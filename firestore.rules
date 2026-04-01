@@ -1,0 +1,91 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    /** 서비스 운영자 — Firebase Auth Custom Claim `admin: true` 필요 */
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+
+    function academyData(academyId) {
+      return get(/databases/$(database)/documents/academies/$(academyId)).data;
+    }
+
+    function isAcademyOwner(academyId) {
+      return isSignedIn() && academyData(academyId).ownerUid == request.auth.uid;
+    }
+
+    function isAcademyTeacher(academyId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/academies/$(academyId)/teachers/$(request.auth.uid));
+    }
+
+    function isAcademyParent(academyId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/academies/$(academyId)/parents/$(request.auth.uid));
+    }
+
+    match /users/{userId} {
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow create, update, delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+    }
+
+    match /academies/{academyId} {
+      allow read: if isAdmin()
+        || isAcademyOwner(academyId)
+        || isAcademyTeacher(academyId)
+        || isAcademyParent(academyId);
+
+      allow create: if isAdmin()
+        || (isSignedIn() && request.resource.data.keys().hasAll(['ownerUid', 'name', 'createdAt'])
+            && request.resource.data.ownerUid == request.auth.uid);
+
+      allow update, delete: if isAdmin() || isAcademyOwner(academyId);
+
+      match /teachers/{teacherId} {
+        allow read: if isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyTeacher(academyId);
+
+        allow create, update, delete: if isAdmin() || isAcademyOwner(academyId);
+      }
+
+      match /parents/{parentId} {
+        allow read: if isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyTeacher(academyId)
+          || (isSignedIn() && request.auth.uid == parentId);
+
+        allow create, update, delete: if isAdmin() || isAcademyOwner(academyId);
+      }
+
+      match /students/{studentId} {
+        allow read: if isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyTeacher(academyId)
+          || (isAcademyParent(academyId) && resource.data.parentUserId == request.auth.uid);
+
+        allow create: if isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyTeacher(academyId)
+          || (isAcademyParent(academyId)
+              && request.resource.data.keys().hasAll(['parentUserId', 'name', 'createdAt'])
+              && request.resource.data.parentUserId == request.auth.uid);
+
+        allow update, delete: if isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyTeacher(academyId)
+          || (isAcademyParent(academyId) && resource.data.parentUserId == request.auth.uid);
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
