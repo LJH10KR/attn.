@@ -36,16 +36,27 @@ service cloud.firestore {
     }
 
     match /academies/{academyId} {
+      /**
+       * 학원 문서 단건·목록(list) 모두에서 `resource`가 각 문서를 가리킵니다.
+       * `get()`만으로 owner를 판별하면 collection query 검증이 실패할 수 있으므로
+       * `resource.data.ownerUid` 비교를 포함합니다.
+       */
       allow read: if isAdmin()
+        || (isSignedIn() && resource.data.ownerUid == request.auth.uid)
         || isAcademyOwner(academyId)
         || isAcademyTeacher(academyId)
         || isAcademyParent(academyId);
 
-      allow create: if isAdmin()
-        || (isSignedIn() && request.resource.data.keys().hasAll(['ownerUid', 'name', 'createdAt'])
-            && request.resource.data.ownerUid == request.auth.uid);
+      /** 학원 생성 + 포털 비밀번호는 Cloud Functions(Admin SDK)에서만 처리 */
+      allow create: if isAdmin();
 
-      allow update, delete: if isAdmin() || isAcademyOwner(academyId);
+      allow update, delete: if isAdmin()
+        || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+
+      /** 오너가 설정한 학원 포털 비밀번호 등 — 클라이언트 직접 접근 불가(Admin SDK만) */
+      match /secrets/{secretId} {
+        allow read, write: if false;
+      }
 
       match /teachers/{teacherId} {
         allow read: if isAdmin()

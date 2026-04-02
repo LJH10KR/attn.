@@ -32,16 +32,28 @@ export function academyStudentsPath(academyId: string) {
   return `${academyPath(academyId)}/students`;
 }
 
+/** 학원 포털 비밀번호 — `secrets/login` 문서, 클라이언트 규칙으로 읽기 불가 */
+export function academySecretsLoginPath(academyId: string) {
+  return `${academyPath(academyId)}/secrets/login`;
+}
+
 /** 모든 로그인 사용자 공통 프로필 (선택) */
 export type UserProfile = {
-  displayName?: string;
-  email?: string;
-  photoURL?: string;
+  displayName?: string | null;
+  email?: string | null;
+  photoURL?: string | null;
+  /** 서비스 단위 역할 (오너 가입 등) */
+  platformRole?: "owner";
+  emailVerified?: boolean;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
+  ownerOnboardedAt?: Timestamp;
 };
 
-/** 학원 문서 — owner 한 명이 여러 학원을 가질 수 있음 (ownerUid 동일 문서 여러 개) */
+/**
+ * 학원 문서 — Firestore 문서 ID가 곧 포털 로그인용 학원 ID(오너가 `createAcademyWithPortal`으로 지정).
+ * owner 한 명이 여러 학원을 가질 수 있음.
+ */
 export type Academy = {
   ownerUid: string;
   name: string;
