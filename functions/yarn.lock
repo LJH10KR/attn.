@@ -529,6 +529,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@types/nodemailer@npm:^7.0.11":
+  version: 7.0.11
+  resolution: "@types/nodemailer@npm:7.0.11"
+  dependencies:
+    "@types/node": "npm:*"
+  checksum: 10c0/dc6472c26600e763c38721b0691fc3014eb868d20b97eb48cfbc4fe9a7a09f66c0ccd8d647033a4be91051cc3c7bdca73c006db2f7a9e8bdd1ce65bb5ec2599c
+  languageName: node
+  linkType: hard
+
 "@types/qs@npm:*":
   version: 6.15.0
   resolution: "@types/qs@npm:6.15.0"
@@ -2077,6 +2086,7 @@ __metadata:
   resolution: "functions@workspace:."
   dependencies:
     "@types/node": "npm:^20.19.0"
+    "@types/nodemailer": "npm:^7.0.11"
     "@typescript-eslint/eslint-plugin": "npm:^5.12.0"
     "@typescript-eslint/parser": "npm:^5.12.0"
     eslint: "npm:^8.9.0"
@@ -2085,6 +2095,7 @@ __metadata:
     firebase-admin: "npm:^13.6.0"
     firebase-functions: "npm:^7.0.0"
     firebase-functions-test: "npm:^3.4.1"
+    nodemailer: "npm:^8.0.4"
     typescript: "npm:^5.7.3"
   languageName: unknown
   linkType: soft
@@ -3208,6 +3219,13 @@ __metadata:
   version: 1.4.0
   resolution: "node-forge@npm:1.4.0"
   checksum: 10c0/67330a5f1f95257a4c8a93b7d555abe87b5f15e350123aa396c97a21a8ca94f9c6549008eb2c73668a91e0d7e3a905785acbd8f8bd0751c29401292011f8f8e1
+  languageName: node
+  linkType: hard
+
+"nodemailer@npm:^8.0.4":
+  version: 8.0.4
+  resolution: "nodemailer@npm:8.0.4"
+  checksum: 10c0/5fb6fa72645b541c18b84b861de46f4740449e1d7c987b4d9ef715d815d613f93262225bc319e217df6215d6f123efadb9a412dcf937fe0a41cbecf279dfb2a0
   languageName: node
   linkType: hard
 

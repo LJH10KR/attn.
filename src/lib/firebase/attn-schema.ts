@@ -63,10 +63,33 @@ export type Academy = {
   status?: "active" | "archived";
 };
 
-/** 학원 소속 선생님 — 문서 ID = 해당 선생님의 Auth uid */
+/**
+ * 학원 선생님 — 초청 전에는 임의 문서 ID, 초청 발송 후 `authUid` 부여 및 문서 ID를 Auth uid로 이전.
+ * 생성·수정·삭제는 Cloud Functions(Admin SDK)만 수행.
+ */
+export type TeacherRegistrationStatus =
+  | "invitation_needed"
+  | "invitation_sent"
+  | "pending_registration"
+  | "active"
+  | "inactive";
+
+/** 초청 메일 발송 시점부터 학원이 안내하는 유효 창 (밀리초) — Functions·UI에서 동일 값 사용 */
+export const TEACHER_INVITE_TTL_MS = 24 * 60 * 60 * 1000;
+
 export type AcademyTeacher = {
-  userId: string;
-  displayName?: string;
+  email: string;
+  displayName: string;
+  subject?: string | null;
+  phone?: string | null;
+  academyId: string;
+  status: TeacherRegistrationStatus;
+  authUid?: string | null;
+  invitedAt?: Timestamp | null;
+  /** 초청 발송(또는 재발송) 시각 + 24시간 — 대시보드 카운트다운·서버 검증에 사용 */
+  invitationExpiresAt?: Timestamp | null;
+  onboardingCompleteAt?: Timestamp | null;
+  activatedAt?: Timestamp | null;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 };

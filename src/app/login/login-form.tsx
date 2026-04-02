@@ -76,6 +76,10 @@ export function LoginForm() {
   const configured = isFirebaseConfigured();
 
   useEffect(() => {
+    const r = searchParams.get("role");
+    if (r === "teacher" || r === "parent" || r === "owner" || r === "academy") {
+      setRole(r);
+    }
     const msg = searchParams.get("msg");
     if (msg === "existing_account") {
       setBanner("이미 가입된 Google 계정입니다. 로그인해 주세요.");
@@ -173,7 +177,7 @@ export function LoginForm() {
           return;
         }
         await signInWithCustomToken(auth, data.customToken);
-        router.replace("/");
+        router.replace("/academy");
       } catch (err) {
         if (err instanceof FirebaseError) {
           setError(functionsErrorMessage(err));

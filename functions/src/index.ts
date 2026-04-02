@@ -196,3 +196,13 @@ export const signInAcademy = onCall(async (request) => {
 
   return {customToken};
 });
+
+export {
+  activateTeacher,
+  deactivateTeacher,
+  deleteTeacherInvite,
+  finalizeTeacherOnboarding,
+  registerTeacherInvite,
+  sendTeacherInvitation,
+  updateTeacherInvite,
+} from "./teachers";

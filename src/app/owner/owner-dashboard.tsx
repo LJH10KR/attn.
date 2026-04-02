@@ -433,21 +433,29 @@ export function OwnerDashboard() {
                     </div>
                   </div>
                 </div>
-                <div className="mt-4 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => openEdit(a)}
-                    className="flex-1 rounded-xl border border-neutral-300/60 bg-white/40 py-2 text-xs font-medium text-[#222] hover:bg-white/70"
+                <div className="mt-4 flex flex-col gap-2">
+                  <Link
+                    href={`/academy?id=${encodeURIComponent(a.id)}&from=owner`}
+                    className="w-full rounded-xl bg-[#222] py-2.5 text-center text-xs font-medium text-white shadow-sm hover:bg-[#333]"
                   >
-                    수정
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openDelete(a)}
-                    className="flex-1 rounded-xl border border-red-200/60 bg-red-500/5 py-2 text-xs font-medium text-red-800 hover:bg-red-500/10"
-                  >
-                    삭제
-                  </button>
+                    학원 대시보드
+                  </Link>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => openEdit(a)}
+                      className="flex-1 rounded-xl border border-neutral-300/60 bg-white/40 py-2 text-xs font-medium text-[#222] hover:bg-white/70"
+                    >
+                      수정
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openDelete(a)}
+                      className="flex-1 rounded-xl border border-red-200/60 bg-red-500/5 py-2 text-xs font-medium text-red-800 hover:bg-red-500/10"
+                    >
+                      삭제
+                    </button>
+                  </div>
                 </div>
               </li>
             ))}

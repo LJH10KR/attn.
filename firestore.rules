@@ -20,14 +20,32 @@ service cloud.firestore {
       return isSignedIn() && academyData(academyId).ownerUid == request.auth.uid;
     }
 
-    function isAcademyTeacher(academyId) {
+    /** 선생님 멤버 문서 경로 — 초청 후 문서 ID = Auth uid */
+    function academyTeacherMemberPath(academyId) {
+      return /databases/$(database)/documents/academies/$(academyId)/teachers/$(request.auth.uid);
+    }
+
+    function isAcademyTeacherMember(academyId) {
+      return isSignedIn() && exists(academyTeacherMemberPath(academyId));
+    }
+
+    /** 학원 업무(학생·학부모 등)에 참여 가능한 활성 선생님 */
+    function isAcademyTeacherActive(academyId) {
       return isSignedIn()
-        && exists(/databases/$(database)/documents/academies/$(academyId)/teachers/$(request.auth.uid));
+        && exists(academyTeacherMemberPath(academyId))
+        && get(academyTeacherMemberPath(academyId)).data.status == 'active';
     }
 
     function isAcademyParent(academyId) {
       return isSignedIn()
         && exists(/databases/$(database)/documents/academies/$(academyId)/parents/$(request.auth.uid));
+    }
+
+    /** 학원 포털 Custom Token — claim `role` / `academyId` (Cloud Functions 발급) */
+    function isAcademyPortalSession(academyId) {
+      return isSignedIn()
+        && request.auth.token.role == 'academy'
+        && request.auth.token.academyId == academyId;
     }
 
     match /users/{userId} {
@@ -43,8 +61,9 @@ service cloud.firestore {
        */
       allow read: if isAdmin()
         || (isSignedIn() && resource.data.ownerUid == request.auth.uid)
+        || isAcademyPortalSession(academyId)
         || isAcademyOwner(academyId)
-        || isAcademyTeacher(academyId)
+        || isAcademyTeacherMember(academyId)
         || isAcademyParent(academyId);
 
       /** 학원 생성 + 포털 비밀번호는 Cloud Functions(Admin SDK)에서만 처리 */
@@ -61,15 +80,16 @@ service cloud.firestore {
       match /teachers/{teacherId} {
         allow read: if isAdmin()
           || isAcademyOwner(academyId)
-          || isAcademyTeacher(academyId);
+          || isAcademyPortalSession(academyId)
+          || (isSignedIn() && resource.data.authUid == request.auth.uid);
 
-        allow create, update, delete: if isAdmin() || isAcademyOwner(academyId);
+        allow create, update, delete: if false;
       }
 
       match /parents/{parentId} {
         allow read: if isAdmin()
           || isAcademyOwner(academyId)
-          || isAcademyTeacher(academyId)
+          || isAcademyTeacherActive(academyId)
           || (isSignedIn() && request.auth.uid == parentId);
 
         allow create, update, delete: if isAdmin() || isAcademyOwner(academyId);
@@ -78,19 +98,19 @@ service cloud.firestore {
       match /students/{studentId} {
         allow read: if isAdmin()
           || isAcademyOwner(academyId)
-          || isAcademyTeacher(academyId)
+          || isAcademyTeacherActive(academyId)
           || (isAcademyParent(academyId) && resource.data.parentUserId == request.auth.uid);
 
         allow create: if isAdmin()
           || isAcademyOwner(academyId)
-          || isAcademyTeacher(academyId)
+          || isAcademyTeacherActive(academyId)
           || (isAcademyParent(academyId)
               && request.resource.data.keys().hasAll(['parentUserId', 'name', 'createdAt'])
               && request.resource.data.parentUserId == request.auth.uid);
 
         allow update, delete: if isAdmin()
           || isAcademyOwner(academyId)
-          || isAcademyTeacher(academyId)
+          || isAcademyTeacherActive(academyId)
           || (isAcademyParent(academyId) && resource.data.parentUserId == request.auth.uid);
       }
     }
