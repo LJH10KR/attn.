@@ -4,6 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
+    "dev:emulator": "next dev",
+    "emulators": "yarn --cwd functions build && cross-env NODE_OPTIONS= firebase emulators:start --import=./.firebase/emulator-data --export-on-exit=./.firebase/emulator-data",
+    "emulators:fresh": "yarn --cwd functions build && cross-env NODE_OPTIONS= firebase emulators:start",
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint"
@@ -20,6 +23,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "cross-env": "^10.1.0",
     "eslint": "^9",
     "eslint-config-next": "15.5.14",
     "tailwindcss": "^4",

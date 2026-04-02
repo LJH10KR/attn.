@@ -34,24 +34,13 @@
         "firebase-debug.*.log",
         "functions"
       ]
-    },
-    {
-      "backendId": "attn",
-      "rootDir": "/",
-      "ignore": [
-        "node_modules",
-        ".git",
-        "firebase-debug.log",
-        "firebase-debug.*.log",
-        "functions"
-      ]
     }
   ],
   "emulators": {
     "apphosting": {
       "port": 5002,
       "rootDirectory": "./",
-      "startCommand": "yarn run dev"
+      "startCommand": "yarn run dev:emulator"
     },
     "auth": {
       "port": 9099
@@ -61,9 +50,6 @@
     },
     "firestore": {
       "port": 8080
-    },
-    "hosting": {
-      "port": 5000
     },
     "ui": {
       "enabled": true
