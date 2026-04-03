@@ -9,6 +9,7 @@ const FIREBASE_CONNECT =
   "https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com wss://*.firebaseio.com " +
   "https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firebase.googleapis.com " +
   "https://www.googleapis.com https://firebaseinstallations.googleapis.com https://apis.google.com https://www.google.com " +
+  "https://fcmregistrations.googleapis.com " +
   "wss://*.googleapis.com";
 
 const EMULATOR_CONNECT =

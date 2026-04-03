@@ -22,6 +22,15 @@ export function isFirebaseEmulatorEnabled(): boolean {
   return process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === "1";
 }
 
+/** FCM 웹용 VAPID 공개 키 — Firebase 콘솔 > 프로젝트 설정 > 클라우드 메시징 > 웹 푸시 인증서 */
+export function getFirebaseWebVapidKey(): string {
+  return process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY?.trim() ?? "";
+}
+
+export function isWebPushConfigured(): boolean {
+  return Boolean(getFirebaseWebVapidKey());
+}
+
 /**
  * HTTP `onRequest` Functions 호출용 base URL.
  * - `NEXT_PUBLIC_API_BASE_URL`이 있으면 최우선.

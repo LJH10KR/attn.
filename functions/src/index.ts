@@ -197,6 +197,7 @@ export const signInAcademy = onCall(async (request) => {
   return {customToken};
 });
 
+export {sendStudentAttendanceNotification, syncParentPushSubscription} from "./push";
 export {
   activateParent,
   deactivateParent,

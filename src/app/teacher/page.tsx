@@ -1,5 +1,6 @@
 "use client";
 
+import { FirebaseError } from "firebase/app";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, onSnapshot, Timestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
@@ -53,6 +54,8 @@ export default function TeacherDashboardPage() {
   const [initError, setInitError] = useState<string | null>(null);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [listRefreshBusy, setListRefreshBusy] = useState(false);
+  const [notifyMessage, setNotifyMessage] = useState<string | null>(null);
+  const [notifyBusyKey, setNotifyBusyKey] = useState<string | null>(null);
 
   const teacherListLoadedUidRef = useRef<string | null>(null);
   const teacherInitGenerationRef = useRef(0);
@@ -193,6 +196,32 @@ export default function TeacherDashboardPage() {
     }
   }, [academyId]);
 
+  const sendAttendanceNotify = useCallback(
+    async (studentId: string, kind: "present" | "absent") => {
+      const aid = academyId;
+      if (!aid) return;
+      const key = `${studentId}-${kind}`;
+      setNotifyBusyKey(key);
+      setNotifyMessage(null);
+      try {
+        const fn = httpsCallable(getFirebaseFunctions(), "sendStudentAttendanceNotification");
+        await fn({ academyId: aid, studentId, kind });
+        setNotifyMessage(kind === "present" ? "출석 알림을 보냈습니다." : "결석 알림을 보냈습니다.");
+      } catch (e) {
+        if (e instanceof FirebaseError) {
+          if (e.code === "functions/resource-exhausted") {
+            setNotifyMessage("같은 학생에게 너무 자주 보낼 수 없습니다. 잠시 후 다시 시도해 주세요.");
+            return;
+          }
+        }
+        setNotifyMessage("알림을 보내지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      } finally {
+        setNotifyBusyKey(null);
+      }
+    },
+    [academyId],
+  );
+
   useEffect(() => {
     if (!academyId) return;
     const db = getFirebaseDb();
@@ -301,6 +330,12 @@ export default function TeacherDashboardPage() {
           </p>
         ) : null}
 
+        {notifyMessage ? (
+          <p className="mb-2 rounded-2xl bg-sky-500/10 px-3 py-2 text-center text-xs text-sky-900 ring-1 ring-sky-500/20">
+            {notifyMessage}
+          </p>
+        ) : null}
+
         <div className="space-y-2">
           {students.length === 0 ? (
             <p className={`py-12 text-center text-sm text-neutral-500 ${glassCard}`}>
@@ -319,6 +354,24 @@ export default function TeacherDashboardPage() {
                 <p className="mt-0.5 text-[11px] text-neutral-600">
                   비상 연락 <span className="text-[#111]">{s.emergencyContact || "—"}</span>
                 </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={notifyBusyKey !== null}
+                    onClick={() => void sendAttendanceNotify(s.id, "present")}
+                    className="rounded-xl border border-emerald-400/60 bg-emerald-500/15 px-3 py-2 text-[11px] font-medium text-emerald-950 hover:bg-emerald-500/25 disabled:opacity-50"
+                  >
+                    {notifyBusyKey === `${s.id}-present` ? "전송 중…" : "출석 알림"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={notifyBusyKey !== null}
+                    onClick={() => void sendAttendanceNotify(s.id, "absent")}
+                    className="rounded-xl border border-amber-400/60 bg-amber-500/12 px-3 py-2 text-[11px] font-medium text-amber-950 hover:bg-amber-500/22 disabled:opacity-50"
+                  >
+                    {notifyBusyKey === `${s.id}-absent` ? "전송 중…" : "결석 알림"}
+                  </button>
+                </div>
               </div>
             ))
           )}

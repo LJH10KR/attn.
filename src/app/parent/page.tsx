@@ -1,13 +1,16 @@
 "use client";
 
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, onSnapshot, Timestamp } from "firebase/firestore";
+import { doc, onSnapshot, setDoc, Timestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { docToStudentRow, type StudentRowVM } from "@/components/academy/academy-student-panel";
+import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
+import { ParentPushNotificationsCard } from "@/components/parent/parent-push-notifications-card";
 import { getFirebaseAuth, getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
 
 const glassCard =
   "rounded-[1.75rem] border border-white/70 bg-[rgba(236,235,228,0.45)] shadow-[0_24px_80px_-20px_rgba(0,0,0,0.14),inset_0_1px_0_rgba(255,255,255,0.85)] backdrop-blur-2xl backdrop-saturate-150";
@@ -53,6 +56,9 @@ export default function ParentDashboardPage() {
   const [initError, setInitError] = useState<string | null>(null);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [listRefreshBusy, setListRefreshBusy] = useState(false);
+  const [authUid, setAuthUid] = useState<string | null>(null);
+  const [hideIosPwaHint, setHideIosPwaHint] = useState<boolean | null>(null);
+  const [iosAutoModalOpen, setIosAutoModalOpen] = useState(false);
 
   const parentListLoadedUidRef = useRef<string | null>(null);
   const parentInitGenerationRef = useRef(0);
@@ -73,11 +79,14 @@ export default function ParentDashboardPage() {
         setListError(null);
         setAcademyId(null);
         setReady(false);
+        setAuthUid(null);
+        setHideIosPwaHint(null);
         router.replace("/login?role=parent");
         return;
       }
 
       const uid = user.uid;
+      setAuthUid(uid);
 
       if (parentListLoadedUidRef.current === uid) {
         return;
@@ -166,6 +175,51 @@ export default function ParentDashboardPage() {
       unsub();
     };
   }, [router]);
+
+  useEffect(() => {
+    if (!authUid || !ready) {
+      return;
+    }
+    const db = getFirebaseDb();
+    const ref = doc(db, "users", authUid);
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        setHideIosPwaHint(snap.data()?.attn_hide_ios_pwa_hint === true);
+      },
+      () => setHideIosPwaHint(false),
+    );
+    return () => unsub();
+  }, [authUid, ready]);
+
+  useEffect(() => {
+    if (!ready || !academyId || hideIosPwaHint === null) {
+      return;
+    }
+    if (hideIosPwaHint) {
+      return;
+    }
+    if (!isLikelyIos() || isStandaloneDisplayMode()) {
+      return;
+    }
+    try {
+      if (sessionStorage.getItem("attn_ios_auto_hint_dismissed")) {
+        return;
+      }
+    } catch {
+      /* ignore */
+    }
+    setIosAutoModalOpen(true);
+  }, [ready, academyId, hideIosPwaHint]);
+
+  const dismissIosAutoModal = useCallback(() => {
+    try {
+      sessionStorage.setItem("attn_ios_auto_hint_dismissed", "1");
+    } catch {
+      /* ignore */
+    }
+    setIosAutoModalOpen(false);
+  }, []);
 
   const refreshChildrenList = useCallback(async () => {
     const auth = getFirebaseAuth();
@@ -274,6 +328,12 @@ export default function ParentDashboardPage() {
               {logoutBusy ? "…" : "로그아웃"}
             </button>
             <Link
+              href="/parent/settings"
+              className="text-[11px] font-medium text-sky-900 underline-offset-2 hover:underline"
+            >
+              사용자 설정
+            </Link>
+            <Link
               href="/"
               className="text-[11px] font-medium text-sky-900 underline-offset-2 hover:underline"
             >
@@ -281,6 +341,10 @@ export default function ParentDashboardPage() {
             </Link>
           </div>
         </header>
+
+        <div className="mb-4">
+          <ParentPushNotificationsCard />
+        </div>
 
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-[#111]">자녀 학생</h2>
@@ -322,6 +386,26 @@ export default function ParentDashboardPage() {
             ))
           )}
         </div>
+
+        <IosPwaHintModal
+          open={iosAutoModalOpen}
+          onCloseAction={dismissIosAutoModal}
+          onConfirmAction={async (dontShowAgain) => {
+            try {
+              sessionStorage.setItem("attn_ios_auto_hint_dismissed", "1");
+            } catch {
+              /* ignore */
+            }
+            if (!dontShowAgain || !authUid) {
+              return;
+            }
+            await setDoc(
+              doc(getFirebaseDb(), "users", authUid),
+              { attn_hide_ios_pwa_hint: true },
+              { merge: true },
+            );
+          }}
+        />
       </div>
     </div>
   );

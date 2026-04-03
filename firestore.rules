@@ -132,6 +132,10 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
       allow create, update, delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+
+      match /pushSubscriptions/{subId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
     }
 
     match /academies/{academyId} {
