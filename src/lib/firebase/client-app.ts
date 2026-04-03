@@ -2,7 +2,7 @@
 
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { connectAuthEmulator, getAuth, type Auth } from "firebase/auth";
-import { connectFirestoreEmulator, getFirestore, type Firestore } from "firebase/firestore";
+import { connectFirestoreEmulator, initializeFirestore, type Firestore } from "firebase/firestore";
 import { connectFunctionsEmulator, getFunctions, type Functions } from "firebase/functions";
 import {
   FIREBASE_FUNCTIONS_REGION,
@@ -15,6 +15,7 @@ import { initFirebaseAppCheck } from "./app-check";
 let authEmulatorConnected = false;
 let firestoreEmulatorConnected = false;
 let functionsEmulatorConnected = false;
+let firestoreInstance: Firestore | null = null;
 
 function getOrInitApp(): FirebaseApp {
   if (!isFirebaseConfigured()) {
@@ -45,12 +46,34 @@ export function getFirebaseAuth(): Auth {
 
 export function getFirebaseDb(): Firestore {
   const app = getOrInitApp();
-  const db = getFirestore(app);
+  if (!firestoreInstance) {
+    const emulator = typeof window !== "undefined" && isFirebaseEmulatorEnabled();
+    firestoreInstance = emulator
+      ? initializeFirestore(app, { experimentalForceLongPolling: true })
+      : initializeFirestore(app, {});
+  }
+  const db = firestoreInstance;
   if (typeof window !== "undefined" && isFirebaseEmulatorEnabled() && !firestoreEmulatorConnected) {
     connectFirestoreEmulator(db, "127.0.0.1", 8080);
     firestoreEmulatorConnected = true;
   }
   return db;
+}
+
+/**
+ * 첫 Firestore 구독/쿼리 직전에 호출하면 Auth 초기화·ID 토큰이 먼저 잡혀
+ * (특히 에뮬레이터 + 로그인 직후) 빈 스냅샷만 오는 현상을 줄일 수 있습니다.
+ */
+export async function getFirebaseDbAfterAuthReady(): Promise<Firestore> {
+  if (typeof window !== "undefined") {
+    const auth = getFirebaseAuth();
+    await auth.authStateReady();
+    const u = auth.currentUser;
+    if (u) {
+      await u.getIdToken();
+    }
+  }
+  return getFirebaseDb();
 }
 
 export function getFirebaseFunctions(): Functions {

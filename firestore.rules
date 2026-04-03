@@ -7,9 +7,11 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    /** 서비스 운영자 — Firebase Auth Custom Claim `admin: true` 필요 */
+    /** 서비스 운영자 — Custom Claim `admin: true` (키 없을 때 `.admin` / `.get` 접근은 에뮬레이터에서 오류 날 수 있어 hasAny로 가드) */
     function isAdmin() {
-      return isSignedIn() && request.auth.token.admin == true;
+      return isSignedIn()
+        && request.auth.token.keys().hasAny(['admin'])
+        && request.auth.token.admin == true;
     }
 
     function academyData(academyId) {
@@ -55,6 +57,7 @@ service cloud.firestore {
     /** 학원 포털 Custom Token — claim `role` / `academyId` (Cloud Functions 발급) */
     function isAcademyPortalSession(academyId) {
       return isSignedIn()
+        && request.auth.token.keys().hasAll(['role', 'academyId'])
         && request.auth.token.role == 'academy'
         && request.auth.token.academyId == academyId;
     }
@@ -112,6 +115,20 @@ service cloud.firestore {
             || (d.assignedTeacherUid is string && teacherDocActive(academyId, d.assignedTeacherUid)));
     }
 
+    /**
+     * 활성 선생님 클라이언트 — 학생 문서는 본인 전담(배열·구 단일 필드)에 한해 읽기만.
+     * `in` 연산자는 list 쿼리 검증 시 에뮬레이터에서 evaluation error가 나는 경우가 있어 hasAny 사용.
+     */
+    function teacherCanReadAssignedStudent(student) {
+      return student is map
+        && ((student.keys().hasAny(['assignedTeacherUids'])
+            && student.assignedTeacherUids is list
+            && student.assignedTeacherUids.hasAny([request.auth.uid]))
+          || (student.keys().hasAny(['assignedTeacherUid'])
+              && student.assignedTeacherUid is string
+              && student.assignedTeacherUid == request.auth.uid));
+    }
+
     match /users/{userId} {
       allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
       allow create, update, delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
@@ -160,16 +177,22 @@ service cloud.firestore {
       }
 
       match /students/{studentId} {
+        /**
+         * list 쿼리 검증 시 OR 전체가 분석되므로, parentUserId 등 필드가 없을 때 직접 접근하면
+         * evaluation error가 날 수 있음 → 키 존재·타입 확인 후 비교.
+         */
         allow read: if isAdmin()
           || isAcademyOwner(academyId)
           || isAcademyPortalSession(academyId)
-          || isAcademyTeacherActive(academyId)
-          || (isAcademyParentActive(academyId) && resource.data.parentUserId == request.auth.uid);
+          || (isAcademyTeacherActive(academyId) && teacherCanReadAssignedStudent(resource.data))
+          || (isAcademyParentActive(academyId)
+              && resource.data.keys().hasAny(['parentUserId'])
+              && resource.data.parentUserId is string
+              && resource.data.parentUserId == request.auth.uid);
 
         allow create: if
           (((isAdmin()
             || isAcademyOwner(academyId)
-            || isAcademyTeacherActive(academyId)
             || isAcademyPortalSession(academyId))
           && request.resource.data.keys().hasAll(['parentUserId', 'name', 'createdAt'])
           && request.resource.data.parentUserId is string
@@ -183,14 +206,12 @@ service cloud.firestore {
         allow update: if (isAdmin()
           || isAcademyOwner(academyId)
           || isAcademyPortalSession(academyId)
-          || isAcademyTeacherActive(academyId)
           || (isAcademyParentActive(academyId) && resource.data.parentUserId == request.auth.uid))
           && studentAssignedTeacherOk(academyId);
 
         allow delete: if isAdmin()
           || isAcademyOwner(academyId)
           || isAcademyPortalSession(academyId)
-          || isAcademyTeacherActive(academyId)
           || (isAcademyParentActive(academyId) && resource.data.parentUserId == request.auth.uid);
       }
     }

@@ -1,6 +1,6 @@
 import * as crypto from "node:crypto";
 import * as admin from "firebase-admin";
-import { FieldValue, Timestamp } from "firebase-admin/firestore";
+import { FieldValue, Timestamp, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import * as nodemailer from "nodemailer";
@@ -478,6 +478,73 @@ export const getTeacherActivationState = onCall(
       primaryStatus,
       primaryAcademyId,
     };
+  },
+);
+
+/**
+ * 활성 선생님 전담 학생 목록 — 클라이언트 Firestore list + 보안 규칙 OR 조합이
+ * 에뮬/일부 환경에서 evaluation error를 내는 경우가 있어 Admin 조회로 통일합니다.
+ */
+export const listTeacherAssignedStudents = onCall(
+  { cors: true, enforceAppCheck: enforceAppCheckOnTeacherState },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+    }
+    const uid = request.auth.uid;
+    const academyId =
+      typeof request.data?.academyId === "string" ? request.data.academyId.trim() : "";
+    if (!academyId) {
+      throw new HttpsError("invalid-argument", "학원 ID가 필요합니다.");
+    }
+
+    const db = admin.firestore();
+    const teacherRef = db.doc(`academies/${academyId}/teachers/${uid}`);
+    const teacherSnap = await teacherRef.get();
+    if (!teacherSnap.exists || teacherSnap.get("status") !== "active") {
+      throw new HttpsError("permission-denied", "이 학원의 활성 선생님만 학생 목록을 조회할 수 있습니다.");
+    }
+
+    const col = db.collection(`academies/${academyId}/students`);
+    const [byArrSnap, byLegacySnap] = await Promise.all([
+      col.where("assignedTeacherUids", "array-contains", uid).get(),
+      col.where("assignedTeacherUid", "==", uid).get(),
+    ]);
+
+    const byId = new Map<string, QueryDocumentSnapshot>();
+    for (const d of byArrSnap.docs) {
+      byId.set(d.id, d);
+    }
+    for (const d of byLegacySnap.docs) {
+      byId.set(d.id, d);
+    }
+
+    const students = [...byId.values()].map((d) => {
+      const data = d.data();
+      const createdAt = data.createdAt as Timestamp | undefined;
+      const createdAtMillis =
+        createdAt && typeof createdAt.toMillis === "function" ? createdAt.toMillis() : null;
+      const rawUids = data.assignedTeacherUids;
+      const assignedTeacherUids =
+        Array.isArray(rawUids) && rawUids.every((x: unknown) => typeof x === "string")
+          ? (rawUids as string[]).filter((x) => x.length > 0)
+          : [];
+      const legacyUid = data.assignedTeacherUid;
+      return {
+        id: d.id,
+        parentUserId: typeof data.parentUserId === "string" ? data.parentUserId : "",
+        name: typeof data.name === "string" ? data.name : "",
+        age: typeof data.age === "number" && Number.isFinite(data.age) ? Math.floor(data.age) : 0,
+        phone: typeof data.phone === "string" ? data.phone : "",
+        emergencyContact: typeof data.emergencyContact === "string" ? data.emergencyContact : "",
+        assignedTeacherUids,
+        assignedTeacherUid:
+          typeof legacyUid === "string" && legacyUid.length > 0 ? legacyUid : null,
+        createdAtMillis,
+      };
+    });
+
+    return { ok: true as const, students };
   },
 );
 

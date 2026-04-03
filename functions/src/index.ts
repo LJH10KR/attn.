@@ -213,6 +213,7 @@ export {
   deleteTeacherInvite,
   finalizeTeacherOnboarding,
   getTeacherActivationState,
+  listTeacherAssignedStudents,
   registerTeacherInvite,
   sendTeacherInvitation,
   updateTeacherInvite,

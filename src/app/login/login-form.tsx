@@ -198,7 +198,9 @@ export function LoginForm() {
           const ok = await checkParentActivationOrRedirect();
           if (!ok) return;
         }
-        router.replace(role === "owner" ? "/owner" : "/");
+        router.replace(
+          role === "owner" ? "/owner" : role === "teacher" ? "/teacher" : "/",
+        );
       } catch (err) {
         const code = err instanceof FirebaseError ? err.code : "";
         setError(authErrorMessage(code, role));
@@ -242,7 +244,9 @@ export function LoginForm() {
         const ok = await checkParentActivationOrRedirect();
         if (!ok) return;
       }
-      router.replace(role === "owner" ? "/owner" : "/");
+      router.replace(
+        role === "owner" ? "/owner" : role === "teacher" ? "/teacher" : "/",
+      );
     } catch (err) {
       const code = err instanceof FirebaseError ? err.code : "";
       setError(authErrorMessage(code, role));
