@@ -125,6 +125,13 @@ export type AcademyParent = {
 export type AcademyStudent = {
   parentUserId: string;
   name: string;
+  /** 만 나이 등 정수(0~120) */
+  age: number;
+  phone?: string | null;
+  emergencyContact?: string | null;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 };
+
+/** 학원이 학부모당 등록 가능한 학생(자녀) 상한 */
+export const MAX_STUDENTS_PER_PARENT = 20;

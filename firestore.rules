@@ -59,6 +59,12 @@ service cloud.firestore {
         && request.auth.token.academyId == academyId;
     }
 
+    /** 학생의 부모로 지정된 학부모 문서가 존재하고 활성 상태인지 */
+    function isActiveParentForStudent(academyId, parentUserId) {
+      let p = /databases/$(database)/documents/academies/$(academyId)/parents/$(parentUserId);
+      return exists(p) && get(p).data.status == 'active';
+    }
+
     match /users/{userId} {
       allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
       allow create, update, delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
@@ -109,18 +115,26 @@ service cloud.firestore {
       match /students/{studentId} {
         allow read: if isAdmin()
           || isAcademyOwner(academyId)
+          || isAcademyPortalSession(academyId)
           || isAcademyTeacherActive(academyId)
           || (isAcademyParentActive(academyId) && resource.data.parentUserId == request.auth.uid);
 
-        allow create: if isAdmin()
-          || isAcademyOwner(academyId)
-          || isAcademyTeacherActive(academyId)
+        allow create: if
+          (isAdmin()
+            || isAcademyOwner(academyId)
+            || isAcademyTeacherActive(academyId)
+            || isAcademyPortalSession(academyId))
+          && request.resource.data.keys().hasAll(['parentUserId', 'name', 'createdAt'])
+          && request.resource.data.parentUserId is string
+          && request.resource.data.name is string
+          && isActiveParentForStudent(academyId, request.resource.data.parentUserId)
           || (isAcademyParentActive(academyId)
               && request.resource.data.keys().hasAll(['parentUserId', 'name', 'createdAt'])
               && request.resource.data.parentUserId == request.auth.uid);
 
         allow update, delete: if isAdmin()
           || isAcademyOwner(academyId)
+          || isAcademyPortalSession(academyId)
           || isAcademyTeacherActive(academyId)
           || (isAcademyParentActive(academyId) && resource.data.parentUserId == request.auth.uid);
       }
