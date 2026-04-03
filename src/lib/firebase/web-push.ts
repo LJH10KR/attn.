@@ -47,7 +47,9 @@ export async function prepareWebPushMessaging(): Promise<WebPushPrepareResult> {
 export async function registerMessagingServiceWorker(): Promise<ServiceWorkerRegistration | null> {
   if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return null;
   try {
-    return await navigator.serviceWorker.register("/firebase-messaging-sw.js");
+    /** 첫 방문 시 installing → activating 사이에 getToken 하면 "no active Service Worker" 발생 */
+    await navigator.serviceWorker.register("/firebase-messaging-sw.js", { scope: "/" });
+    return await navigator.serviceWorker.ready;
   } catch {
     return null;
   }
