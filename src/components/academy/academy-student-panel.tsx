@@ -4,6 +4,7 @@ import { FirebaseError } from "firebase/app";
 import {
   collection,
   deleteDoc,
+  deleteField,
   doc,
   onSnapshot,
   query,
@@ -14,6 +15,10 @@ import {
 } from "firebase/firestore";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import {
+  MAX_ASSIGNED_TEACHERS_PER_STUDENT,
+  type TeacherRegistrationStatus,
+} from "@/lib/firebase/attn-schema";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
 
 const glassCard =
@@ -32,10 +37,14 @@ export type StudentRowVM = {
   age: number;
   phone: string;
   emergencyContact: string;
+  /** 병합된 전담 선생 uid — 구 `assignedTeacherUid` 단일 필드는 읽을 때 여기에 합쳐짐 */
+  assignedTeacherUids: string[];
   createdAt?: Timestamp;
 };
 
-type StudentRowWithParent = StudentRowVM & { parentName: string };
+type StudentRowWithParent = StudentRowVM & { parentName: string; teacherLabel: string };
+
+type TeacherBrief = { id: string; name: string; status: TeacherRegistrationStatus };
 
 function fsErr(err: unknown): string {
   if (err instanceof FirebaseError) {
@@ -44,13 +53,36 @@ function fsErr(err: unknown): string {
   return "요청에 실패했습니다.";
 }
 
-function docToStudentRow(id: string, data: Record<string, unknown>): StudentRowVM {
+function mergeAssignedTeacherUidsFromDoc(data: Record<string, unknown>): string[] {
+  const raw = data.assignedTeacherUids;
+  const fromList =
+    Array.isArray(raw) && raw.every((x) => typeof x === "string")
+      ? (raw as string[]).filter((x) => x.length > 0)
+      : [];
+  const legacy = data.assignedTeacherUid;
+  const legacyOne = typeof legacy === "string" && legacy.length > 0 ? legacy : null;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const x of fromList) {
+    if (!seen.has(x)) {
+      seen.add(x);
+      out.push(x);
+    }
+  }
+  if (legacyOne && !seen.has(legacyOne)) {
+    out.push(legacyOne);
+  }
+  return out;
+}
+
+export function docToStudentRow(id: string, data: Record<string, unknown>): StudentRowVM {
   const ageRaw = data.age;
   const age =
     typeof ageRaw === "number" && Number.isFinite(ageRaw)
       ? Math.max(0, Math.floor(ageRaw))
       : 0;
   const createdAt = data.createdAt;
+  const assignedTeacherUids = mergeAssignedTeacherUidsFromDoc(data);
   return {
     id,
     parentUserId: typeof data.parentUserId === "string" ? data.parentUserId : "",
@@ -58,6 +90,7 @@ function docToStudentRow(id: string, data: Record<string, unknown>): StudentRowV
     age,
     phone: typeof data.phone === "string" ? data.phone : "",
     emergencyContact: typeof data.emergencyContact === "string" ? data.emergencyContact : "",
+    assignedTeacherUids,
     createdAt:
       createdAt &&
       typeof createdAt === "object" &&
@@ -314,6 +347,7 @@ export function AcademyParentStudentList({
   parentUserId: string;
   setNotice: (msg: string | null) => void;
 }) {
+  const [teacherNames, setTeacherNames] = useState<Record<string, string>>({});
   const [rows, setRows] = useState<StudentRowVM[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<StudentRowVM | null>(null);
@@ -325,6 +359,19 @@ export function AcademyParentStudentList({
   const [formAge, setFormAge] = useState("");
   const [formPhone, setFormPhone] = useState("");
   const [formEmergency, setFormEmergency] = useState("");
+
+  useEffect(() => {
+    const db = getFirebaseDb();
+    const unsubT = onSnapshot(collection(db, "academies", academyId, "teachers"), (snap) => {
+      const m: Record<string, string> = {};
+      for (const d of snap.docs) {
+        const data = d.data() as { displayName?: string };
+        m[d.id] = typeof data.displayName === "string" && data.displayName ? data.displayName : d.id;
+      }
+      setTeacherNames(m);
+    });
+    return () => unsubT();
+  }, [academyId]);
 
   useEffect(() => {
     const db = getFirebaseDb();
@@ -432,6 +479,17 @@ export function AcademyParentStudentList({
                   <div className="mt-0.5 text-[11px] text-neutral-600">
                     연락 {s.phone || "—"} · 비상 {s.emergencyContact || "—"}
                   </div>
+                  {s.assignedTeacherUids.length > 0 ? (
+                    <div className="mt-0.5 text-[11px] text-sky-900">
+                      전담:{" "}
+                      {s.assignedTeacherUids.map((uid, i) => (
+                        <span key={uid}>
+                          {i > 0 ? ", " : ""}
+                          <span className="font-medium">{teacherNames[uid] ?? uid}</span>
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="flex shrink-0 gap-1">
                   <button type="button" className={miniBtnClass} onClick={() => openEdit(s)}>
@@ -483,6 +541,7 @@ export function AcademyParentStudentList({
 export function AcademyStudentPanel({ academyId }: { academyId: string }) {
   const [queryText, setQueryText] = useState("");
   const [students, setStudents] = useState<StudentRowVM[]>([]);
+  const [teachers, setTeachers] = useState<TeacherBrief[]>([]);
   const [parentsById, setParentsById] = useState<Record<string, string>>({});
   const [listError, setListError] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<StudentRowVM | null>(null);
@@ -490,6 +549,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
   const [editBusy, setEditBusy] = useState(false);
   const [editErr, setEditErr] = useState<string | null>(null);
   const [delBusy, setDelBusy] = useState(false);
+  const [teacherAssignBusyId, setTeacherAssignBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [formName, setFormName] = useState("");
   const [formAge, setFormAge] = useState("");
@@ -514,6 +574,29 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
 
   useEffect(() => {
     const db = getFirebaseDb();
+    const unsub = onSnapshot(
+      collection(db, "academies", academyId, "teachers"),
+      (snap) => {
+        setTeachers(
+          snap.docs.map((d) => {
+            const data = d.data() as Record<string, unknown>;
+            return {
+              id: d.id,
+              name: typeof data.displayName === "string" ? data.displayName : "",
+              status: (data.status as TeacherRegistrationStatus) ?? "invitation_needed",
+            };
+          }),
+        );
+      },
+      () => {
+        /* 선생님 목록 실패 시 전담 UI는 활성 목록 없이만 동작 */
+      },
+    );
+    return () => unsub();
+  }, [academyId]);
+
+  useEffect(() => {
+    const db = getFirebaseDb();
     const qy = query(collection(db, "academies", academyId, "parents"));
     const unsub = onSnapshot(
       qy,
@@ -532,12 +615,33 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
     return () => unsub();
   }, [academyId]);
 
+  const teacherNameById = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const t of teachers) {
+      m[t.id] = t.name || t.id;
+    }
+    return m;
+  }, [teachers]);
+
+  const activeTeachersSorted = useMemo(() => {
+    return teachers
+      .filter((t) => t.status === "active")
+      .slice()
+      .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id, "ko"));
+  }, [teachers]);
+
   const rowsWithParent = useMemo((): StudentRowWithParent[] => {
-    return students.map((s) => ({
-      ...s,
-      parentName: parentsById[s.parentUserId] ?? s.parentUserId,
-    }));
-  }, [students, parentsById]);
+    return students.map((s) => {
+      const teacherLabel = s.assignedTeacherUids
+        .map((uid) => teacherNameById[uid] ?? uid)
+        .join(", ");
+      return {
+        ...s,
+        parentName: parentsById[s.parentUserId] ?? s.parentUserId,
+        teacherLabel,
+      };
+    });
+  }, [students, parentsById, teacherNameById]);
 
   const filtered = useMemo((): StudentRowWithParent[] => {
     const q = queryText.trim().toLowerCase();
@@ -550,7 +654,9 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
         r.phone.toLowerCase().includes(q) ||
         r.emergencyContact.toLowerCase().includes(q) ||
         ageStr.includes(q) ||
-        r.parentUserId.toLowerCase().includes(q)
+        r.parentUserId.toLowerCase().includes(q) ||
+        r.teacherLabel.toLowerCase().includes(q) ||
+        r.assignedTeacherUids.some((uid) => uid.toLowerCase().includes(q))
       );
     });
   }, [rowsWithParent, queryText]);
@@ -621,6 +727,42 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
     }
   }, [academyId, deleteTarget]);
 
+  const toggleTeacherForStudent = useCallback(
+    async (student: StudentRowVM, teacherUid: string, add: boolean) => {
+      const cur = student.assignedTeacherUids;
+      let next: string[];
+      if (add) {
+        if (cur.includes(teacherUid)) return;
+        if (cur.length >= MAX_ASSIGNED_TEACHERS_PER_STUDENT) {
+          setNotice(
+            `전담 선생님은 학생당 최대 ${MAX_ASSIGNED_TEACHERS_PER_STUDENT}명까지 지정할 수 있습니다.`,
+          );
+          return;
+        }
+        next = [...cur, teacherUid];
+      } else {
+        next = cur.filter((id) => id !== teacherUid);
+      }
+      setTeacherAssignBusyId(student.id);
+      try {
+        const db = getFirebaseDb();
+        await updateDoc(doc(db, "academies", academyId, "students", student.id), {
+          assignedTeacherUids: next,
+          assignedTeacherUid: deleteField(),
+          updatedAt: serverTimestamp(),
+        });
+        setNotice(
+          next.length > 0 ? "전담 선생님을 저장했습니다." : "전담 선생님을 모두 해제했습니다.",
+        );
+      } catch (e) {
+        setNotice(fsErr(e));
+      } finally {
+        setTeacherAssignBusyId(null);
+      }
+    },
+    [academyId],
+  );
+
   return (
     <div className="space-y-4">
       {notice ? (
@@ -642,7 +784,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
         <input
           type="search"
           className="min-w-0 flex-1 rounded-2xl border border-neutral-300/60 bg-white/50 px-4 py-2.5 text-sm text-[#111] shadow-inner outline-none placeholder:text-neutral-400 focus:border-[#4a90e2]/50 focus:bg-white/70"
-          placeholder="이름·학부모·연락처·나이·학부모ID로 검색"
+          placeholder="이름·학부모·연락처·나이·학부모ID·전담선생으로 검색"
           value={queryText}
           onChange={(e) => setQueryText(e.target.value)}
           aria-label="학생 검색"
@@ -677,6 +819,61 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                   <p className="mt-1 text-[11px] text-neutral-600">
                     연락 {s.phone || "—"} · 비상 {s.emergencyContact || "—"}
                   </p>
+                  <span className="mt-1 block text-[11px] font-medium text-neutral-600">
+                    전담 선생님
+                    <span className="font-normal text-neutral-500">
+                      {" "}
+                      (복수 지정 가능, 최대 {MAX_ASSIGNED_TEACHERS_PER_STUDENT}명)
+                    </span>
+                  </span>
+                  <div className="mt-1 max-h-36 space-y-1 overflow-y-auto rounded-xl border border-white/60 bg-white/25 px-2 py-1.5">
+                    {activeTeachersSorted.map((t) => {
+                      const on = s.assignedTeacherUids.includes(t.id);
+                      const atCap =
+                        !on && s.assignedTeacherUids.length >= MAX_ASSIGNED_TEACHERS_PER_STUDENT;
+                      return (
+                        <label
+                          key={t.id}
+                          className="flex cursor-pointer items-center gap-2 text-[11px] text-[#111]"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            disabled={teacherAssignBusyId === s.id || atCap}
+                            onChange={() =>
+                              void toggleTeacherForStudent(s, t.id, !on)
+                            }
+                            className="h-3.5 w-3.5 rounded border-neutral-400"
+                          />
+                          <span>{t.name || t.id}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {s.assignedTeacherUids.some(
+                    (tid) => !activeTeachersSorted.some((t) => t.id === tid),
+                  ) ? (
+                    <ul className="mt-1 space-y-1 text-[11px] text-amber-900">
+                      {s.assignedTeacherUids
+                        .filter((tid) => !activeTeachersSorted.some((t) => t.id === tid))
+                        .map((tid) => (
+                          <li key={tid} className="flex flex-wrap items-center justify-between gap-2">
+                            <span>
+                              {teacherNameById[tid] ?? tid}
+                              <span className="text-neutral-600"> (비활성 등 — 연결 해제만 가능)</span>
+                            </span>
+                            <button
+                              type="button"
+                              className={miniBtnClass}
+                              disabled={teacherAssignBusyId === s.id}
+                              onClick={() => void toggleTeacherForStudent(s, tid, false)}
+                            >
+                              제거
+                            </button>
+                          </li>
+                        ))}
+                    </ul>
+                  ) : null}
                 </div>
                 <div className="flex shrink-0 flex-col gap-1.5 sm:flex-row">
                   <button

@@ -121,6 +121,9 @@ export type AcademyParent = {
   updatedAt?: Timestamp;
 };
 
+/** 학생당 전담 선생 상한 — Firestore 규칙과 클라이언트가 동일 값 사용 */
+export const MAX_ASSIGNED_TEACHERS_PER_STUDENT = 20;
+
 /** 학생 — 부모와 연결, Auth 없을 수 있음 */
 export type AcademyStudent = {
   parentUserId: string;
@@ -129,6 +132,16 @@ export type AcademyStudent = {
   age: number;
   phone?: string | null;
   emergencyContact?: string | null;
+  /**
+   * 전담 선생님 Auth uid 목록 — 과목별로 동일 학생이 여러 선생님에게 전담될 수 있음.
+   * 활성 선생만 허용(규칙), 최대 `MAX_ASSIGNED_TEACHERS_PER_STUDENT`명.
+   */
+  assignedTeacherUids?: string[];
+  /**
+   * @deprecated 구 단일 전담 필드 — 기존 문서 호환용. 클라이언트는 읽을 때 `assignedTeacherUids`와 병합하고
+   * 전담 저장 시 제거(`deleteField`)합니다.
+   */
+  assignedTeacherUid?: string | null;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 };

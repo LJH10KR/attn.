@@ -65,6 +65,53 @@ service cloud.firestore {
       return exists(p) && get(p).data.status == 'active';
     }
 
+    function teacherDocActive(academyId, tid) {
+      return tid is string
+        && exists(/databases/$(database)/documents/academies/$(academyId)/teachers/$(tid))
+        && get(/databases/$(database)/documents/academies/$(academyId)/teachers/$(tid)).data.status == 'active';
+    }
+
+    /**
+     * assignedTeacherUids — 최대 20명, 요소마다 활성 선생 문서 필요.
+     * (규칙은 고정 길이 분기로 검증 — `MAX_ASSIGNED_TEACHERS_PER_STUDENT`와 맞출 것)
+     */
+    function assignedTeacherUidsListOk(academyId, u) {
+      return u is list
+        && u.size() <= 20
+        && (u.size() < 1 || teacherDocActive(academyId, u[0]))
+        && (u.size() < 2 || teacherDocActive(academyId, u[1]))
+        && (u.size() < 3 || teacherDocActive(academyId, u[2]))
+        && (u.size() < 4 || teacherDocActive(academyId, u[3]))
+        && (u.size() < 5 || teacherDocActive(academyId, u[4]))
+        && (u.size() < 6 || teacherDocActive(academyId, u[5]))
+        && (u.size() < 7 || teacherDocActive(academyId, u[6]))
+        && (u.size() < 8 || teacherDocActive(academyId, u[7]))
+        && (u.size() < 9 || teacherDocActive(academyId, u[8]))
+        && (u.size() < 10 || teacherDocActive(academyId, u[9]))
+        && (u.size() < 11 || teacherDocActive(academyId, u[10]))
+        && (u.size() < 12 || teacherDocActive(academyId, u[11]))
+        && (u.size() < 13 || teacherDocActive(academyId, u[12]))
+        && (u.size() < 14 || teacherDocActive(academyId, u[13]))
+        && (u.size() < 15 || teacherDocActive(academyId, u[14]))
+        && (u.size() < 16 || teacherDocActive(academyId, u[15]))
+        && (u.size() < 17 || teacherDocActive(academyId, u[16]))
+        && (u.size() < 18 || teacherDocActive(academyId, u[17]))
+        && (u.size() < 19 || teacherDocActive(academyId, u[18]))
+        && (u.size() < 20 || teacherDocActive(academyId, u[19]));
+    }
+
+    /**
+     * 학생 전담 필드 — assignedTeacherUids(권장) 또는 구 assignedTeacherUid(마이그레이션 대비).
+     */
+    function studentAssignedTeacherOk(academyId) {
+      let d = request.resource.data;
+      return (!d.keys().hasAny(['assignedTeacherUids'])
+          || assignedTeacherUidsListOk(academyId, d.assignedTeacherUids))
+        && (!d.keys().hasAny(['assignedTeacherUid'])
+            || d.assignedTeacherUid == null
+            || (d.assignedTeacherUid is string && teacherDocActive(academyId, d.assignedTeacherUid)));
+    }
+
     match /users/{userId} {
       allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
       allow create, update, delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
@@ -120,19 +167,27 @@ service cloud.firestore {
           || (isAcademyParentActive(academyId) && resource.data.parentUserId == request.auth.uid);
 
         allow create: if
-          (isAdmin()
+          (((isAdmin()
             || isAcademyOwner(academyId)
             || isAcademyTeacherActive(academyId)
             || isAcademyPortalSession(academyId))
           && request.resource.data.keys().hasAll(['parentUserId', 'name', 'createdAt'])
           && request.resource.data.parentUserId is string
           && request.resource.data.name is string
-          && isActiveParentForStudent(academyId, request.resource.data.parentUserId)
+          && isActiveParentForStudent(academyId, request.resource.data.parentUserId))
           || (isAcademyParentActive(academyId)
               && request.resource.data.keys().hasAll(['parentUserId', 'name', 'createdAt'])
-              && request.resource.data.parentUserId == request.auth.uid);
+              && request.resource.data.parentUserId == request.auth.uid))
+          && studentAssignedTeacherOk(academyId);
 
-        allow update, delete: if isAdmin()
+        allow update: if (isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyPortalSession(academyId)
+          || isAcademyTeacherActive(academyId)
+          || (isAcademyParentActive(academyId) && resource.data.parentUserId == request.auth.uid))
+          && studentAssignedTeacherOk(academyId);
+
+        allow delete: if isAdmin()
           || isAcademyOwner(academyId)
           || isAcademyPortalSession(academyId)
           || isAcademyTeacherActive(academyId)

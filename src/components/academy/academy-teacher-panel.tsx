@@ -11,6 +11,7 @@ import {
 import { httpsCallable } from "firebase/functions";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { TeacherAssignedStudentsBlock } from "@/components/academy/academy-teacher-assigned-students";
 import {
   TEACHER_INVITE_TTL_MS,
   type TeacherRegistrationStatus,
@@ -707,6 +708,13 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
                     aria-labelledby={`teacher-row-${t.id}`}
                     className="border-t border-white/60 bg-white/20 px-3 py-3 sm:px-4"
                   >
+                    <TeacherAssignedStudentsBlock
+                      academyId={academyId}
+                      teacherId={t.id}
+                      teacherName={t.name || t.email || t.id}
+                      teacherStatus={t.status}
+                      setNotice={setNotice}
+                    />
                     <TeacherRowActions
                       academyId={academyId}
                       row={t}
