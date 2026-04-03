@@ -4,22 +4,8 @@
       "collectionGroup": "teachers",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
-        { "fieldPath": "authUid", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "teachers",
-      "queryScope": "COLLECTION_GROUP",
-      "fields": [
         { "fieldPath": "authUid", "order": "ASCENDING" },
         { "fieldPath": "status", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "parents",
-      "queryScope": "COLLECTION_GROUP",
-      "fields": [
-        { "fieldPath": "authUid", "order": "ASCENDING" }
       ]
     },
     {
@@ -31,5 +17,26 @@
       ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "collectionGroup": "teachers",
+      "fieldPath": "authUid",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "parents",
+      "fieldPath": "authUid",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    }
+  ]
 }

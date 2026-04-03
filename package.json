@@ -7,7 +7,7 @@
     "dev:emulator": "next dev",
     "emulators": "yarn --cwd functions build && cross-env NODE_OPTIONS= firebase emulators:start --import=./.firebase/emulator-data --export-on-exit=./.firebase/emulator-data",
     "emulators:fresh": "yarn --cwd functions build && cross-env NODE_OPTIONS= firebase emulators:start",
-    "build": "next build --turbopack",
+    "build": "next build",
     "start": "next start",
     "lint": "eslint"
   },
@@ -18,6 +18,10 @@
     "next": "15.5.14",
     "react": "19.1.0",
     "react-dom": "19.1.0"
+  },
+  "optionalDependencies": {
+    "@tailwindcss/oxide-linux-x64-gnu": "4.2.2",
+    "lightningcss-linux-x64-gnu": "1.32.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
