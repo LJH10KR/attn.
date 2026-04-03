@@ -8,8 +8,9 @@ import {
   FIREBASE_FUNCTIONS_REGION,
   firebaseWebConfig,
   isFirebaseConfigured,
-  useFirebaseEmulator,
+  isFirebaseEmulatorEnabled,
 } from "./config";
+import { initFirebaseAppCheck } from "./app-check";
 
 let authEmulatorConnected = false;
 let firestoreEmulatorConnected = false;
@@ -23,16 +24,19 @@ function getOrInitApp(): FirebaseApp {
   }
   const existing = getApps()[0];
   if (existing) {
+    initFirebaseAppCheck(existing);
     return existing;
   }
-  return initializeApp(firebaseWebConfig);
+  const app = initializeApp(firebaseWebConfig);
+  initFirebaseAppCheck(app);
+  return app;
 }
 
 /** 브라우저에서만 호출. */
 export function getFirebaseAuth(): Auth {
   const app = getOrInitApp();
   const auth = getAuth(app);
-  if (typeof window !== "undefined" && useFirebaseEmulator() && !authEmulatorConnected) {
+  if (typeof window !== "undefined" && isFirebaseEmulatorEnabled() && !authEmulatorConnected) {
     connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
     authEmulatorConnected = true;
   }
@@ -42,7 +46,7 @@ export function getFirebaseAuth(): Auth {
 export function getFirebaseDb(): Firestore {
   const app = getOrInitApp();
   const db = getFirestore(app);
-  if (typeof window !== "undefined" && useFirebaseEmulator() && !firestoreEmulatorConnected) {
+  if (typeof window !== "undefined" && isFirebaseEmulatorEnabled() && !firestoreEmulatorConnected) {
     connectFirestoreEmulator(db, "127.0.0.1", 8080);
     firestoreEmulatorConnected = true;
   }
@@ -52,7 +56,7 @@ export function getFirebaseDb(): Firestore {
 export function getFirebaseFunctions(): Functions {
   const app = getOrInitApp();
   const functions = getFunctions(app, FIREBASE_FUNCTIONS_REGION);
-  if (typeof window !== "undefined" && useFirebaseEmulator() && !functionsEmulatorConnected) {
+  if (typeof window !== "undefined" && isFirebaseEmulatorEnabled() && !functionsEmulatorConnected) {
     connectFunctionsEmulator(functions, "127.0.0.1", 5001);
     functionsEmulatorConnected = true;
   }

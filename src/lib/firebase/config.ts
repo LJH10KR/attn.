@@ -18,7 +18,7 @@ export function isFirebaseConfigured(): boolean {
   );
 }
 
-export function useFirebaseEmulator(): boolean {
+export function isFirebaseEmulatorEnabled(): boolean {
   return process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === "1";
 }
 
@@ -32,7 +32,7 @@ export function getApiBaseUrl(): string {
   if (explicit) {
     return explicit.replace(/\/$/, "");
   }
-  if (useFirebaseEmulator() && firebaseWebConfig.projectId) {
+  if (isFirebaseEmulatorEnabled() && firebaseWebConfig.projectId) {
     return `http://127.0.0.1:5001/${firebaseWebConfig.projectId}/${FIREBASE_FUNCTIONS_REGION}`;
   }
   return "";

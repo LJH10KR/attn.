@@ -12,12 +12,20 @@ const compat = new FlatCompat({
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
+    rules: {
+      "react/no-danger": "error",
+    },
+  },
+  {
     ignores: [
       "node_modules/**",
       ".next/**",
       "out/**",
       "build/**",
       "next-env.d.ts",
+      /** Cloud Functions는 functions/.eslintrc.js + `yarn --cwd functions lint`로 검사 */
+      "functions/**",
+      ".yarn/**",
     ],
   },
 ];

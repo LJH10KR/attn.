@@ -154,3 +154,7 @@ $RECYCLE.BIN/
 # env files
 .env*
 !.env.example
+
+
+### Markdown ###
+docs/

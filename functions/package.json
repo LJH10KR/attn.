@@ -1,7 +1,7 @@
 {
   "name": "functions",
   "scripts": {
-    "grant-admin-emulator": "node scripts/grantAdminEmulator.cjs",
+    "grant-admin-emulator": "node scripts/grantAdminEmulator.mjs",
     "lint": "eslint --ext .js,.ts .",
     "prepare": "yarn build",
     "build": "tsc",

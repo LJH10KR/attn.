@@ -417,57 +417,69 @@ export const finalizeTeacherOnboarding = onCall(async (request) => {
   return { ok: true };
 });
 
-export const getTeacherActivationState = onCall({ cors: true }, async (request) => {
-  if (!request.auth?.uid) {
-    throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
-  }
-  const { uid } = request.auth;
+const enforceAppCheckOnTeacherState = process.env.ENFORCE_APP_CHECK === "1";
 
-  const db = admin.firestore();
-  const snaps = await db.collectionGroup("teachers").where("authUid", "==", uid).limit(25).get();
+export const getTeacherActivationState = onCall(
+  { cors: true, enforceAppCheck: enforceAppCheckOnTeacherState },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+    }
+    const { uid } = request.auth;
 
-  if (snaps.empty) {
+    const db = admin.firestore();
+
+    /**
+     * 비용: 활성 선생님은 `status == active` 조건으로 최대 1건 읽기만 수행.
+     * 비활성·다중 학원은 기존과 동일하게 최대 25건까지 읽어 우선 표시 상태를 맞춤.
+     */
+    const activeSnap = await db
+      .collectionGroup("teachers")
+      .where("authUid", "==", uid)
+      .where("status", "==", "active")
+      .limit(1)
+      .get();
+
+    if (!activeSnap.empty) {
+      const d = activeSnap.docs[0]!;
+      return {
+        ok: true,
+        anyActive: true,
+        primaryStatus: "active" as TeacherStatus,
+        primaryAcademyId: teacherDocAcademyId(d.ref),
+      };
+    }
+
+    const snaps = await db.collectionGroup("teachers").where("authUid", "==", uid).limit(25).get();
+
+    if (snaps.empty) {
+      return {
+        ok: true,
+        anyActive: false,
+        primaryStatus: null as TeacherStatus | null,
+        primaryAcademyId: null as string | null,
+      };
+    }
+
+    const memberships = snaps.docs.map((d) => {
+      const status = d.data().status as TeacherStatus;
+      const academyId = teacherDocAcademyId(d.ref);
+      return { status, academyId };
+    });
+
+    const order: TeacherStatus[] = ["pending_registration", "invitation_sent", "inactive", "invitation_needed"];
+    const primary = memberships.find((m) => order.includes(m.status));
+    const primaryStatus = primary?.status ?? null;
+    const primaryAcademyId = primary?.academyId ?? null;
+
     return {
       ok: true,
       anyActive: false,
-      primaryStatus: null as TeacherStatus | null,
-      primaryAcademyId: null as string | null,
+      primaryStatus,
+      primaryAcademyId,
     };
-  }
-
-  const memberships = snaps.docs.map((d) => {
-    const status = d.data().status as TeacherStatus;
-    const academyId = teacherDocAcademyId(d.ref);
-    return { status, academyId };
-  });
-
-  const anyActive = memberships.some((m) => m.status === "active");
-  const activeAcademyIds = memberships
-    .filter((m) => m.status === "active" && typeof m.academyId === "string")
-    .map((m) => m.academyId as string);
-
-  // 활성 계정이 하나라도 있으면 통과(로그인 허용)
-  if (anyActive) {
-    return {
-      ok: true,
-      anyActive: true,
-      primaryStatus: "active" as TeacherStatus,
-      primaryAcademyId: activeAcademyIds[0] ?? null,
-    };
-  }
-
-  const order: TeacherStatus[] = ["pending_registration", "invitation_sent", "inactive", "invitation_needed"];
-  const primary = memberships.find((m) => order.includes(m.status));
-  const primaryStatus = primary?.status ?? null;
-  const primaryAcademyId = primary?.academyId ?? null;
-
-  return {
-    ok: true,
-    anyActive: false,
-    primaryStatus,
-    primaryAcademyId,
-  };
-});
+  },
+);
 
 export const activateTeacher = onCall(async (request) => {
   if (!request.auth?.uid) {

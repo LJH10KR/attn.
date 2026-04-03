@@ -10,7 +10,7 @@
  *   yarn grant-admin-emulator admin@local.test MySecret123!
  */
 
-const admin = require("firebase-admin");
+import admin from "firebase-admin";
 
 const projectId =
   process.env.GCLOUD_PROJECT ||

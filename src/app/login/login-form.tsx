@@ -154,7 +154,7 @@ export function LoginForm() {
         setBusy(false);
       }
     },
-    [configured, email, password, router, role, showEmailAuth],
+    [checkTeacherActivationOrRedirect, configured, email, password, router, role, showEmailAuth],
   );
 
   const onGoogleLogin = useCallback(async () => {
@@ -184,7 +184,7 @@ export function LoginForm() {
     } finally {
       setBusy(false);
     }
-  }, [configured, role, router]);
+  }, [checkTeacherActivationOrRedirect, configured, role, router]);
 
   const onAcademyLogin = useCallback(
     async (e: React.FormEvent) => {

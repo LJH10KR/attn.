@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist_Mono } from "next/font/google";
 import { Noto_Sans_KR } from "next/font/google";
+import { headers } from "next/headers";
 import "./globals.css";
 
 const notoSansKr = Noto_Sans_KR({
@@ -20,13 +21,15 @@ export const metadata: Metadata = {
   description: "학부모를 위한 출석·결석 알림 서비스",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const nonce = (await headers()).get("x-nonce") ?? "";
+
   return (
-    <html lang="ko">
+    <html lang="ko" nonce={nonce}>
       <body
         className={`${notoSansKr.variable} ${geistMono.variable} font-sans antialiased`}
       >

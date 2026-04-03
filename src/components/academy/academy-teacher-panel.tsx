@@ -202,7 +202,6 @@ function TeacherRowActions({
                 const res = await h({ academyId, teacherId: row.id });
                 const data = res.data as { debugLinks?: { resetLink: string; verifyLink: string } };
                 if (data?.debugLinks && typeof window !== "undefined") {
-                  // eslint-disable-next-line no-console
                   console.info("[emulator] 초청 링크", data.debugLinks);
                 }
               })
@@ -241,7 +240,6 @@ function TeacherRowActions({
                 const res = await h({ academyId, teacherId: row.id });
                 const data = res.data as { debugLinks?: { resetLink: string; verifyLink: string } };
                 if (data?.debugLinks && typeof window !== "undefined") {
-                  // eslint-disable-next-line no-console
                   console.info("[emulator] 초청 링크", data.debugLinks);
                 }
               })
@@ -475,7 +473,6 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
         const res = await send({ academyId, teacherId });
         const data = res.data as { debugLinks?: { resetLink: string; verifyLink: string } };
         if (data?.debugLinks && typeof window !== "undefined") {
-          // eslint-disable-next-line no-console
           console.info("[emulator] 초청 링크", teacherId, data.debugLinks);
         }
       }
