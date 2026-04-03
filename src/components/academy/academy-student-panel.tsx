@@ -114,6 +114,27 @@ function SearchIcon() {
   );
 }
 
+function ChevronRightGlyph({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+    >
+      <path
+        d="M9 6l6 6-6 6"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function EditStudentModal({
   academyId,
   student,
@@ -337,6 +358,149 @@ function DeleteStudentConfirmModal({
   );
 }
 
+function StudentAssignedTeachersModal({
+  academyId,
+  student,
+  onClose,
+  activeTeachersSorted,
+  teacherNameById,
+  teacherAssignBusyId,
+  onToggleTeacher,
+}: {
+  academyId: string;
+  student: StudentRowWithParent | null;
+  onClose: () => void;
+  activeTeachersSorted: TeacherBrief[];
+  teacherNameById: Record<string, string>;
+  teacherAssignBusyId: string | null;
+  onToggleTeacher: (row: StudentRowVM, teacherUid: string, add: boolean) => void;
+}) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (student) closeRef.current?.focus();
+  }, [student]);
+  useEffect(() => {
+    if (!student) return;
+    const busyHere = teacherAssignBusyId === student.id;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busyHere) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [student, teacherAssignBusyId, onClose]);
+
+  if (!student) return null;
+
+  const busyHere = teacherAssignBusyId === student.id;
+  const s = student;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[210] flex items-center justify-center bg-black/45 p-4 backdrop-blur-[2px]"
+      role="presentation"
+      onClick={() => {
+        if (!busyHere) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="student-assign-teachers-title"
+        className={`${glassCard} flex max-h-[min(90dvh,560px)] w-full max-w-md flex-col p-6 shadow-2xl`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="student-assign-teachers-title" className="shrink-0 text-base font-semibold text-[#111]">
+          전담 선생님
+        </h2>
+        <p className="mt-1 shrink-0 text-xs text-neutral-600">
+          <span className="font-medium text-[#111]">{s.name}</span>
+          <span className="text-neutral-500"> · 만 {s.age}세</span>
+        </p>
+        <p className="mt-0.5 shrink-0 text-[11px] text-neutral-500">
+          학부모: <span className="font-medium text-[#111]">{s.parentName}</span>
+          <span className="font-mono text-[10px] text-neutral-400"> ({s.parentUserId})</span>
+        </p>
+        <p className="mt-2 shrink-0 text-[11px] leading-relaxed text-neutral-600">
+          활성 선생님을 복수 선택할 수 있습니다. 학생당 최대{" "}
+          {MAX_ASSIGNED_TEACHERS_PER_STUDENT}명 · 학원{" "}
+          <span className="font-mono text-[10px] text-[#111]">{academyId}</span>
+        </p>
+        <div className="mt-4 flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+          <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/60 bg-white/25 px-2 py-2">
+            <p className="mb-1.5 px-1 text-[11px] font-medium text-neutral-600">활성 선생님</p>
+            <div className="max-h-48 space-y-0.5 overflow-y-auto">
+              {activeTeachersSorted.length === 0 ? (
+                <p className="px-1 py-2 text-xs text-neutral-500">활성 선생님이 없습니다.</p>
+              ) : (
+                activeTeachersSorted.map((t) => {
+                  const on = s.assignedTeacherUids.includes(t.id);
+                  const atCap =
+                    !on && s.assignedTeacherUids.length >= MAX_ASSIGNED_TEACHERS_PER_STUDENT;
+                  return (
+                    <label
+                      key={t.id}
+                      className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 text-[11px] text-[#111] hover:bg-white/50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        disabled={busyHere || atCap}
+                        onChange={() => onToggleTeacher(s, t.id, !on)}
+                        className="h-3.5 w-3.5 rounded border-neutral-400"
+                      />
+                      <span>{t.name || t.id}</span>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+          </div>
+          {s.assignedTeacherUids.some((tid) => !activeTeachersSorted.some((t) => t.id === tid)) ? (
+            <div className="shrink-0 overflow-y-auto rounded-xl border border-amber-500/20 bg-amber-500/5 px-2 py-2">
+              <p className="mb-1 px-1 text-[11px] font-medium text-amber-950/90">비활성·기타 전담</p>
+              <ul className="space-y-1 text-[11px] text-amber-950">
+                {s.assignedTeacherUids
+                  .filter((tid) => !activeTeachersSorted.some((t) => t.id === tid))
+                  .map((tid) => (
+                    <li
+                      key={tid}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/40 bg-white/30 px-2 py-1.5"
+                    >
+                      <span>
+                        {teacherNameById[tid] ?? tid}
+                        <span className="text-neutral-700"> (연결 해제만 가능)</span>
+                      </span>
+                      <button
+                        type="button"
+                        className={miniBtnClass}
+                        disabled={busyHere}
+                        onClick={() => onToggleTeacher(s, tid, false)}
+                      >
+                        제거
+                      </button>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+        <div className="mt-6 flex shrink-0 justify-end">
+          <button
+            ref={closeRef}
+            type="button"
+            disabled={busyHere}
+            className="rounded-2xl border border-neutral-300/80 bg-white/80 px-4 py-2.5 text-sm font-medium text-neutral-800 disabled:opacity-50"
+            onClick={onClose}
+          >
+            {busyHere ? "저장 중…" : "닫기"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 /** 학부모 카드 확장 영역 — 해당 학부모의 자녀만 */
 export function AcademyParentStudentList({
   academyId,
@@ -550,6 +714,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
   const [editErr, setEditErr] = useState<string | null>(null);
   const [delBusy, setDelBusy] = useState(false);
   const [teacherAssignBusyId, setTeacherAssignBusyId] = useState<string | null>(null);
+  const [teacherModalStudentId, setTeacherModalStudentId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [formName, setFormName] = useState("");
   const [formAge, setFormAge] = useState("");
@@ -661,7 +826,32 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
     });
   }, [rowsWithParent, queryText]);
 
+  const teacherModalRow = useMemo((): StudentRowWithParent | null => {
+    if (!teacherModalStudentId) return null;
+    const s = students.find((x) => x.id === teacherModalStudentId);
+    if (!s) return null;
+    const teacherLabel = s.assignedTeacherUids
+      .map((uid) => teacherNameById[uid] ?? uid)
+      .join(", ");
+    return {
+      ...s,
+      parentName: parentsById[s.parentUserId] ?? s.parentUserId,
+      teacherLabel,
+    };
+  }, [teacherModalStudentId, students, parentsById, teacherNameById]);
+
+  useEffect(() => {
+    if (teacherModalStudentId && !students.some((x) => x.id === teacherModalStudentId)) {
+      setTeacherModalStudentId(null);
+    }
+  }, [teacherModalStudentId, students]);
+
+  const closeTeacherModal = useCallback(() => {
+    setTeacherModalStudentId(null);
+  }, []);
+
   const openEdit = (s: StudentRowVM) => {
+    setTeacherModalStudentId(null);
     setEditErr(null);
     setFormName(s.name);
     setFormAge(String(s.age));
@@ -798,104 +988,88 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
         </button>
       </div>
 
-      <div className="space-y-2 pb-8">
+      <div className="relative space-y-2 pb-8">
         {filtered.length === 0 ? (
           <p className={`py-10 text-center text-sm text-neutral-500 ${glassCard}`}>
             {students.length === 0 ? "등록된 학생이 없습니다." : "검색 결과가 없습니다."}
           </p>
         ) : (
-          filtered.map((s) => (
-            <div key={s.id} className={`p-4 ${glassCard}`}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="font-medium text-[#111]">
-                    {s.name}
-                    <span className="font-normal text-neutral-500"> · 만 {s.age}세</span>
-                  </p>
-                  <p className="mt-1 text-xs text-neutral-600">
-                    학부모: <span className="font-medium text-[#111]">{s.parentName}</span>
-                    <span className="font-mono text-[10px] text-neutral-400"> ({s.parentUserId})</span>
-                  </p>
-                  <p className="mt-1 text-[11px] text-neutral-600">
-                    연락 {s.phone || "—"} · 비상 {s.emergencyContact || "—"}
-                  </p>
-                  <span className="mt-1 block text-[11px] font-medium text-neutral-600">
-                    전담 선생님
-                    <span className="font-normal text-neutral-500">
-                      {" "}
-                      (복수 지정 가능, 최대 {MAX_ASSIGNED_TEACHERS_PER_STUDENT}명)
+          filtered.map((s) => {
+            const modalOpen = teacherModalStudentId === s.id;
+            return (
+              <div
+                key={s.id}
+                className={`overflow-hidden ${glassCard} ${modalOpen ? "ring-1 ring-[#222]/10" : ""}`}
+              >
+                <div className="flex items-stretch gap-1 p-2 sm:gap-2 sm:p-3.5">
+                  <button
+                    type="button"
+                    id={`student-row-${s.id}`}
+                    className="flex min-w-0 flex-1 items-center gap-2 rounded-2xl px-2 py-2 text-left transition hover:bg-white/35 active:bg-white/45 sm:gap-3 sm:px-3"
+                    aria-haspopup="dialog"
+                    aria-expanded={modalOpen}
+                    aria-controls="student-assign-teachers-title"
+                    onClick={() =>
+                      setTeacherModalStudentId((prev) => (prev === s.id ? null : s.id))
+                    }
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-medium text-[#111]">{s.name}</span>
+                      <span className="mt-0.5 block truncate text-xs text-neutral-500">
+                        학부모 {s.parentName} · 만 {s.age}세
+                      </span>
+                      <span className="mt-0.5 block text-[11px] text-neutral-500">
+                        연락 {s.phone || "—"} · 전담 선생{" "}
+                        <span className="font-medium text-sky-900/90">
+                          {s.assignedTeacherUids.length > 0
+                            ? `${s.assignedTeacherUids.length}명`
+                            : "없음"}
+                        </span>
+                      </span>
                     </span>
-                  </span>
-                  <div className="mt-1 max-h-36 space-y-1 overflow-y-auto rounded-xl border border-white/60 bg-white/25 px-2 py-1.5">
-                    {activeTeachersSorted.map((t) => {
-                      const on = s.assignedTeacherUids.includes(t.id);
-                      const atCap =
-                        !on && s.assignedTeacherUids.length >= MAX_ASSIGNED_TEACHERS_PER_STUDENT;
-                      return (
-                        <label
-                          key={t.id}
-                          className="flex cursor-pointer items-center gap-2 text-[11px] text-[#111]"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={on}
-                            disabled={teacherAssignBusyId === s.id || atCap}
-                            onChange={() =>
-                              void toggleTeacherForStudent(s, t.id, !on)
-                            }
-                            className="h-3.5 w-3.5 rounded border-neutral-400"
-                          />
-                          <span>{t.name || t.id}</span>
-                        </label>
-                      );
-                    })}
+                    <span
+                      className="flex shrink-0 items-center gap-0.5 text-[11px] font-medium text-sky-900/90"
+                      aria-hidden
+                    >
+                      전담
+                      <ChevronRightGlyph className="text-neutral-400" />
+                    </span>
+                  </button>
+                  <div className="flex shrink-0 flex-col justify-center gap-1.5 sm:flex-row sm:items-center">
+                    <button
+                      type="button"
+                      className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-[#222] shadow-sm hover:bg-white/90"
+                      onClick={() => openEdit(s)}
+                    >
+                      수정
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-[#222] shadow-sm hover:bg-white/90"
+                      onClick={() => {
+                        setTeacherModalStudentId(null);
+                        setDeleteTarget(s);
+                      }}
+                    >
+                      삭제
+                    </button>
                   </div>
-                  {s.assignedTeacherUids.some(
-                    (tid) => !activeTeachersSorted.some((t) => t.id === tid),
-                  ) ? (
-                    <ul className="mt-1 space-y-1 text-[11px] text-amber-900">
-                      {s.assignedTeacherUids
-                        .filter((tid) => !activeTeachersSorted.some((t) => t.id === tid))
-                        .map((tid) => (
-                          <li key={tid} className="flex flex-wrap items-center justify-between gap-2">
-                            <span>
-                              {teacherNameById[tid] ?? tid}
-                              <span className="text-neutral-600"> (비활성 등 — 연결 해제만 가능)</span>
-                            </span>
-                            <button
-                              type="button"
-                              className={miniBtnClass}
-                              disabled={teacherAssignBusyId === s.id}
-                              onClick={() => void toggleTeacherForStudent(s, tid, false)}
-                            >
-                              제거
-                            </button>
-                          </li>
-                        ))}
-                    </ul>
-                  ) : null}
-                </div>
-                <div className="flex shrink-0 flex-col gap-1.5 sm:flex-row">
-                  <button
-                    type="button"
-                    className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-[#222] shadow-sm hover:bg-white/90"
-                    onClick={() => openEdit(s)}
-                  >
-                    수정
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-[#222] shadow-sm hover:bg-white/90"
-                    onClick={() => setDeleteTarget(s)}
-                  >
-                    삭제
-                  </button>
                 </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
+
+      <StudentAssignedTeachersModal
+        academyId={academyId}
+        student={teacherModalRow}
+        onClose={closeTeacherModal}
+        activeTeachersSorted={activeTeachersSorted}
+        teacherNameById={teacherNameById}
+        teacherAssignBusyId={teacherAssignBusyId}
+        onToggleTeacher={toggleTeacherForStudent}
+      />
 
       {editTarget ? (
         <EditStudentModal
