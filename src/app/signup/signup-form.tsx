@@ -3,7 +3,6 @@
 import { FirebaseError } from "firebase/app";
 import {
   createUserWithEmailAndPassword,
-  getAdditionalUserInfo,
   GoogleAuthProvider,
   sendEmailVerification,
   signInWithPopup,
@@ -95,11 +94,10 @@ export function SignupForm() {
       const auth = getFirebaseAuth();
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
-      const info = getAdditionalUserInfo(result);
-      if (!info?.isNewUser) {
-        router.replace("/login?msg=existing_account");
-        return;
-      }
+      /**
+       * Google은 로그인만 해도 Auth 계정이 생깁니다. 기존에는 isNewUser가 아니면
+       * Firestore 오너 문서 없이 로그인으로 보내 교착이 났음 → 항상 오너 프로필을 맞춤.
+       */
       await upsertOwnerProfile(result.user);
       router.replace("/owner");
     } catch (err) {

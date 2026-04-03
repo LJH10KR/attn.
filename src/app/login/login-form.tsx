@@ -15,6 +15,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { upsertOwnerProfile } from "@/lib/firebase/owner-profile";
 
 export type LoginRole = "owner" | "academy" | "teacher" | "parent";
 
@@ -198,6 +199,9 @@ export function LoginForm() {
           const ok = await checkParentActivationOrRedirect();
           if (!ok) return;
         }
+        if (role === "owner") {
+          await upsertOwnerProfile(cred.user);
+        }
         router.replace(
           role === "owner"
             ? "/owner"
@@ -249,6 +253,9 @@ export function LoginForm() {
       if (role === "parent") {
         const ok = await checkParentActivationOrRedirect();
         if (!ok) return;
+      }
+      if (role === "owner") {
+        await upsertOwnerProfile(cred.user);
       }
       router.replace(
         role === "owner"
