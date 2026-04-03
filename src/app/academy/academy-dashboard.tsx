@@ -5,6 +5,7 @@ import { AcademyStudentPanel } from "@/components/academy/academy-student-panel"
 import { AcademyTeacherPanel } from "@/components/academy/academy-teacher-panel";
 import { AcademyTreemap, type AcademyHeatmapItem } from "@/components/academy/academy-treemap";
 import { COLLECTIONS, type Academy } from "@/lib/firebase/attn-schema";
+import { signOut } from "firebase/auth";
 import { getFirebaseAuth, getFirebaseDb } from "@/lib/firebase/client-app";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { doc, getDoc } from "firebase/firestore";
@@ -131,6 +132,9 @@ export function AcademyDashboard() {
   const [academyId, setAcademyId] = useState<string | null>(null);
   const [academyName, setAcademyName] = useState<string | null>(null);
   const [showBack, setShowBack] = useState(false);
+  /** 학원 ID·비밀번호 포털 로그인(커스텀 토큰) 세션 — 오너 대시보드에서 연 경로와 구분 */
+  const [isAcademyPortalSession, setIsAcademyPortalSession] = useState(false);
+  const [logoutBusy, setLogoutBusy] = useState(false);
 
   const fromOwner = searchParams.get("from") === "owner";
   const queryAcademyId = searchParams.get("id")?.trim() ?? "";
@@ -177,6 +181,7 @@ export function AcademyDashboard() {
     if (isPortal && portalAcademyId) {
       setAcademyId(portalAcademyId);
       setShowBack(false);
+      setIsAcademyPortalSession(true);
       try {
         const snap = await getDoc(doc(getFirebaseDb(), COLLECTIONS.academies, portalAcademyId));
         const data = snap.data() as Academy | undefined;
@@ -189,6 +194,7 @@ export function AcademyDashboard() {
     }
 
     if (fromOwner && queryAcademyId) {
+      setIsAcademyPortalSession(false);
       try {
         const snap = await getDoc(doc(getFirebaseDb(), COLLECTIONS.academies, queryAcademyId));
         if (!snap.exists()) {
@@ -210,8 +216,19 @@ export function AcademyDashboard() {
       return;
     }
 
+    setIsAcademyPortalSession(false);
     router.replace("/owner");
   }, [configured, fromOwner, queryAcademyId, router]);
+
+  const onPortalLogout = useCallback(async () => {
+    setLogoutBusy(true);
+    try {
+      await signOut(getFirebaseAuth());
+    } finally {
+      setLogoutBusy(false);
+      router.replace("/login?role=academy");
+    }
+  }, [router]);
 
   useEffect(() => {
     if (!configured) {
@@ -309,13 +326,25 @@ export function AcademyDashboard() {
               <div className="mt-2 h-10 w-10" aria-hidden />
             )}
           </div>
-          <button
-            type="button"
-            className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-neutral-300/50 bg-white/45 text-neutral-700 backdrop-blur-md hover:bg-white/75"
-            aria-label="알림"
-          >
-            <BellIcon className="text-neutral-700" />
-          </button>
+          <div className="mt-1 flex shrink-0 items-center gap-2">
+            {isAcademyPortalSession ? (
+              <button
+                type="button"
+                onClick={() => void onPortalLogout()}
+                disabled={logoutBusy}
+                className="rounded-full border border-neutral-300/50 bg-white/45 px-3 py-2 text-[11px] font-medium text-neutral-800 backdrop-blur-md hover:bg-white/75 disabled:opacity-50"
+              >
+                {logoutBusy ? "…" : "로그아웃"}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-neutral-300/50 bg-white/45 text-neutral-700 backdrop-blur-md hover:bg-white/75"
+              aria-label="알림"
+            >
+              <BellIcon className="text-neutral-700" />
+            </button>
+          </div>
         </div>
         <h1 className="-mt-2 pb-1 text-center text-lg font-semibold text-[#111]">학원 대시보드</h1>
         {academyName ? (
