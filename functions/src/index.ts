@@ -203,6 +203,7 @@ export {
   deleteParentInvite,
   finalizeParentOnboarding,
   getParentActivationState,
+  listParentChildrenStudents,
   registerParentInvite,
   sendParentInvitation,
   updateParentInvite,

@@ -199,7 +199,13 @@ export function LoginForm() {
           if (!ok) return;
         }
         router.replace(
-          role === "owner" ? "/owner" : role === "teacher" ? "/teacher" : "/",
+          role === "owner"
+            ? "/owner"
+            : role === "teacher"
+              ? "/teacher"
+              : role === "parent"
+                ? "/parent"
+                : "/",
         );
       } catch (err) {
         const code = err instanceof FirebaseError ? err.code : "";
@@ -245,7 +251,13 @@ export function LoginForm() {
         if (!ok) return;
       }
       router.replace(
-        role === "owner" ? "/owner" : role === "teacher" ? "/teacher" : "/",
+        role === "owner"
+          ? "/owner"
+          : role === "teacher"
+            ? "/teacher"
+            : role === "parent"
+              ? "/parent"
+              : "/",
       );
     } catch (err) {
       const code = err instanceof FirebaseError ? err.code : "";
