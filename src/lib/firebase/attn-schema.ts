@@ -77,6 +77,12 @@ export type TeacherRegistrationStatus =
 /** 초청 메일 발송 시점부터 학원이 안내하는 유효 창 (밀리초) — Functions·UI에서 동일 값 사용 */
 export const TEACHER_INVITE_TTL_MS = 24 * 60 * 60 * 1000;
 
+/** 학부모 초청 — 선생님과 동일 24h */
+export const PARENT_INVITE_TTL_MS = TEACHER_INVITE_TTL_MS;
+
+/** 학부모 등록 단계 — 선생님과 동일 상태 값 */
+export type ParentRegistrationStatus = TeacherRegistrationStatus;
+
 export type AcademyTeacher = {
   email: string;
   displayName: string;
@@ -94,10 +100,23 @@ export type AcademyTeacher = {
   updatedAt?: Timestamp;
 };
 
-/** 학원 소속 학부모 — 문서 ID = 해당 학부모의 Auth uid */
+/**
+ * 학원 학부모 — 초청 전 임의 문서 ID, 초청 발송 후 authUid 부여 및 문서 ID를 Auth uid로 이전.
+ * 생성·수정·삭제는 Cloud Functions만 수행.
+ */
 export type AcademyParent = {
-  userId: string;
-  displayName?: string;
+  email: string;
+  displayName: string;
+  phone?: string | null;
+  emergencyContact?: string | null;
+  childrenCount: number;
+  academyId: string;
+  status: ParentRegistrationStatus;
+  authUid?: string | null;
+  invitedAt?: Timestamp | null;
+  invitationExpiresAt?: Timestamp | null;
+  onboardingCompleteAt?: Timestamp | null;
+  activatedAt?: Timestamp | null;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 };

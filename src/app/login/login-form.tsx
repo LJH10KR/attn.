@@ -33,6 +33,9 @@ function authErrorMessage(code: string, role: LoginRole): string {
       if (role === "teacher") {
         return "선생님 등록 대기(pending) 상태라 로그인할 수 없습니다. 학원에서 활성 처리 후 다시 시도해 주세요.";
       }
+      if (role === "parent") {
+        return "학부모 등록 대기(pending) 상태라 로그인할 수 없습니다. 학원에서 활성 처리 후 다시 시도해 주세요.";
+      }
       return "이 계정은 현재 로그인할 수 없습니다. 학원에서 승인·활성 처리가 끝난 뒤 다시 시도하거나 문의해 주세요.";
     case "auth/user-not-found":
     case "auth/wrong-password":
@@ -95,7 +98,6 @@ export function LoginForm() {
 
   const checkTeacherActivationOrRedirect = useCallback(
     async (): Promise<boolean> => {
-      // 선생님은 로그인 성공 후에도 "active 상태"가 아니면 접근을 막아야 합니다.
       const functions = getFirebaseFunctions();
       const fn = httpsCallable(functions, "getTeacherActivationState");
       const res = await fn({});
@@ -109,10 +111,56 @@ export function LoginForm() {
 
       const state = data?.primaryStatus ?? "unknown";
       const academyId = data?.primaryAcademyId ?? "";
+
+      /**
+       * 초청 발송 직후 — 로그인한 채로 등록 완료(Callable)까지 가야 함.
+       * 여기서 session으로 보내면 등록 완료 처리가 불가능해 교착 상태가 됩니다.
+       */
+      if (state === "invitation_sent") {
+        const p = new URLSearchParams();
+        if (academyId) p.set("academyId", academyId);
+        const qs = p.toString();
+        router.replace(`/teacher/complete${qs ? `?${qs}` : ""}`);
+        return false;
+      }
+
       const q = new URLSearchParams();
       q.set("state", state);
       if (academyId) q.set("academyId", academyId);
       router.replace(`/teacher/session?${q.toString()}`);
+      return false;
+    },
+    [router],
+  );
+
+  const checkParentActivationOrRedirect = useCallback(
+    async (): Promise<boolean> => {
+      const functions = getFirebaseFunctions();
+      const fn = httpsCallable(functions, "getParentActivationState");
+      const res = await fn({});
+      const data = res.data as {
+        anyActive?: boolean;
+        primaryStatus?: string | null;
+        primaryAcademyId?: string | null;
+      };
+
+      if (data?.anyActive) return true;
+
+      const state = data?.primaryStatus ?? "unknown";
+      const aid = data?.primaryAcademyId ?? "";
+
+      if (state === "invitation_sent") {
+        const p = new URLSearchParams();
+        if (aid) p.set("academyId", aid);
+        const qs = p.toString();
+        router.replace(`/parent/complete${qs ? `?${qs}` : ""}`);
+        return false;
+      }
+
+      const q = new URLSearchParams();
+      q.set("state", state);
+      if (aid) q.set("academyId", aid);
+      router.replace(`/parent/session?${q.toString()}`);
       return false;
     },
     [router],
@@ -146,6 +194,10 @@ export function LoginForm() {
           const ok = await checkTeacherActivationOrRedirect();
           if (!ok) return;
         }
+        if (role === "parent") {
+          const ok = await checkParentActivationOrRedirect();
+          if (!ok) return;
+        }
         router.replace(role === "owner" ? "/owner" : "/");
       } catch (err) {
         const code = err instanceof FirebaseError ? err.code : "";
@@ -154,7 +206,16 @@ export function LoginForm() {
         setBusy(false);
       }
     },
-    [checkTeacherActivationOrRedirect, configured, email, password, router, role, showEmailAuth],
+    [
+      checkParentActivationOrRedirect,
+      checkTeacherActivationOrRedirect,
+      configured,
+      email,
+      password,
+      router,
+      role,
+      showEmailAuth,
+    ],
   );
 
   const onGoogleLogin = useCallback(async () => {
@@ -177,6 +238,10 @@ export function LoginForm() {
         const ok = await checkTeacherActivationOrRedirect();
         if (!ok) return;
       }
+      if (role === "parent") {
+        const ok = await checkParentActivationOrRedirect();
+        if (!ok) return;
+      }
       router.replace(role === "owner" ? "/owner" : "/");
     } catch (err) {
       const code = err instanceof FirebaseError ? err.code : "";
@@ -184,7 +249,7 @@ export function LoginForm() {
     } finally {
       setBusy(false);
     }
-  }, [checkTeacherActivationOrRedirect, configured, role, router]);
+  }, [checkParentActivationOrRedirect, checkTeacherActivationOrRedirect, configured, role, router]);
 
   const onAcademyLogin = useCallback(
     async (e: React.FormEvent) => {

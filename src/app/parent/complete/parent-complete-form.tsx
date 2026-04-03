@@ -20,7 +20,7 @@ function finalizeErrorMessage(err: FirebaseError): string {
   }
 }
 
-export function TeacherCompleteForm() {
+export function ParentCompleteForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const academyId = searchParams.get("academyId")?.trim() ?? "";
@@ -54,7 +54,7 @@ export function TeacherCompleteForm() {
     setError(null);
     setBusy(true);
     try {
-      const fn = httpsCallable(getFirebaseFunctions(), "finalizeTeacherOnboarding");
+      const fn = httpsCallable(getFirebaseFunctions(), "finalizeParentOnboarding");
       const res = await fn(academyId ? { academyId } : {});
       const data = res.data as { ok?: boolean; alreadyComplete?: boolean };
       const alreadyComplete = Boolean(data?.alreadyComplete);
@@ -70,7 +70,7 @@ export function TeacherCompleteForm() {
       } else {
         next.delete("already");
       }
-      router.replace(`/teacher/complete?${next.toString()}`);
+      router.replace(`/parent/complete?${next.toString()}`);
 
       await signOut(getFirebaseAuth());
     } catch (e) {
@@ -84,7 +84,7 @@ export function TeacherCompleteForm() {
     }
   }, [academyId, router, searchParams]);
 
-  const onSignOutOtherTeacher = useCallback(async () => {
+  const onSignOutOtherParent = useCallback(async () => {
     setError(null);
     try {
       await signOut(getFirebaseAuth());
@@ -94,7 +94,7 @@ export function TeacherCompleteForm() {
       next.delete("done");
       next.delete("already");
       const q = next.toString();
-      router.replace(q ? `/teacher/complete?${q}` : "/teacher/complete");
+      router.replace(q ? `/parent/complete?${q}` : "/parent/complete");
     } catch {
       setError("로그아웃에 실패했습니다.");
     }
@@ -122,29 +122,32 @@ export function TeacherCompleteForm() {
         {showAlready ? (
           <div className="space-y-2 rounded-xl bg-amber-500/10 px-3 py-2 text-xs text-amber-950 ring-1 ring-amber-500/20">
             <p>
-              <strong>다른 선생님</strong> 초청을 이어서 하시는 경우, 다른 계정으로 로그인되어 있지 않은지
-              확인해 주세요. (같은 브라우저에 이전 선생님이 로그인된 채로 이메일 인증만 하면, 잘못된
-              계정으로 처리될 수 있습니다.)
+              <strong>다른 학부모</strong> 초청을 이어서 진행하시는 경우, 다른 계정으로 로그인되어 있지
+              않은지 확인해 주세요. (같은 브라우저에 이전에 로그인된 채로 이메일 인증만 하면, 잘못된 계정으로
+              처리될 수 있습니다.)
             </p>
             {userEmail ? (
               <p className="font-mono text-[11px] text-neutral-700">직전 로그인: {userEmail}</p>
             ) : null}
             <button
               type="button"
-              onClick={() => void onSignOutOtherTeacher()}
+              onClick={() => void onSignOutOtherParent()}
               className="w-full rounded-xl border border-amber-700/30 bg-white/60 py-2 text-xs font-medium text-amber-950"
             >
-              다른 선생님으로 진행 (로그인 화면)
+              다른 학부모로 진행 (로그인 화면)
             </button>
           </div>
         ) : null}
         {!showAlready ? (
           <div className="space-y-2 text-xs text-neutral-500">
-            <p>지금부터는 앱에 다시 로그인하지 못합니다. 학원 대시보드에서는 해당 선생님이 &quot;등록대기&quot;로 표시됩니다.</p>
+            <p>
+              지금부터는 앱에 다시 로그인하지 못합니다. 학원 대시보드에서는 해당 학부모가 &quot;등록대기&quot;로
+              표시됩니다.
+            </p>
           </div>
         ) : null}
         <Link
-          href="/login?role=teacher"
+          href="/login?role=parent"
           className="inline-flex w-full justify-center rounded-2xl border border-neutral-200 bg-white py-3 text-center text-sm font-medium text-neutral-800"
         >
           로그인 화면으로
@@ -164,7 +167,7 @@ export function TeacherCompleteForm() {
         ) : (
           <p>
             비밀번호 설정과 이메일 인증을 모두 마쳤다면, 아래에서{" "}
-            <strong>초청받은 선생님 이메일</strong>로 로그인한 뒤 &quot;등록 완료 처리&quot;를 눌러 주세요.
+            <strong>초청받은 학부모 이메일</strong>로 로그인한 뒤 &quot;등록 완료 처리&quot;를 눌러 주세요.
           </p>
         )}
         {academyId ? (
@@ -173,10 +176,10 @@ export function TeacherCompleteForm() {
           </p>
         ) : null}
         <Link
-          href="/login?role=teacher"
+          href="/login?role=parent"
           className="inline-flex w-full justify-center rounded-2xl bg-[#222] py-3 text-center font-medium text-white"
         >
-          선생님 로그인
+          학부모 로그인
         </Link>
       </div>
     );

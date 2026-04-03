@@ -4,6 +4,7 @@ import { FirebaseError } from "firebase/app";
 import {
   applyActionCode,
   confirmPasswordReset,
+  signInWithEmailAndPassword,
   signOut,
   verifyPasswordResetCode,
 } from "firebase/auth";
@@ -12,8 +13,11 @@ import { useCallback, useEffect, useState } from "react";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { getFirebaseAuth } from "@/lib/firebase/client-app";
 
-/** Firebase 액션 링크의 continueUrl에서 /teacher/complete 경로(+쿼리) 복원 */
-function teacherCompleteHref(searchParams: URLSearchParams): string {
+/**
+ * Firebase 액션 링크의 continueUrl에서 초청 완료 페이지 경로(+쿼리) 복원.
+ * 선생님·학부모 모두 Functions에서 동일한 방식으로 continueUrl을 넣으므로 둘 다 허용합니다.
+ */
+function inviteCompleteHref(searchParams: URLSearchParams): string {
   const enc = searchParams.get("continueUrl");
   if (!enc) {
     return "/teacher/complete";
@@ -23,8 +27,9 @@ function teacherCompleteHref(searchParams: URLSearchParams): string {
     const base =
       typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1:3000";
     const u = new URL(decoded, base);
-    if (u.pathname.endsWith("/teacher/complete")) {
-      return `${u.pathname}${u.search}`;
+    const path = u.pathname.replace(/\/$/, "") || "/";
+    if (path.endsWith("/teacher/complete") || path.endsWith("/parent/complete")) {
+      return `${path}${u.search}`;
     }
   } catch {
     /* ignore */
@@ -70,10 +75,10 @@ export function AuthActionForm() {
       try {
         const auth = getFirebaseAuth();
         await applyActionCode(auth, oobCode);
-        /** 다른 선생님으로 로그인된 채 인증만 하면 세션이 바뀌지 않아 잘못된 계정으로 finalize 됨 */
+        /** 다른 계정으로 로그인된 채 인증만 하면 세션이 바뀌지 않아 잘못된 계정으로 finalize 됨 */
         await signOut(auth);
         if (!cancelled) {
-          const next = teacherCompleteHref(searchParams);
+          const next = inviteCompleteHref(searchParams);
           const joiner = next.includes("?") ? "&" : "?";
           router.replace(`${next}${joiner}verified=1`);
         }
@@ -135,14 +140,23 @@ export function AuthActionForm() {
       try {
         const auth = getFirebaseAuth();
         await confirmPasswordReset(auth, oobCode, pw);
-        router.replace(teacherCompleteHref(searchParams));
+        /** Firebase는 비밀번호 설정만 하고 세션을 유지하지 않음 — 바로 로그인해 등록 완료 단계로 이어짐 */
+        const email = resetEmail?.trim();
+        if (email) {
+          try {
+            await signInWithEmailAndPassword(auth, email, pw);
+          } catch {
+            /* 실패 시 완료 페이지에서 수동 로그인 */
+          }
+        }
+        router.replace(inviteCompleteHref(searchParams));
       } catch (err) {
         setError(messageFromFirebase(err));
       } finally {
         setSubmitBusy(false);
       }
     },
-    [oobCode, pw, pw2, router, searchParams],
+    [oobCode, pw, pw2, resetEmail, router, searchParams],
   );
 
   if (!isFirebaseConfigured()) {

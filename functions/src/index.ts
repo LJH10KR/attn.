@@ -198,6 +198,16 @@ export const signInAcademy = onCall(async (request) => {
 });
 
 export {
+  activateParent,
+  deactivateParent,
+  deleteParentInvite,
+  finalizeParentOnboarding,
+  getParentActivationState,
+  registerParentInvite,
+  sendParentInvitation,
+  updateParentInvite,
+} from "./parents";
+export {
   activateTeacher,
   deactivateTeacher,
   deleteTeacherInvite,

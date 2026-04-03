@@ -36,9 +36,20 @@ service cloud.firestore {
         && get(academyTeacherMemberPath(academyId)).data.status == 'active';
     }
 
-    function isAcademyParent(academyId) {
+    /** 학부모 멤버 문서 — 초청 후 문서 ID = Auth uid (초청 전에는 임시 ID) */
+    function academyParentMemberPath(academyId) {
+      return /databases/$(database)/documents/academies/$(academyId)/parents/$(request.auth.uid);
+    }
+
+    function isAcademyParentMember(academyId) {
+      return isSignedIn() && exists(academyParentMemberPath(academyId));
+    }
+
+    /** 자녀 연결 등 — 활성 학부모만 */
+    function isAcademyParentActive(academyId) {
       return isSignedIn()
-        && exists(/databases/$(database)/documents/academies/$(academyId)/parents/$(request.auth.uid));
+        && exists(academyParentMemberPath(academyId))
+        && get(academyParentMemberPath(academyId)).data.status == 'active';
     }
 
     /** 학원 포털 Custom Token — claim `role` / `academyId` (Cloud Functions 발급) */
@@ -64,7 +75,7 @@ service cloud.firestore {
         || isAcademyPortalSession(academyId)
         || isAcademyOwner(academyId)
         || isAcademyTeacherMember(academyId)
-        || isAcademyParent(academyId);
+        || isAcademyParentMember(academyId);
 
       /** 학원 생성 + 포털 비밀번호는 Cloud Functions(Admin SDK)에서만 처리 */
       allow create: if isAdmin();
@@ -89,29 +100,29 @@ service cloud.firestore {
       match /parents/{parentId} {
         allow read: if isAdmin()
           || isAcademyOwner(academyId)
-          || isAcademyTeacherActive(academyId)
-          || (isSignedIn() && request.auth.uid == parentId);
+          || isAcademyPortalSession(academyId)
+          || (isSignedIn() && resource.data.authUid == request.auth.uid);
 
-        allow create, update, delete: if isAdmin() || isAcademyOwner(academyId);
+        allow create, update, delete: if false;
       }
 
       match /students/{studentId} {
         allow read: if isAdmin()
           || isAcademyOwner(academyId)
           || isAcademyTeacherActive(academyId)
-          || (isAcademyParent(academyId) && resource.data.parentUserId == request.auth.uid);
+          || (isAcademyParentActive(academyId) && resource.data.parentUserId == request.auth.uid);
 
         allow create: if isAdmin()
           || isAcademyOwner(academyId)
           || isAcademyTeacherActive(academyId)
-          || (isAcademyParent(academyId)
+          || (isAcademyParentActive(academyId)
               && request.resource.data.keys().hasAll(['parentUserId', 'name', 'createdAt'])
               && request.resource.data.parentUserId == request.auth.uid);
 
         allow update, delete: if isAdmin()
           || isAcademyOwner(academyId)
           || isAcademyTeacherActive(academyId)
-          || (isAcademyParent(academyId) && resource.data.parentUserId == request.auth.uid);
+          || (isAcademyParentActive(academyId) && resource.data.parentUserId == request.auth.uid);
       }
     }
 

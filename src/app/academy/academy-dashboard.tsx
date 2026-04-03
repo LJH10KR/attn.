@@ -1,5 +1,6 @@
 "use client";
 
+import { AcademyParentPanel } from "@/components/academy/academy-parent-panel";
 import { AcademyTeacherPanel } from "@/components/academy/academy-teacher-panel";
 import { AcademyTreemap, type AcademyHeatmapItem } from "@/components/academy/academy-treemap";
 import { COLLECTIONS, type Academy } from "@/lib/firebase/attn-schema";
@@ -382,10 +383,7 @@ export function AcademyDashboard() {
 
         {section === "parents" ? (
           <section className="mt-6">
-            <div className={`p-8 text-center ${glassCard}`}>
-              <p className="text-sm font-medium text-[#111]">학부모 관리</p>
-              <p className="mt-2 text-xs text-neutral-500">UI는 추후 연동 예정입니다.</p>
-            </div>
+            <AcademyParentPanel academyId={academyId} />
           </section>
         ) : null}
 
