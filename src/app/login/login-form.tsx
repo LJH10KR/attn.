@@ -25,12 +25,15 @@ const ROLES: { id: LoginRole; label: string; hint: string }[] = [
   { id: "parent", label: "학부모", hint: "알림·출석" },
 ];
 
-function authErrorMessage(code: string): string {
+function authErrorMessage(code: string, role: LoginRole): string {
   switch (code) {
     case "auth/invalid-email":
       return "이메일 형식을 확인해 주세요.";
     case "auth/user-disabled":
-      return "비활성화된 계정입니다.";
+      if (role === "teacher") {
+        return "선생님 등록 대기(pending) 상태라 로그인할 수 없습니다. 학원에서 활성 처리 후 다시 시도해 주세요.";
+      }
+      return "이 계정은 현재 로그인할 수 없습니다. 학원에서 승인·활성 처리가 끝난 뒤 다시 시도하거나 문의해 주세요.";
     case "auth/user-not-found":
     case "auth/wrong-password":
     case "auth/invalid-credential":
@@ -89,6 +92,31 @@ export function LoginForm() {
       setBanner(null);
     }
   }, [searchParams]);
+
+  const checkTeacherActivationOrRedirect = useCallback(
+    async (): Promise<boolean> => {
+      // 선생님은 로그인 성공 후에도 "active 상태"가 아니면 접근을 막아야 합니다.
+      const functions = getFirebaseFunctions();
+      const fn = httpsCallable(functions, "getTeacherActivationState");
+      const res = await fn({});
+      const data = res.data as {
+        anyActive?: boolean;
+        primaryStatus?: string | null;
+        primaryAcademyId?: string | null;
+      };
+
+      if (data?.anyActive) return true;
+
+      const state = data?.primaryStatus ?? "unknown";
+      const academyId = data?.primaryAcademyId ?? "";
+      const q = new URLSearchParams();
+      q.set("state", state);
+      if (academyId) q.set("academyId", academyId);
+      router.replace(`/teacher/session?${q.toString()}`);
+      return false;
+    },
+    [router],
+  );
   const showEmailAuth = role === "owner" || role === "teacher" || role === "parent";
   const showGoogle = showEmailAuth;
   const showAcademyFields = role === "academy";
@@ -114,10 +142,14 @@ export function LoginForm() {
           router.replace("/verify-email");
           return;
         }
+        if (role === "teacher") {
+          const ok = await checkTeacherActivationOrRedirect();
+          if (!ok) return;
+        }
         router.replace(role === "owner" ? "/owner" : "/");
       } catch (err) {
         const code = err instanceof FirebaseError ? err.code : "";
-        setError(authErrorMessage(code));
+        setError(authErrorMessage(code, role));
       } finally {
         setBusy(false);
       }
@@ -141,10 +173,14 @@ export function LoginForm() {
         router.replace("/verify-email");
         return;
       }
+      if (role === "teacher") {
+        const ok = await checkTeacherActivationOrRedirect();
+        if (!ok) return;
+      }
       router.replace(role === "owner" ? "/owner" : "/");
     } catch (err) {
       const code = err instanceof FirebaseError ? err.code : "";
-      setError(authErrorMessage(code));
+      setError(authErrorMessage(code, role));
     } finally {
       setBusy(false);
     }
@@ -209,11 +245,11 @@ export function LoginForm() {
       setResetSent(true);
     } catch (err) {
       const code = err instanceof FirebaseError ? err.code : "";
-      setError(authErrorMessage(code));
+      setError(authErrorMessage(code, role));
     } finally {
       setBusy(false);
     }
-  }, [configured, email]);
+  }, [configured, email, role]);
 
   return (
     <div className="min-h-[100dvh] bg-[#f2f1eb] px-4 py-10 flex flex-col items-center justify-center pb-[max(2rem,env(safe-area-inset-bottom))]">

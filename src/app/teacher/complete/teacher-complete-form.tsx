@@ -4,7 +4,7 @@ import { FirebaseError } from "firebase/app";
 import { signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
@@ -21,9 +21,12 @@ function finalizeErrorMessage(err: FirebaseError): string {
 }
 
 export function TeacherCompleteForm() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const academyId = searchParams.get("academyId")?.trim() ?? "";
   const showVerifiedBanner = searchParams.get("verified") === "1";
+  const urlDone = searchParams.get("done") === "1";
+  const urlAlready = searchParams.get("already") === "1";
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,10 +55,22 @@ export function TeacherCompleteForm() {
       const fn = httpsCallable(getFirebaseFunctions(), "finalizeTeacherOnboarding");
       const res = await fn(academyId ? { academyId } : {});
       const data = res.data as { ok?: boolean; alreadyComplete?: boolean };
-      if (data?.alreadyComplete) {
+      const alreadyComplete = Boolean(data?.alreadyComplete);
+      if (alreadyComplete) {
         setAlready(true);
       }
       setDone(true);
+
+      const next = new URLSearchParams(searchParams.toString());
+      next.set("done", "1");
+      if (alreadyComplete) {
+        next.set("already", "1");
+      } else {
+        next.delete("already");
+      }
+      router.replace(`/teacher/complete?${next.toString()}`);
+
+      await signOut(getFirebaseAuth());
     } catch (e) {
       if (e instanceof FirebaseError) {
         setError(finalizeErrorMessage(e));
@@ -65,7 +80,7 @@ export function TeacherCompleteForm() {
     } finally {
       setBusy(false);
     }
-  }, [academyId]);
+  }, [academyId, router, searchParams]);
 
   const onSignOutOtherTeacher = useCallback(async () => {
     setError(null);
@@ -73,10 +88,15 @@ export function TeacherCompleteForm() {
       await signOut(getFirebaseAuth());
       setDone(false);
       setAlready(false);
+      const next = new URLSearchParams(searchParams.toString());
+      next.delete("done");
+      next.delete("already");
+      const q = next.toString();
+      router.replace(q ? `/teacher/complete?${q}` : "/teacher/complete");
     } catch {
       setError("로그아웃에 실패했습니다.");
     }
-  }, []);
+  }, [router, searchParams]);
 
   if (!isFirebaseConfigured()) {
     return <p className="text-sm text-neutral-600">Firebase 설정이 필요합니다.</p>;
@@ -84,6 +104,51 @@ export function TeacherCompleteForm() {
 
   if (!authReady) {
     return <p className="text-sm text-neutral-500">불러오는 중…</p>;
+  }
+
+  const showDone = done || urlDone;
+  const showAlready = already || urlAlready;
+
+  if (showDone) {
+    return (
+      <div className="space-y-3 text-sm text-neutral-700">
+        <p className="font-medium text-emerald-800">
+          {showAlready
+            ? "현재 계정은 이미 등록 대기 상태입니다."
+            : "등록 대기 상태로 전환되었습니다. 학원에서 활성 처리되면 다시 로그인할 수 있습니다."}
+        </p>
+        {showAlready ? (
+          <div className="space-y-2 rounded-xl bg-amber-500/10 px-3 py-2 text-xs text-amber-950 ring-1 ring-amber-500/20">
+            <p>
+              <strong>다른 선생님</strong> 초청을 이어서 하시는 경우, 다른 계정으로 로그인되어 있지 않은지
+              확인해 주세요. (같은 브라우저에 이전 선생님이 로그인된 채로 이메일 인증만 하면, 잘못된
+              계정으로 처리될 수 있습니다.)
+            </p>
+            {userEmail ? (
+              <p className="font-mono text-[11px] text-neutral-700">직전 로그인: {userEmail}</p>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => void onSignOutOtherTeacher()}
+              className="w-full rounded-xl border border-amber-700/30 bg-white/60 py-2 text-xs font-medium text-amber-950"
+            >
+              다른 선생님으로 진행 (로그인 화면)
+            </button>
+          </div>
+        ) : null}
+        {!showAlready ? (
+          <div className="space-y-2 text-xs text-neutral-500">
+            <p>지금부터는 앱에 다시 로그인하지 못합니다. 학원 대시보드에서는 해당 선생님이 &quot;등록대기&quot;로 표시됩니다.</p>
+          </div>
+        ) : null}
+        <Link
+          href="/login?role=teacher"
+          className="inline-flex w-full justify-center rounded-2xl border border-neutral-200 bg-white py-3 text-center text-sm font-medium text-neutral-800"
+        >
+          로그인 화면으로
+        </Link>
+      </div>
+    );
   }
 
   if (!signedIn) {
@@ -111,42 +176,6 @@ export function TeacherCompleteForm() {
         >
           선생님 로그인
         </Link>
-      </div>
-    );
-  }
-
-  if (done) {
-    return (
-      <div className="space-y-3 text-sm text-neutral-700">
-        <p className="font-medium text-emerald-800">
-          {already
-            ? "현재 로그인한 계정은 이미 등록 대기 상태입니다."
-            : "등록 대기 상태로 전환되었습니다. 학원과 확인이 끝나면 활성 처리됩니다."}
-        </p>
-        {already ? (
-          <div className="space-y-2 rounded-xl bg-amber-500/10 px-3 py-2 text-xs text-amber-950 ring-1 ring-amber-500/20">
-            <p>
-              <strong>다른 선생님</strong> 초청을 이어서 하시는 경우, 다른 계정으로 로그인되어 있지 않은지
-              확인해 주세요. (같은 브라우저에 이전 선생님이 로그인된 채로 이메일 인증만 하면, 잘못된
-              계정으로 처리될 수 있습니다.)
-            </p>
-            {userEmail ? (
-              <p className="font-mono text-[11px] text-neutral-700">지금 로그인: {userEmail}</p>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => void onSignOutOtherTeacher()}
-              className="w-full rounded-xl border border-amber-700/30 bg-white/60 py-2 text-xs font-medium text-amber-950"
-            >
-              로그아웃 후 다른 선생님으로 진행
-            </button>
-          </div>
-        ) : null}
-        {!already ? (
-          <p className="text-xs text-neutral-500">
-            학원 대시보드에서는 해당 선생님이 &quot;등록대기&quot;로 표시됩니다.
-          </p>
-        ) : null}
       </div>
     );
   }

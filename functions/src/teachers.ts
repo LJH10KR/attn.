@@ -390,6 +390,7 @@ export const finalizeTeacherOnboarding = onCall(async (request) => {
     candidates[0];
 
   if ((teacherDoc.data().status as TeacherStatus) === "pending_registration") {
+    await admin.auth().updateUser(uid, { disabled: true });
     return { ok: true, alreadyComplete: true };
   }
 
@@ -410,7 +411,62 @@ export const finalizeTeacherOnboarding = onCall(async (request) => {
     updatedAt: FieldValue.serverTimestamp(),
   });
 
+  /** 등록 대기 = 학원 활성 전까지 Auth 로그인 불가 (Firestore 규칙과 별도의 명시적 잠금) */
+  await admin.auth().updateUser(uid, { disabled: true });
+
   return { ok: true };
+});
+
+export const getTeacherActivationState = onCall({ cors: true }, async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+  }
+  const { uid } = request.auth;
+
+  const db = admin.firestore();
+  const snaps = await db.collectionGroup("teachers").where("authUid", "==", uid).limit(25).get();
+
+  if (snaps.empty) {
+    return {
+      ok: true,
+      anyActive: false,
+      primaryStatus: null as TeacherStatus | null,
+      primaryAcademyId: null as string | null,
+    };
+  }
+
+  const memberships = snaps.docs.map((d) => {
+    const status = d.data().status as TeacherStatus;
+    const academyId = teacherDocAcademyId(d.ref);
+    return { status, academyId };
+  });
+
+  const anyActive = memberships.some((m) => m.status === "active");
+  const activeAcademyIds = memberships
+    .filter((m) => m.status === "active" && typeof m.academyId === "string")
+    .map((m) => m.academyId as string);
+
+  // 활성 계정이 하나라도 있으면 통과(로그인 허용)
+  if (anyActive) {
+    return {
+      ok: true,
+      anyActive: true,
+      primaryStatus: "active" as TeacherStatus,
+      primaryAcademyId: activeAcademyIds[0] ?? null,
+    };
+  }
+
+  const order: TeacherStatus[] = ["pending_registration", "invitation_sent", "inactive", "invitation_needed"];
+  const primary = memberships.find((m) => order.includes(m.status));
+  const primaryStatus = primary?.status ?? null;
+  const primaryAcademyId = primary?.academyId ?? null;
+
+  return {
+    ok: true,
+    anyActive: false,
+    primaryStatus,
+    primaryAcademyId,
+  };
 });
 
 export const activateTeacher = onCall(async (request) => {
@@ -450,6 +506,8 @@ export const activateTeacher = onCall(async (request) => {
     academyId,
   });
 
+  await admin.auth().updateUser(teacherAuthUid, { disabled: false });
+
   return { ok: true };
 });
 
@@ -488,6 +546,8 @@ export const deactivateTeacher = onCall(async (request) => {
     academyId,
     teacherDisabled: true,
   });
+
+  await admin.auth().updateUser(teacherAuthUid, { disabled: true });
 
   return { ok: true };
 });
