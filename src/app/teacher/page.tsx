@@ -52,6 +52,7 @@ export default function TeacherDashboardPage() {
   const [listError, setListError] = useState<string | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
   const [logoutBusy, setLogoutBusy] = useState(false);
+  const [listRefreshBusy, setListRefreshBusy] = useState(false);
 
   const teacherListLoadedUidRef = useRef<string | null>(null);
   const teacherInitGenerationRef = useRef(0);
@@ -166,6 +167,32 @@ export default function TeacherDashboardPage() {
     };
   }, [router]);
 
+  const refreshAssignedStudents = useCallback(async () => {
+    const auth = getFirebaseAuth();
+    const user = auth.currentUser;
+    const aid = academyId;
+    if (!user?.uid || !aid) {
+      return;
+    }
+    setListRefreshBusy(true);
+    setListError(null);
+    try {
+      await user.getIdToken(true);
+      const listFn = httpsCallable(getFirebaseFunctions(), "listTeacherAssignedStudents");
+      const listRes = await listFn({ academyId: aid });
+      const payload = listRes.data as { students?: CallableStudentPayload[] };
+      const rawList = Array.isArray(payload?.students) ? payload.students : [];
+      const list = rawList.map((s) => studentRowFromCallablePayload(s));
+      list.sort(sortByName);
+      setStudents(list);
+      setListError(null);
+    } catch {
+      setListError("전담 학생 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setListRefreshBusy(false);
+    }
+  }, [academyId]);
+
   useEffect(() => {
     if (!academyId) return;
     const db = getFirebaseDb();
@@ -256,7 +283,17 @@ export default function TeacherDashboardPage() {
           </div>
         </header>
 
-        <h2 className="mb-3 text-sm font-semibold text-[#111]">전담 학생</h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-[#111]">전담 학생</h2>
+          <button
+            type="button"
+            onClick={() => void refreshAssignedStudents()}
+            disabled={listRefreshBusy || !academyId}
+            className="rounded-xl border border-neutral-300/80 bg-white/70 px-3 py-2 text-[11px] font-medium text-neutral-800 hover:bg-white disabled:opacity-50"
+          >
+            {listRefreshBusy ? "불러오는 중…" : "목록 새로고침"}
+          </button>
+        </div>
 
         {listError ? (
           <p className="rounded-2xl bg-red-500/10 px-3 py-2 text-center text-xs text-red-800 ring-1 ring-red-500/15">
