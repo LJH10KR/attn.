@@ -9,7 +9,8 @@ import {
   Timestamp,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   TEACHER_INVITE_TTL_MS,
   type TeacherRegistrationStatus,
@@ -123,6 +124,84 @@ function SearchIcon() {
 const actionBtnClass =
   "rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-[#222] shadow-sm hover:bg-white/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45";
 
+function DeleteTeacherConfirmModal({
+  row,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  row: TeacherRowVM;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    cancelRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  /** 테이블/카드에 transform·overflow가 있으면 fixed가 행 기준으로 잡히므로 body로 포털 */
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/45 p-4 backdrop-blur-[2px]"
+      role="presentation"
+      onClick={onCancel}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-teacher-dialog-title"
+        className={`${glassCard} w-full max-w-md p-6 shadow-2xl`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="delete-teacher-dialog-title" className="text-base font-semibold text-[#111]">
+          선생님을 삭제할까요?
+        </h2>
+        <p className="mt-3 text-sm leading-relaxed text-neutral-700">
+          <span className="font-medium text-[#111]">{row.name || "(이름 없음)"}</span>
+          {row.email ? (
+            <>
+              {" "}
+              <span className="text-neutral-500">({row.email})</span>
+            </>
+          ) : null}
+          의 정보를 삭제합니다. 연결된 인증 계정이 있으면 함께 제거될 수 있습니다. 이 작업은 되돌릴 수
+          없습니다.
+        </p>
+        <div className="mt-6 flex flex-wrap justify-end gap-2">
+          <button
+            ref={cancelRef}
+            type="button"
+            disabled={busy}
+            className="rounded-2xl border border-neutral-300/80 bg-white/80 px-4 py-2.5 text-sm font-medium text-neutral-800 hover:bg-white disabled:opacity-50"
+            onClick={onCancel}
+          >
+            취소
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            className="rounded-2xl bg-red-700 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-800 disabled:opacity-50"
+            onClick={onConfirm}
+          >
+            {busy ? "삭제 중…" : "삭제"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 type RowActionsProps = {
   academyId: string;
   row: TeacherRowVM;
@@ -140,6 +219,7 @@ function TeacherRowActions({
 }: RowActionsProps) {
   const fn = getFirebaseFunctions();
   const k = (action: string) => `${row.id}:${action}`;
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   const run = async (action: string, name: string, exec: () => Promise<unknown>) => {
     setNotice(null);
@@ -154,9 +234,27 @@ function TeacherRowActions({
     }
   };
 
+  const confirmDeleteTeacher = () => {
+    setNotice(null);
+    setBusyKey(k("del"));
+    void (async () => {
+      try {
+        const del = httpsCallable(fn, "deleteTeacherInvite");
+        await del({ academyId, teacherId: row.id });
+        setNotice("삭제 처리되었습니다.");
+        setDeleteConfirmOpen(false);
+      } catch (e) {
+        setNotice(callableErr(e));
+      } finally {
+        setBusyKey(null);
+      }
+    })();
+  };
+
+  let panel: ReactNode;
   switch (row.status) {
     case "active":
-      return (
+      panel = (
         <div className="flex flex-wrap gap-2" role="group" aria-label="선생님 작업">
           <button type="button" disabled className={actionBtnClass}>
             수정
@@ -165,12 +263,7 @@ function TeacherRowActions({
             type="button"
             disabled={busyKey !== null}
             className={actionBtnClass}
-            onClick={() =>
-              void run("del", "삭제", async () => {
-                const del = httpsCallable(fn, "deleteTeacherInvite");
-                await del({ academyId, teacherId: row.id });
-              })
-            }
+            onClick={() => setDeleteConfirmOpen(true)}
           >
             {busyKey === k("del") ? "…" : "삭제"}
           </button>
@@ -189,8 +282,9 @@ function TeacherRowActions({
           </button>
         </div>
       );
+      break;
     case "invitation_needed":
-      return (
+      panel = (
         <div className="flex flex-wrap gap-2" role="group" aria-label="선생님 작업">
           <button
             type="button"
@@ -216,19 +310,15 @@ function TeacherRowActions({
             type="button"
             disabled={busyKey !== null}
             className={actionBtnClass}
-            onClick={() =>
-              void run("del", "삭제", async () => {
-                const del = httpsCallable(fn, "deleteTeacherInvite");
-                await del({ academyId, teacherId: row.id });
-              })
-            }
+            onClick={() => setDeleteConfirmOpen(true)}
           >
             {busyKey === k("del") ? "…" : "삭제"}
           </button>
         </div>
       );
+      break;
     case "invitation_sent":
-      return (
+      panel = (
         <div className="flex flex-wrap gap-2" role="group" aria-label="선생님 작업">
           <button
             type="button"
@@ -254,19 +344,15 @@ function TeacherRowActions({
             type="button"
             disabled={busyKey !== null}
             className={actionBtnClass}
-            onClick={() =>
-              void run("del", "삭제", async () => {
-                const del = httpsCallable(fn, "deleteTeacherInvite");
-                await del({ academyId, teacherId: row.id });
-              })
-            }
+            onClick={() => setDeleteConfirmOpen(true)}
           >
             {busyKey === k("del") ? "…" : "삭제"}
           </button>
         </div>
       );
+      break;
     case "pending_registration":
-      return (
+      panel = (
         <div className="flex flex-wrap gap-2" role="group" aria-label="선생님 작업">
           <button
             type="button"
@@ -289,8 +375,9 @@ function TeacherRowActions({
           </button>
         </div>
       );
+      break;
     case "inactive":
-      return (
+      panel = (
         <div className="flex flex-wrap gap-2" role="group" aria-label="선생님 작업">
           <button type="button" disabled className={actionBtnClass}>
             수정
@@ -299,12 +386,7 @@ function TeacherRowActions({
             type="button"
             disabled={busyKey !== null}
             className={actionBtnClass}
-            onClick={() =>
-              void run("del", "삭제", async () => {
-                const del = httpsCallable(fn, "deleteTeacherInvite");
-                await del({ academyId, teacherId: row.id });
-              })
-            }
+            onClick={() => setDeleteConfirmOpen(true)}
           >
             {busyKey === k("del") ? "…" : "삭제"}
           </button>
@@ -323,9 +405,26 @@ function TeacherRowActions({
           </button>
         </div>
       );
+      break;
     default:
-      return null;
+      panel = null;
   }
+
+  return (
+    <>
+      {panel}
+      {deleteConfirmOpen ? (
+        <DeleteTeacherConfirmModal
+          row={row}
+          busy={busyKey === k("del")}
+          onCancel={() => {
+            if (busyKey !== k("del")) setDeleteConfirmOpen(false);
+          }}
+          onConfirm={confirmDeleteTeacher}
+        />
+      ) : null}
+    </>
+  );
 }
 
 function docToRow(id: string, data: Record<string, unknown>): TeacherRowVM {

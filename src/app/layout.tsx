@@ -28,8 +28,9 @@ export default async function RootLayout({
 }>) {
   const nonce = (await headers()).get("x-nonce") ?? "";
 
+  // CSP nonce: 미들웨어·RSC 스트리밍 타이밍으로 서버 HTML과 hydration 시점 속성이 어긋날 수 있음 → html에만 suppressHydrationWarning.
   return (
-    <html lang="ko" nonce={nonce}>
+    <html lang="ko" nonce={nonce || undefined} suppressHydrationWarning>
       <body
         className={`${notoSansKr.variable} ${geistMono.variable} font-sans antialiased`}
       >

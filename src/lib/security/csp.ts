@@ -16,6 +16,9 @@ const EMULATOR_CONNECT =
   "http://localhost:5001 http://localhost:8080 http://localhost:9099 " +
   "ws://127.0.0.1:8080 ws://localhost:8080";
 
+const EMULATOR_FRAME =
+  "http://127.0.0.1:9099 http://localhost:9099";
+
 export function generateCspNonce(): string {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
@@ -41,7 +44,7 @@ export function buildContentSecurityPolicy(opts: { nonce: string; isDev: boolean
     "img-src 'self' data: blob: https:",
     "font-src 'self' data:",
     `connect-src 'self' ${FIREBASE_CONNECT}${isDev ? ` ${EMULATOR_CONNECT}` : ""}`,
-    "frame-src 'self' https://accounts.google.com https://www.google.com https://www.gstatic.com https://*.firebaseapp.com https://*.google.com",
+    `frame-src 'self' https://accounts.google.com https://www.google.com https://www.gstatic.com https://*.firebaseapp.com https://*.google.com${isDev ? ` ${EMULATOR_FRAME}` : ""}`,
   ];
 
   if (!isDev) {
