@@ -5,8 +5,8 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "dev:emulator": "next dev",
-    "emulators": "yarn --cwd functions build && cross-env NODE_OPTIONS= firebase emulators:start --import=./.firebase/emulator-data --export-on-exit=./.firebase/emulator-data",
-    "emulators:fresh": "yarn --cwd functions build && cross-env NODE_OPTIONS= firebase emulators:start",
+    "emulators": "npm --prefix functions run build && cross-env NODE_OPTIONS= firebase emulators:start --import=./.firebase/emulator-data --export-on-exit=./.firebase/emulator-data",
+    "emulators:fresh": "npm --prefix functions run build && cross-env NODE_OPTIONS= firebase emulators:start",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
