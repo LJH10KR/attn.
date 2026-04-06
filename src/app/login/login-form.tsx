@@ -1,18 +1,21 @@
 "use client";
 
 import { FirebaseError } from "firebase/app";
+import type { User } from "firebase/auth";
 import {
   GoogleAuthProvider,
+  onAuthStateChanged,
   sendPasswordResetEmail,
   signInWithCustomToken,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signOut,
 } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
 import { GoogleMark } from "@/components/auth/google-mark";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { upsertOwnerProfile } from "@/lib/firebase/owner-profile";
@@ -79,8 +82,20 @@ export function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [resetSent, setResetSent] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
+  const [sessionUser, setSessionUser] = useState<User | null>(null);
+  const [logoutBusy, setLogoutBusy] = useState(false);
 
   const configured = isFirebaseConfigured();
+
+  useEffect(() => {
+    if (!configured) {
+      setSessionUser(null);
+      return;
+    }
+    const auth = getFirebaseAuth();
+    const unsub = onAuthStateChanged(auth, (u) => setSessionUser(u));
+    return () => unsub();
+  }, [configured]);
 
   useEffect(() => {
     const r = searchParams.get("role");
@@ -169,6 +184,81 @@ export function LoginForm() {
   const showEmailAuth = role === "owner" || role === "teacher" || role === "parent";
   const showGoogle = showEmailAuth;
   const showAcademyFields = role === "academy";
+  const hasSession = Boolean(sessionUser);
+  const sessionBlocked = hasSession;
+  const sessionLabel = useMemo(() => {
+    if (!sessionUser) return "";
+    return (
+      sessionUser.email ??
+      sessionUser.phoneNumber ??
+      sessionUser.displayName?.trim() ??
+      "현재 계정"
+    );
+  }, [sessionUser]);
+
+  const onLogoutForSwitch = useCallback(async () => {
+    if (!configured) return;
+    setLogoutBusy(true);
+    setError(null);
+    setResetSent(false);
+    try {
+      await signOut(getFirebaseAuth());
+    } catch (err) {
+      const code = err instanceof FirebaseError ? err.code : "";
+      setError(code ? authErrorMessage(code, role) : "로그아웃에 실패했습니다.");
+    } finally {
+      setLogoutBusy(false);
+    }
+  }, [configured, role]);
+
+  const onContinueAsSession = useCallback(async () => {
+    setError(null);
+    if (!configured) {
+      setError("Firebase 환경 변수를 먼저 설정해 주세요.");
+      return;
+    }
+    const auth = getFirebaseAuth();
+    const u = auth.currentUser;
+    if (!u) return;
+    setBusy(true);
+    try {
+      if (showEmailAuth && !u.emailVerified) {
+        router.replace("/verify-email");
+        return;
+      }
+      if (role === "owner") {
+        await upsertOwnerProfile(u);
+        router.replace("/owner");
+        return;
+      }
+      if (role === "teacher") {
+        const ok = await checkTeacherActivationOrRedirect();
+        if (ok) router.replace("/teacher");
+        return;
+      }
+      if (role === "parent") {
+        const ok = await checkParentActivationOrRedirect();
+        if (ok) router.replace("/parent");
+        return;
+      }
+      if (role === "academy") {
+        router.replace("/academy");
+        return;
+      }
+    } catch (err) {
+      const code = err instanceof FirebaseError ? err.code : "";
+      setError(authErrorMessage(code, role));
+    } finally {
+      setBusy(false);
+    }
+  }, [
+    checkParentActivationOrRedirect,
+    checkTeacherActivationOrRedirect,
+    configured,
+    role,
+    router,
+    showEmailAuth,
+  ]);
 
   const onEmailLogin = useCallback(
     async (e: React.FormEvent) => {
@@ -181,6 +271,10 @@ export function LoginForm() {
       }
       if (!email.trim() || !password) {
         setError("이메일과 비밀번호를 입력해 주세요.");
+        return;
+      }
+      if (getFirebaseAuth().currentUser) {
+        setError("이미 로그인된 세션이 있습니다. 아래에서 이동하거나 로그아웃한 뒤 다시 시도해 주세요.");
         return;
       }
       setBusy(true);
@@ -237,6 +331,10 @@ export function LoginForm() {
       setError("Firebase 환경 변수를 먼저 설정해 주세요.");
       return;
     }
+    if (getFirebaseAuth().currentUser) {
+      setError("이미 로그인된 세션이 있습니다. 아래에서 이동하거나 로그아웃한 뒤 다시 시도해 주세요.");
+      return;
+    }
     setBusy(true);
     try {
       const auth = getFirebaseAuth();
@@ -284,6 +382,10 @@ export function LoginForm() {
       }
       if (!academyId.trim() || !password) {
         setError("학원 ID와 비밀번호를 입력해 주세요.");
+        return;
+      }
+      if (getFirebaseAuth().currentUser) {
+        setError("다른 계정으로 학원 로그인하려면 먼저 로그아웃해 주세요.");
         return;
       }
       setBusy(true);
@@ -365,7 +467,7 @@ export function LoginForm() {
             <button
               key={r.id}
               type="button"
-              disabled={busy}
+              disabled={busy || logoutBusy}
               onClick={() => {
                 setRole(r.id);
                 setError(null);
@@ -384,6 +486,38 @@ export function LoginForm() {
             </button>
           ))}
         </div>
+
+        {hasSession ? (
+          <div className="mt-5 rounded-2xl border border-amber-200/70 bg-amber-50/80 px-3.5 py-3 text-sm text-amber-950 ring-1 ring-amber-500/15 backdrop-blur-sm">
+            <p className="font-medium">이미 로그인된 상태입니다</p>
+            <p className="mt-1 text-xs text-amber-900/90">
+              <span className="break-all font-mono text-[11px]">{sessionLabel}</span>
+            </p>
+            <p className="mt-2 text-xs leading-relaxed text-amber-900/85">
+              {role === "academy"
+                ? "다른 학원 ID로 로그인하거나 Google·이메일 계정으로 전환하려면 먼저 로그아웃해 주세요."
+                : "다른 Google 계정·역할로 로그인하려면 먼저 로그아웃해 주세요. 현재 세션으로 바로 들어가려면 아래를 눌러 주세요."}
+            </p>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:justify-stretch">
+              <button
+                type="button"
+                disabled={busy || logoutBusy || !configured}
+                onClick={onContinueAsSession}
+                className="flex-1 rounded-xl bg-[#222] px-3 py-2.5 text-xs font-medium text-white shadow-sm transition hover:bg-[#333] active:scale-[0.99] disabled:opacity-50"
+              >
+                {busy ? "처리 중…" : "선택한 역할 화면으로 이동"}
+              </button>
+              <button
+                type="button"
+                disabled={busy || logoutBusy || !configured}
+                onClick={onLogoutForSwitch}
+                className="flex-1 rounded-xl border border-amber-800/20 bg-white/60 px-3 py-2.5 text-xs font-medium text-amber-950 transition hover:bg-white/90 active:scale-[0.99] disabled:opacity-50"
+              >
+                {logoutBusy ? "로그아웃 중…" : "로그아웃 후 전환"}
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {banner ? (
           <p className="mt-5 rounded-2xl bg-sky-500/10 px-3 py-2.5 text-center text-sm text-sky-950 ring-1 ring-sky-500/20">
@@ -443,7 +577,7 @@ export function LoginForm() {
             </div>
             <button
               type="submit"
-              disabled={busy || !configured}
+              disabled={busy || !configured || sessionBlocked}
               className="mt-2 w-full rounded-2xl bg-[#222] py-3.5 text-[15px] font-medium text-white shadow-[0_8px_24px_rgba(0,0,0,0.18)] transition hover:bg-[#333] active:scale-[0.99] disabled:opacity-50"
             >
               {busy ? "처리 중…" : "로그인"}
@@ -488,7 +622,7 @@ export function LoginForm() {
             </div>
             <button
               type="submit"
-              disabled={busy || !configured}
+              disabled={busy || !configured || sessionBlocked}
               className="mt-2 w-full rounded-2xl bg-[#222] py-3.5 text-[15px] font-medium text-white shadow-[0_8px_24px_rgba(0,0,0,0.18)] transition hover:bg-[#333] active:scale-[0.99] disabled:opacity-50"
             >
               {busy ? "처리 중…" : "로그인"}
@@ -507,7 +641,7 @@ export function LoginForm() {
             </div>
             <button
               type="button"
-              disabled={busy || !configured}
+              disabled={busy || !configured || sessionBlocked}
               onClick={onGoogleLogin}
               className="flex w-full items-center justify-center gap-3 rounded-2xl border border-neutral-300/70 bg-white/60 py-3.5 text-[15px] font-medium text-[#222] shadow-sm backdrop-blur-md transition hover:bg-white/85 active:scale-[0.99] disabled:opacity-50"
             >
@@ -523,7 +657,7 @@ export function LoginForm() {
               비밀번호를 잊으셨나요?{" "}
               <button
                 type="button"
-                disabled={busy || !configured}
+                disabled={busy || !configured || sessionBlocked}
                 onClick={onPasswordReset}
                 className="font-medium text-[#4a90e2] underline-offset-2 hover:underline disabled:opacity-50"
               >
