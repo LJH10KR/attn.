@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { LoginForm } from "./login-form";
+import { LoginSessionAutoRedirect } from "./login-session-auto-redirect";
 
 export const metadata: Metadata = {
   title: "로그인 — attn.",
@@ -16,6 +17,7 @@ export default function LoginPage() {
         </div>
       }
     >
+      <LoginSessionAutoRedirect />
       <LoginForm />
     </Suspense>
   );
