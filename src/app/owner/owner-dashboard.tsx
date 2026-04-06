@@ -16,6 +16,7 @@ import { signOut } from "firebase/auth";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
@@ -405,6 +406,16 @@ export function OwnerDashboard() {
         onHome={() => router.push("/")}
         showBellOnTitle
         showBellInBottomBar={false}
+        bottomTabs={[
+          {
+            id: "home",
+            label: "홈",
+            showLabel: false,
+            icon: (active: boolean) => <AttnTabLogo active={active} />,
+            active: true,
+            onSelect: () => router.push("/"),
+          },
+        ]}
         onLogout={() => void onLogout()}
         profile={authProfile}
       />
@@ -493,11 +504,11 @@ export function OwnerDashboard() {
           </ul>
         )}
 
-        <p className="mt-8 text-center text-xs text-neutral-500">
+        {/* <p className="mt-8 text-center text-xs text-neutral-500">
           <Link href="/" className="underline-offset-2 hover:underline">
             홈으로
           </Link>
-        </p>
+        </p> */}
       </main>
 
       <DashboardBottomScrim />

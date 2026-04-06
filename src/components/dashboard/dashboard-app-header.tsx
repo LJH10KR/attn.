@@ -223,6 +223,16 @@ export function DashboardAppHeader({
                   </button>
                 );
               })}
+              {Array.from(
+                { length: Math.max(0, 4 - bottomTabs.length) },
+                (_, i) => (
+                  <div
+                    key={`bottom-nav-slot-pad-${i}`}
+                    className="min-h-0 min-w-0"
+                    aria-hidden
+                  />
+                ),
+              )}
             </nav>
           ) : (
             <>

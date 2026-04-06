@@ -44,7 +44,56 @@ function scoreToHeatColor(score: number): { bg: string; fg: string } {
 
 type TreemapRoot = { children: AcademyHeatmapItem[] };
 
-export function AcademyTreemap({ items }: { items: AcademyHeatmapItem[] }) {
+type AcademyTreemapProps = {
+  items: AcademyHeatmapItem[];
+  /**
+   * true면 카드 안에 끼워 넣을 때: 차트만 테두리 없이 넓게 쓰고, 범례·캡션은 아래에 붙음.
+   */
+  embedded?: boolean;
+  /**
+   * true면 범례·캡션을 차트 안이 아니라 렌더하지 않음 — `AcademyTreemapFooter`를 카드 바깥에 배치.
+   */
+  footerOutside?: boolean;
+  /** 범례 아래 작은 안내 문구 (`footerOutside`이면 무시, 푸터 컴포넌트에 전달) */
+  caption?: string;
+};
+
+/** 히트맵 카드 바로 아래: 범례 + 선택 캡션 */
+export function AcademyTreemapFooter({
+  caption,
+  className = "",
+}: {
+  caption?: string;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 px-1 py-1.5 text-[9px] text-neutral-600 dark:text-neutral-400">
+        <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-emerald-800 dark:text-emerald-200/90">
+          <span className="h-2 w-2 rounded-sm bg-emerald-600" /> 양호
+        </span>
+        <span className="inline-flex items-center gap-1 rounded-md bg-neutral-400/20 px-1.5 py-0.5 text-neutral-600 dark:text-neutral-300">
+          <span className="h-2 w-2 rounded-sm bg-zinc-500" /> 보통
+        </span>
+        <span className="inline-flex items-center gap-1 rounded-md bg-red-500/15 px-1.5 py-0.5 text-red-800 dark:text-red-200/90">
+          <span className="h-2 w-2 rounded-sm bg-red-600" /> 주의
+        </span>
+      </div>
+      {caption ? (
+        <p className="px-1 pt-0.5 text-center text-[10px] leading-relaxed text-neutral-500 dark:text-neutral-400">
+          {caption}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+export function AcademyTreemap({
+  items,
+  embedded = false,
+  footerOutside = false,
+  caption,
+}: AcademyTreemapProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 320, h: 280 });
 
@@ -59,22 +108,27 @@ export function AcademyTreemap({ items }: { items: AcademyHeatmapItem[] }) {
         return;
       }
       const w = Math.floor(cr.width);
-      const h = Math.max(200, Math.floor((w * 9) / 16));
+      const h = embedded
+        ? Math.max(280, Math.floor((w * 5) / 8))
+        : Math.max(200, Math.floor((w * 9) / 16));
       setSize({ w, h });
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [embedded]);
 
   const leaves = useMemo(() => {
     const layout = treemap<TreemapRoot | AcademyHeatmapItem>()
       .tile(treemapSquarify)
       .size([size.w, size.h])
-      .paddingOuter(3)
+      /* embedded: 카드 가장자리와 타일 사이 빈 띠 제거 */
+      .paddingOuter(embedded ? 0 : 3)
       .paddingInner(2)
       .round(true);
 
-    const root = hierarchy<TreemapRoot | AcademyHeatmapItem>({ children: items })
+    const root = hierarchy<TreemapRoot | AcademyHeatmapItem>({
+      children: items,
+    })
       .sum((d) => {
         if ("children" in d && d.children) {
           return 0;
@@ -85,12 +139,20 @@ export function AcademyTreemap({ items }: { items: AcademyHeatmapItem[] }) {
 
     layout(root);
     return root.leaves() as HierarchyRectangularNode<AcademyHeatmapItem>[];
-  }, [items, size.w, size.h]);
+  }, [embedded, items, size.w, size.h]);
 
   return (
     <div ref={wrapRef} className="w-full">
       <div
-        className="relative w-full overflow-hidden rounded-2xl border border-[#1a1a1a]/25 bg-[#0f0f0f]/[0.03]"
+        className={
+          embedded
+            ? footerOutside
+              ? /* 카드 전체가 차트만 — glass-card와 동일 반경 */
+                "relative w-full overflow-hidden rounded-[1.75rem] bg-neutral-400/10 dark:bg-white/[0.06]"
+              : /* glass-card(1.75rem) 상단 + 내부 푸터 */
+                "relative w-full overflow-hidden rounded-t-[1.75rem] bg-neutral-400/10 dark:bg-white/[0.06]"
+            : "relative w-full overflow-hidden rounded-2xl border border-[#1a1a1a]/25 bg-[#0f0f0f]/[0.03]"
+        }
         style={{ height: size.h }}
       >
         {leaves.map((leaf) => {
@@ -135,17 +197,36 @@ export function AcademyTreemap({ items }: { items: AcademyHeatmapItem[] }) {
           );
         })}
       </div>
-      <div className="mt-3 flex flex-wrap items-center justify-end gap-2 text-[10px] text-neutral-500">
-        <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-emerald-800">
-          <span className="h-2 w-2 rounded-sm bg-emerald-600" /> 양호
-        </span>
-        <span className="inline-flex items-center gap-1 rounded-md bg-neutral-400/20 px-1.5 py-0.5 text-neutral-600">
-          <span className="h-2 w-2 rounded-sm bg-zinc-500" /> 보통
-        </span>
-        <span className="inline-flex items-center gap-1 rounded-md bg-red-500/15 px-1.5 py-0.5 text-red-800">
-          <span className="h-2 w-2 rounded-sm bg-red-600" /> 주의
-        </span>
-      </div>
+      {embedded && footerOutside ? null : (
+        <>
+          <div
+            className={
+              embedded
+                ? "flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-t border-neutral-200/70 px-3 py-2 text-[9px] text-neutral-600 dark:border-white/10 dark:text-neutral-400"
+                : "mt-3 flex flex-wrap items-center justify-end gap-2 text-[10px] text-neutral-500"
+            }
+          >
+            <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-emerald-800 dark:text-emerald-200/90">
+              <span className="h-2 w-2 rounded-sm bg-emerald-600" /> 양호
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-md bg-neutral-400/20 px-1.5 py-0.5 text-neutral-600 dark:text-neutral-300">
+              <span className="h-2 w-2 rounded-sm bg-zinc-500" /> 보통
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-md bg-red-500/15 px-1.5 py-0.5 text-red-800 dark:text-red-200/90">
+              <span className="h-2 w-2 rounded-sm bg-red-600" /> 주의
+            </span>
+          </div>
+          {caption ? (
+            <p
+              className={`px-3 text-center text-[10px] leading-relaxed text-neutral-500 dark:text-neutral-400 ${
+                embedded ? "pb-3 pt-1" : "mt-2 pb-1"
+              }`}
+            >
+              {caption}
+            </p>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }

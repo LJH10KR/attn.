@@ -5,6 +5,7 @@ import { AcademyStudentPanel } from "@/components/academy/academy-student-panel"
 import { AcademyTeacherPanel } from "@/components/academy/academy-teacher-panel";
 import {
   AcademyTreemap,
+  AcademyTreemapFooter,
   type AcademyHeatmapItem,
 } from "@/components/academy/academy-treemap";
 import { COLLECTIONS, type Academy } from "@/lib/firebase/attn-schema";
@@ -16,10 +17,13 @@ import {
   doc,
   getCountFromServer,
   getDoc,
+  query,
+  where,
 } from "firebase/firestore";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
@@ -36,44 +40,104 @@ function parseSection(raw: string | null): AcademySection {
   return "home";
 }
 
-/** 목업과 동일한 분포·라벨. 이후 API·Firestore 집계로 교체 예정 */
-const PLACEHOLDER_HEATMAP: AcademyHeatmapItem[] = [
-  {
-    id: "attendance",
-    label: "출근 처리 요청",
-    value: 10,
-    score: -0.72,
-    metric: "10건",
-  },
-  {
-    id: "teachers-pending",
-    label: "등록 대기 중 선생님",
-    value: 2,
-    score: -0.15,
-    metric: "2명",
-  },
-  {
-    id: "teachers-invite",
-    label: "초청 필요 선생님",
-    value: 1,
-    score: -0.35,
-    metric: "1명",
-  },
-  {
-    id: "parents-pending",
-    label: "등록 대기 중 학부모",
-    value: 5,
-    score: -0.12,
-    metric: "5명",
-  },
-  {
-    id: "parents-invite",
-    label: "초청 필요 학부모",
-    value: 7,
-    score: -0.55,
-    metric: "7명",
-  },
-];
+function cautionScore(n: number): number {
+  return -Math.min(0.92, 0.14 + n * 0.055);
+}
+
+function mildConcernScore(n: number): number {
+  return -Math.min(0.78, 0.08 + n * 0.04);
+}
+
+type AcademyHeatmapCounts = {
+  students: number;
+  teachersPending: number;
+  teachersInviteNeeded: number;
+  teachersInviteSent: number;
+  parentsPending: number;
+  parentsInviteNeeded: number;
+  parentsInviteSent: number;
+};
+
+function buildAcademyHeatmapItems(
+  c: AcademyHeatmapCounts,
+): AcademyHeatmapItem[] {
+  const items: AcademyHeatmapItem[] = [];
+  if (c.students > 0) {
+    items.push({
+      id: "students",
+      label: "재원 학생",
+      value: c.students,
+      metric: `${c.students}명`,
+      score: Math.min(0.82, 0.4 + Math.min(c.students, 50) * 0.008),
+    });
+  }
+  if (c.teachersPending > 0) {
+    items.push({
+      id: "teachers-pending",
+      label: "등록 대기 중 선생님",
+      value: c.teachersPending,
+      metric: `${c.teachersPending}명`,
+      score: cautionScore(c.teachersPending),
+    });
+  }
+  if (c.teachersInviteNeeded > 0) {
+    items.push({
+      id: "teachers-invite",
+      label: "초청 필요 선생님",
+      value: c.teachersInviteNeeded,
+      metric: `${c.teachersInviteNeeded}명`,
+      score: cautionScore(c.teachersInviteNeeded + 1),
+    });
+  }
+  if (c.teachersInviteSent > 0) {
+    items.push({
+      id: "teachers-invite-sent",
+      label: "가입 대기 선생님",
+      value: c.teachersInviteSent,
+      metric: `${c.teachersInviteSent}명`,
+      score: mildConcernScore(c.teachersInviteSent),
+    });
+  }
+  if (c.parentsPending > 0) {
+    items.push({
+      id: "parents-pending",
+      label: "등록 대기 중 학부모",
+      value: c.parentsPending,
+      metric: `${c.parentsPending}명`,
+      score: cautionScore(c.parentsPending),
+    });
+  }
+  if (c.parentsInviteNeeded > 0) {
+    items.push({
+      id: "parents-invite",
+      label: "초청 필요 학부모",
+      value: c.parentsInviteNeeded,
+      metric: `${c.parentsInviteNeeded}명`,
+      score: cautionScore(c.parentsInviteNeeded + 1),
+    });
+  }
+  if (c.parentsInviteSent > 0) {
+    items.push({
+      id: "parents-invite-sent",
+      label: "가입 대기 학부모",
+      value: c.parentsInviteSent,
+      metric: `${c.parentsInviteSent}명`,
+      score: mildConcernScore(c.parentsInviteSent),
+    });
+  }
+  if (items.length === 0) {
+    return [
+      {
+        id: "heatmap-empty",
+        label: "표시할 운영 지표가 없습니다",
+        value: 1,
+        metric: "—",
+        score: 0,
+      },
+    ];
+  }
+  return items;
+}
 
 const SUMMARY_STAT_ROWS = [
   { key: "teachers" as const, label: "선생님" },
@@ -86,25 +150,6 @@ type AcademySummaryCounts = {
   parents: number;
   students: number;
 };
-
-/** 하단 탭 홈 슬롯 ? `public/attn-tab-logo.svg`를 준비한 로고로 교체해 사용하세요(동일 경로·PNG 등으로 덮어쓰기 가능). */
-const ATTN_TAB_LOGO_SRC = "/attn_tab_logo.svg";
-
-function AttnTabLogo({ active }: { active: boolean }) {
-  return (
-    // eslint-disable-next-line @next/next/no-img-element -- 정적 public 에셋
-    <img
-      src={ATTN_TAB_LOGO_SRC}
-      alt=""
-      width={78}
-      height={26}
-      draggable={false}
-      className={`h-[26px] w-[78px] max-h-[26px] max-w-full object-contain object-center ${
-        active ? "opacity-100" : "opacity-88"
-      }`}
-    />
-  );
-}
 
 function IconMonitor({ active }: { active?: boolean }) {
   const stroke = active ? "#171717" : "#666";
@@ -195,6 +240,10 @@ export function AcademyDashboard() {
   const [summaryCountsError, setSummaryCountsError] = useState<string | null>(
     null,
   );
+  const [heatmapItems, setHeatmapItems] = useState<AcademyHeatmapItem[] | null>(
+    null,
+  );
+  const [heatmapError, setHeatmapError] = useState<string | null>(null);
 
   const fromOwner = searchParams.get("from") === "owner";
   const queryAcademyId = searchParams.get("id")?.trim() ?? "";
@@ -353,6 +402,84 @@ export function AcademyDashboard() {
         if (!cancelled) {
           setSummaryCounts(null);
           setSummaryCountsError("요약 인원을 불러오지 못했습니다.");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [gate, academyId, section]);
+
+  useEffect(() => {
+    if (gate !== "ready" || !academyId || section !== "home") {
+      return;
+    }
+    let cancelled = false;
+    setHeatmapError(null);
+    const db = getFirebaseDb();
+    const sub = (name: "teachers" | "parents" | "students") =>
+      collection(db, COLLECTIONS.academies, academyId, name);
+    (async () => {
+      try {
+        const [stu, tp, tiNeed, tiSent, pp, piNeed, piSent] = await Promise.all(
+          [
+            getCountFromServer(sub("students")),
+            getCountFromServer(
+              query(
+                sub("teachers"),
+                where("status", "==", "pending_registration"),
+              ),
+            ),
+            getCountFromServer(
+              query(
+                sub("teachers"),
+                where("status", "==", "invitation_needed"),
+              ),
+            ),
+            getCountFromServer(
+              query(sub("teachers"), where("status", "==", "invitation_sent")),
+            ),
+            getCountFromServer(
+              query(
+                sub("parents"),
+                where("status", "==", "pending_registration"),
+              ),
+            ),
+            getCountFromServer(
+              query(sub("parents"), where("status", "==", "invitation_needed")),
+            ),
+            getCountFromServer(
+              query(sub("parents"), where("status", "==", "invitation_sent")),
+            ),
+          ],
+        );
+        if (!cancelled) {
+          setHeatmapItems(
+            buildAcademyHeatmapItems({
+              students: stu.data().count,
+              teachersPending: tp.data().count,
+              teachersInviteNeeded: tiNeed.data().count,
+              teachersInviteSent: tiSent.data().count,
+              parentsPending: pp.data().count,
+              parentsInviteNeeded: piNeed.data().count,
+              parentsInviteSent: piSent.data().count,
+            }),
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setHeatmapError("히트맵 데이터를 불러오지 못했습니다.");
+          setHeatmapItems(
+            buildAcademyHeatmapItems({
+              students: 0,
+              teachersPending: 0,
+              teachersInviteNeeded: 0,
+              teachersInviteSent: 0,
+              parentsPending: 0,
+              parentsInviteNeeded: 0,
+              parentsInviteSent: 0,
+            }),
+          );
         }
       }
     })();
@@ -527,13 +654,28 @@ export function AcademyDashboard() {
             <h2 className="mb-3 text-sm font-semibold text-foreground">
               히트맵
             </h2>
-            <div className={`p-4 ${glassCard}`}>
-              <AcademyTreemap items={PLACEHOLDER_HEATMAP} />
-              <p className="mt-3 text-[10px] leading-relaxed text-neutral-500">
-                타일 면적은 건수(볼륨), 색상은 상태 지표를 나타냅니다. 실제
-                지표는 추후 연동됩니다.
-              </p>
+            <div className={`overflow-hidden ${glassCard} p-0`}>
+              {heatmapItems === null ? (
+                <div className="py-14 text-center text-sm text-neutral-500">
+                  히트맵을 불러오는 중…
+                </div>
+              ) : (
+                <>
+                  {heatmapError ? (
+                    <p className="px-3 pt-3 text-center text-[10px] text-red-600 dark:text-red-400">
+                      {heatmapError}
+                    </p>
+                  ) : null}
+                  <AcademyTreemap items={heatmapItems} embedded footerOutside />
+                </>
+              )}
             </div>
+            {heatmapItems !== null ? (
+              <AcademyTreemapFooter
+                className="mt-1.5"
+                caption="타일 면적은 건수(볼륨), 색상은 상태 지표를 나타냅니다."
+              />
+            ) : null}
           </section>
         ) : null}
 

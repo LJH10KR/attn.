@@ -6,6 +6,7 @@ import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { docToStudentRow, type StudentRowVM } from "@/components/academy/academy-student-panel";
+import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
@@ -312,6 +313,16 @@ export default function ParentDashboardPage() {
           onHome={() => router.push("/")}
           showBellOnTitle
           showBellInBottomBar={false}
+          bottomTabs={[
+            {
+              id: "home",
+              label: "홈",
+              showLabel: false,
+              icon: (active: boolean) => <AttnTabLogo active={active} />,
+              active: true,
+              onSelect: () => router.push("/"),
+            },
+          ]}
           onLogout={() => void onLogout()}
           logoutBusy={logoutBusy}
           profile={authProfile}
