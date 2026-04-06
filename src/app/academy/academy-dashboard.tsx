@@ -11,7 +11,12 @@ import { COLLECTIONS, type Academy } from "@/lib/firebase/attn-schema";
 import { signOut } from "firebase/auth";
 import { getFirebaseAuth, getFirebaseDb } from "@/lib/firebase/client-app";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
-import { doc, getDoc } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getCountFromServer,
+  getDoc,
+} from "firebase/firestore";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -70,11 +75,17 @@ const PLACEHOLDER_HEATMAP: AcademyHeatmapItem[] = [
   },
 ];
 
-const STAT_COUNTS = [
-  { key: "teachers" as const, label: "선생님", value: "7" },
-  { key: "parents" as const, label: "학부모", value: "30" },
-  { key: "students" as const, label: "학생", value: "70" },
-];
+const SUMMARY_STAT_ROWS = [
+  { key: "teachers" as const, label: "선생님" },
+  { key: "parents" as const, label: "학부모" },
+  { key: "students" as const, label: "학생" },
+] as const;
+
+type AcademySummaryCounts = {
+  teachers: number;
+  parents: number;
+  students: number;
+};
 
 /** 하단 탭 홈 슬롯 ? `public/attn-tab-logo.svg`를 준비한 로고로 교체해 사용하세요(동일 경로·PNG 등으로 덮어쓰기 가능). */
 const ATTN_TAB_LOGO_SRC = "/attn_tab_logo.svg";
@@ -179,6 +190,11 @@ export function AcademyDashboard() {
   /** 학원 ID·비밀번호 포털 로그인(커스텀 토큰) 세션 ? 오너 대시보드에서 연 경로와 구분 */
   const [isAcademyPortalSession, setIsAcademyPortalSession] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
+  const [summaryCounts, setSummaryCounts] =
+    useState<AcademySummaryCounts | null>(null);
+  const [summaryCountsError, setSummaryCountsError] = useState<string | null>(
+    null,
+  );
 
   const fromOwner = searchParams.get("from") === "owner";
   const queryAcademyId = searchParams.get("id")?.trim() ?? "";
@@ -304,6 +320,47 @@ export function AcademyDashboard() {
     return () => unsub();
   }, [configured, resolveSession]);
 
+  useEffect(() => {
+    if (gate !== "ready" || !academyId) {
+      setSummaryCounts(null);
+      setSummaryCountsError(null);
+      return;
+    }
+    let cancelled = false;
+    setSummaryCountsError(null);
+    const db = getFirebaseDb();
+    (async () => {
+      try {
+        const [teachersSnap, parentsSnap, studentsSnap] = await Promise.all([
+          getCountFromServer(
+            collection(db, COLLECTIONS.academies, academyId, "teachers"),
+          ),
+          getCountFromServer(
+            collection(db, COLLECTIONS.academies, academyId, "parents"),
+          ),
+          getCountFromServer(
+            collection(db, COLLECTIONS.academies, academyId, "students"),
+          ),
+        ]);
+        if (!cancelled) {
+          setSummaryCounts({
+            teachers: teachersSnap.data().count,
+            parents: parentsSnap.data().count,
+            students: studentsSnap.data().count,
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setSummaryCounts(null);
+          setSummaryCountsError("요약 인원을 불러오지 못했습니다.");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [gate, academyId, section]);
+
   if (!configured) {
     return (
       <div className="min-h-[100dvh] bg-background flex items-center justify-center px-4">
@@ -377,7 +434,8 @@ export function AcademyDashboard() {
         bottomTabs={[
           {
             id: "home",
-            label: "홈",
+            label: "요약",
+            showLabel: false,
             icon: (active: boolean) => <AttnTabLogo active={active} />,
             active: section === "home",
             onSelect: () => navigateSection("home"),
@@ -416,9 +474,15 @@ export function AcademyDashboard() {
       <main className="mx-auto max-w-lg px-4 pt-4">
         <h2 className="mb-2 text-sm font-semibold text-foreground">요약</h2>
         <div className="grid grid-cols-3 gap-2">
-          {STAT_COUNTS.map((c) => {
+          {SUMMARY_STAT_ROWS.map((c) => {
             const isActive = section === c.key;
             const isHomeCards = section === "home";
+            const countValue =
+              summaryCounts !== null
+                ? String(summaryCounts[c.key])
+                : summaryCountsError
+                  ? "—"
+                  : "…";
             return (
               <button
                 key={c.key}
@@ -446,12 +510,17 @@ export function AcademyDashboard() {
                       : "text-foreground"
                   }`}
                 >
-                  {c.value}
+                  {countValue}
                 </span>
               </button>
             );
           })}
         </div>
+        {summaryCountsError ? (
+          <p className="mt-2 text-center text-[10px] text-red-600 dark:text-red-400">
+            {summaryCountsError}
+          </p>
+        ) : null}
 
         {section === "home" ? (
           <section className="mt-6">

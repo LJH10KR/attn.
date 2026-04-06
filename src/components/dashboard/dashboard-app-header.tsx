@@ -11,10 +11,13 @@ export type DashboardHeaderMenuAction = {
 
 export type DashboardHeaderBottomTab = {
   id: string;
+  /** 접근성(aria-label 등)용 — `showLabel: false`일 때도 유지하는 것을 권장 */
   label: string;
   icon: (active: boolean) => ReactNode;
   active: boolean;
   onSelect: () => void;
+  /** false이면 아래 한 줄 라벨을 렌더하지 않음(로고만 등) */
+  showLabel?: boolean;
 };
 
 export type DashboardAppHeaderProps = {
@@ -192,28 +195,34 @@ export function DashboardAppHeader({
               className="grid h-full w-full grid-cols-4 items-stretch gap-px"
               aria-label="대시보드 메뉴"
             >
-              {bottomTabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={tab.onSelect}
-                  className={`flex min-h-0 min-w-0 flex-col items-center justify-center gap-0 px-0.5 py-0 transition ${
-                    tab.active
-                      ? "m-[2px] rounded-full bg-[#cccccc]/70 text-neutral-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.35)]"
-                      : "m-0 text-neutral-700"
-                  }`}
-                  aria-current={tab.active ? "page" : undefined}
-                >
-                  <span
-                    className={`flex items-center justify-center ${tab.id === "home" ? "h-7 w-[5rem] min-w-[5rem] shrink-0" : "h-7 w-7"}`}
+              {bottomTabs.map((tab) => {
+                const showLabel = tab.showLabel !== false;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={tab.onSelect}
+                    className={`flex min-h-0 min-w-0 flex-col items-center justify-center gap-0 px-0.5 py-0 transition ${
+                      tab.active
+                        ? "m-[2px] rounded-full bg-[#cccccc]/70 text-neutral-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.35)]"
+                        : "m-0 text-neutral-700"
+                    }`}
+                    aria-label={showLabel ? undefined : tab.label}
+                    aria-current={tab.active ? "page" : undefined}
                   >
-                    {tab.icon(tab.active)}
-                  </span>
-                  <span className="truncate text-[10px] font-medium">
-                    {tab.label}
-                  </span>
-                </button>
-              ))}
+                    <span
+                      className={`flex items-center justify-center ${tab.id === "home" ? "h-7 w-[5rem] min-w-[5rem] shrink-0" : "h-7 w-7"}`}
+                    >
+                      {tab.icon(tab.active)}
+                    </span>
+                    {showLabel ? (
+                      <span className="truncate text-[10px] font-medium">
+                        {tab.label}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
             </nav>
           ) : (
             <>
