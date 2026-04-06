@@ -5,10 +5,16 @@ import { doc, onSnapshot, setDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
+import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
+import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
 import { ParentPushNotificationsCard } from "@/components/parent/parent-push-notifications-card";
-import { DashboardBottomNav } from "@/components/dashboard/dashboard-bottom-nav";
-import { getFirebaseAuth, getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import {
+  getFirebaseAuth,
+  getFirebaseDb,
+  getFirebaseFunctions,
+} from "@/lib/firebase/client-app";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
@@ -22,7 +28,9 @@ export default function ParentSettingsPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [logoutBusy, setLogoutBusy] = useState(false);
   /** undefined: 아직 로딩, null: 기본 학원 없음 */
-  const [primaryAcademyId, setPrimaryAcademyId] = useState<string | null | undefined>(undefined);
+  const [primaryAcademyId, setPrimaryAcademyId] = useState<
+    string | null | undefined
+  >(undefined);
   const [academyName, setAcademyName] = useState<string | null>(null);
 
   useEffect(() => {
@@ -36,7 +44,10 @@ export default function ParentSettingsPage() {
       }
       try {
         await user.getIdToken();
-        const fn = httpsCallable(getFirebaseFunctions(), "getParentActivationState");
+        const fn = httpsCallable(
+          getFirebaseFunctions(),
+          "getParentActivationState",
+        );
         const res = await fn({});
         const data = res.data as { primaryAcademyId?: string | null };
         const aid = data?.primaryAcademyId?.trim() || null;
@@ -90,7 +101,9 @@ export default function ParentSettingsPage() {
 
   const openIosHint = () => {
     if (!isLikelyIos()) {
-      setToast("iPhone·iPad Safari가 아닌 경우 이 안내는 필요하지 않을 수 있습니다.");
+      setToast(
+        "iPhone·iPad Safari가 아닌 경우 이 안내는 필요하지 않을 수 있습니다.",
+      );
       return;
     }
     if (isStandaloneDisplayMode()) {
@@ -102,9 +115,9 @@ export default function ParentSettingsPage() {
   };
 
   return (
-    <div className="min-h-[100dvh] bg-background px-4 pb-12">
+    <div className="min-h-[100dvh] bg-background px-4 pb-28">
       <div className="mx-auto max-w-lg">
-        <DashboardBottomNav
+        <DashboardRoleHeader
           title="사용자 설정"
           affiliationLabel={affiliationLabel}
           menuIntro={
@@ -115,13 +128,21 @@ export default function ParentSettingsPage() {
           showBack
           onBack={() => router.push("/parent")}
           backAriaLabel="학부모 대시보드로 돌아가기"
-          menuActions={[
+          onHome={() => router.push("/")}
+          showBellOnTitle
+          showBellInBottomBar={false}
+          bottomTabs={[
             {
-              label: logoutBusy ? "처리 중…" : "로그아웃",
-              onSelect: () => void onLogout(),
-              disabled: logoutBusy,
+              id: "home",
+              label: "홈",
+              showLabel: false,
+              icon: (active: boolean) => <AttnTabLogo active={active} />,
+              active: true,
+              onSelect: () => router.push("/"),
             },
           ]}
+          onLogout={() => void onLogout()}
+          logoutBusy={logoutBusy}
           profile={authProfile}
         />
 
@@ -131,13 +152,15 @@ export default function ParentSettingsPage() {
           </p>
         ) : null}
 
-        <div className="space-y-4">
+        <div className="space-y-4 mt-5">
           <ParentPushNotificationsCard />
           <section className={`p-4 ${glassCard}`}>
-            <h2 className="text-sm font-semibold text-foreground">iOS (Safari)</h2>
+            <h2 className="text-sm font-semibold text-foreground">
+              iOS (Safari)
+            </h2>
             <p className="mt-2 text-[11px] leading-relaxed text-neutral-600">
-              푸시를 안정적으로 쓰려면 홈 화면에 추가한 뒤 해당 아이콘으로 여는 것이 좋습니다. 안내를
-              다시 보려면 아래를 누르세요.
+              푸시를 안정적으로 쓰려면 홈 화면에 추가한 뒤 해당 아이콘으로 여는
+              것이 좋습니다. 안내를 다시 보려면 아래를 누르세요.
             </p>
             <button
               type="button"
@@ -164,6 +187,8 @@ export default function ParentSettingsPage() {
           }}
         />
       </div>
+
+      <DashboardBottomScrim />
     </div>
   );
 }

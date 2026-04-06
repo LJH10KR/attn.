@@ -13,7 +13,6 @@ import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
-import { ParentPushNotificationsCard } from "@/components/parent/parent-push-notifications-card";
 import {
   getFirebaseAuth,
   getFirebaseDb,
@@ -381,11 +380,7 @@ export default function ParentDashboardPage() {
           연결된 자녀 학생 정보를 확인할 수 있습니다.
         </p> */}
 
-        <div className="mt-5 mb-4">
-          <ParentPushNotificationsCard />
-        </div>
-
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="mt-5 mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-foreground">자녀 학생</h2>
           <button
             type="button"
