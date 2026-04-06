@@ -1,15 +1,17 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { greetingDisplayNameFromProfile } from "@/lib/ui/dashboard-greetings";
 
-export type DashboardHeaderMenuAction = {
+/** 계정 메뉴(프로필 버튼) 항목 */
+export type DashboardBottomNavMenuAction = {
   label: string;
   onSelect: () => void;
   disabled?: boolean;
 };
 
-export type DashboardHeaderBottomTab = {
+/** 하단 캡슐 바의 탭 한 칸 */
+export type DashboardBottomNavTab = {
   id: string;
   /** 접근성(aria-label 등)용 — `showLabel: false`일 때도 유지하는 것을 권장 */
   label: string;
@@ -20,23 +22,25 @@ export type DashboardHeaderBottomTab = {
   showLabel?: boolean;
 };
 
-export type DashboardAppHeaderProps = {
-  /** ?묎렐?깆슜 ???붾㈃?먮뒗 蹂댁씠吏 ?딄퀬 ?ㅽ겕由?由щ뜑留??쎌뒿?덈떎 */
+export type DashboardBottomNavProps = {
+  /** 스크린 리더용 현재 화면 제목(시각적으로 숨김) */
   title: string;
-  /** ?꾨줈??硫붾돱???쒖떆???뚯냽 ?숈썝(?ㅻ꼫???댁쁺 ?숈썝 ?붿빟 ?? */
+  /** 계정 메뉴에 표시되는 소속·학원 라벨 */
   affiliationLabel: string;
-  /** 援щ텇???꾨옒쨌硫붾돱 ??ぉ ??蹂댁“ ?덈궡(?좏깮) */
+  /** 계정 메뉴 상단 안내(선택) */
   menuIntro?: ReactNode;
   showBack: boolean;
   onBack?: () => void;
   backAriaLabel?: string;
-  /** ?ㅻ줈 踰꾪듉 ?놁뿉 ?쒖떆 (?ㅻ꼫媛 ?숈썝 ??쒕낫?쒖뿉???뚯븘媛????? */
+  /** 뒤로 버튼 옆 보조 문구 */
   backHint?: string;
+  /** 탭이 없을 때 왼쪽 "attn." 텍스트 버튼 동작 */
   onHomeClick?: () => void;
   onBellClick?: () => void;
+  /** 탭 미사용 모드에서 캡슐 안에 알림 벨 표시 */
   showBellInBottomBar?: boolean;
-  bottomTabs?: DashboardHeaderBottomTab[];
-  menuActions: DashboardHeaderMenuAction[];
+  bottomTabs?: DashboardBottomNavTab[];
+  menuActions: DashboardBottomNavMenuAction[];
   profile: {
     displayName?: string | null;
     email?: string | null;
@@ -134,14 +138,18 @@ function ProfileAvatar({
 }
 
 function menuProfileDisplayName(
-  profile: DashboardAppHeaderProps["profile"],
+  profile: DashboardBottomNavProps["profile"],
 ): string {
   const full = profile?.displayName?.trim();
   if (full) return full;
   return greetingDisplayNameFromProfile(profile);
 }
 
-export function DashboardAppHeader({
+/**
+ * 대시보드 하단 고정 바: 탭(또는 홈·알림) + 프로필·계정 시트.
+ * (Material 등에서 말하는 bottom navigation / tab bar 역할)
+ */
+export function DashboardBottomNav({
   title,
   affiliationLabel,
   menuIntro,
@@ -156,7 +164,7 @@ export function DashboardAppHeader({
   menuActions,
   profile,
   className = "",
-}: DashboardAppHeaderProps) {
+}: DashboardBottomNavProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   const closeMenu = useCallback(() => setMenuOpen(false), []);
@@ -180,19 +188,21 @@ export function DashboardAppHeader({
   const hasProfilePhoto = Boolean(profile?.photoURL?.trim());
 
   return (
-    <header
+    <nav
       className={`fixed inset-x-0 bottom-[25px] z-30 mx-auto max-w-lg px-4 ${className}`}
+      aria-label="대시보드 하단 메뉴"
     >
-      <h1 className="sr-only">{title}</h1>
+      <p className="sr-only">{title}</p>
       <div className="flex items-center gap-2">
-        {/* 메인 하단 바 */}
+        {/* 메인 하단 캡슐 */}
         <div
           className="flex h-[60px] min-w-0 flex-1 items-stretch overflow-hidden rounded-full bg-white/38 p-[2px] backdrop-blur-xs shadow-[0_12px_30px_-14px_rgba(0,0,0,0.10),0_-12px_30px_-14px_rgba(0,0,0,0.10),12px_0_30px_-14px_rgba(0,0,0,0.10),-12px_0_30px_-14px_rgba(0,0,0,0.10),inset_0_1px_0_rgba(255,255,255,0.78)] dark:bg-white/10 dark:shadow-[0_14px_34px_-16px_rgba(0,0,0,0.36),0_-14px_34px_-16px_rgba(0,0,0,0.36),14px_0_34px_-16px_rgba(0,0,0,0.36),-14px_0_34px_-16px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.18)]"
           style={{ WebkitBackdropFilter: "blur(20px) saturate(1.15)" }}
         >
           {bottomTabs && bottomTabs.length > 0 ? (
-            <nav
+            <div
               className="grid h-full w-full grid-cols-4 items-stretch gap-px"
+              role="tablist"
               aria-label="대시보드 메뉴"
             >
               {bottomTabs.map((tab) => {
@@ -201,6 +211,7 @@ export function DashboardAppHeader({
                   <button
                     key={tab.id}
                     type="button"
+                    role="tab"
                     onClick={tab.onSelect}
                     className={`flex min-h-0 min-w-0 flex-col items-center justify-center gap-0 px-0.5 py-0 transition ${
                       tab.active
@@ -208,7 +219,7 @@ export function DashboardAppHeader({
                         : "m-0 text-neutral-700"
                     }`}
                     aria-label={showLabel ? undefined : tab.label}
-                    aria-current={tab.active ? "page" : undefined}
+                    aria-selected={tab.active}
                   >
                     <span
                       className={`flex items-center justify-center ${tab.id === "home" ? "h-7 w-[5rem] min-w-[5rem] shrink-0" : "h-7 w-7"}`}
@@ -233,7 +244,7 @@ export function DashboardAppHeader({
                   />
                 ),
               )}
-            </nav>
+            </div>
           ) : (
             <>
               <button
@@ -373,6 +384,6 @@ export function DashboardAppHeader({
           ) : null}
         </div>
       ) : null}
-    </header>
+    </nav>
   );
 }

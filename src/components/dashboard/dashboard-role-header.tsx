@@ -2,10 +2,10 @@
 
 import type { ReactNode } from "react";
 import {
-  DashboardAppHeader,
-  type DashboardHeaderBottomTab,
-  type DashboardHeaderMenuAction,
-} from "@/components/dashboard/dashboard-app-header";
+  DashboardBottomNav,
+  type DashboardBottomNavMenuAction,
+  type DashboardBottomNavTab,
+} from "@/components/dashboard/dashboard-bottom-nav";
 import type { AuthProfilePayload } from "@/lib/firebase/use-auth-profile";
 
 type DashboardRoleHeaderProps = {
@@ -23,12 +23,12 @@ type DashboardRoleHeaderProps = {
   onBellClick?: () => void;
   showBellOnTitle?: boolean;
   showBellInBottomBar?: boolean;
-  bottomTabs?: DashboardHeaderBottomTab[];
+  bottomTabs?: DashboardBottomNavTab[];
   includeSettingsAction?: boolean;
   onSettings?: () => void;
   settingsLabel?: string;
   logoutLabel?: string;
-  extraMenuActions?: DashboardHeaderMenuAction[];
+  extraMenuActions?: DashboardBottomNavMenuAction[];
 };
 
 export function DashboardRoleHeader({
@@ -53,7 +53,7 @@ export function DashboardRoleHeader({
   logoutLabel = "로그아웃",
   extraMenuActions = [],
 }: DashboardRoleHeaderProps) {
-  const menuActions: DashboardHeaderMenuAction[] = [];
+  const menuActions: DashboardBottomNavMenuAction[] = [];
   const TitleBellButton = showBellOnTitle ? (
     <button
       type="button"
@@ -117,7 +117,7 @@ export function DashboardRoleHeader({
         ) : null}
       </section>
 
-      <DashboardAppHeader
+      <DashboardBottomNav
         title={title}
         affiliationLabel={affiliationLabel}
         showBack={false}

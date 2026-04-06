@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
 import { ParentPushNotificationsCard } from "@/components/parent/parent-push-notifications-card";
-import { DashboardAppHeader } from "@/components/dashboard/dashboard-app-header";
+import { DashboardBottomNav } from "@/components/dashboard/dashboard-bottom-nav";
 import { getFirebaseAuth, getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
@@ -104,7 +104,7 @@ export default function ParentSettingsPage() {
   return (
     <div className="min-h-[100dvh] bg-background px-4 pb-12">
       <div className="mx-auto max-w-lg">
-        <DashboardAppHeader
+        <DashboardBottomNav
           title="사용자 설정"
           affiliationLabel={affiliationLabel}
           menuIntro={
