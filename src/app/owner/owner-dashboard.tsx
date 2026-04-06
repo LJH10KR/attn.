@@ -16,6 +16,7 @@ import { signOut } from "firebase/auth";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
@@ -402,6 +403,8 @@ export function OwnerDashboard() {
               : `${academies[0].name} 외 ${academies.length - 1}곳`
         }
         onHome={() => router.push("/")}
+        showBellOnTitle
+        showBellInBottomBar={false}
         onLogout={() => void onLogout()}
         profile={authProfile}
       />
@@ -497,10 +500,7 @@ export function OwnerDashboard() {
         </p>
       </main>
 
-      <div
-        aria-hidden
-        className="pointer-events-none fixed inset-x-0 bottom-0 z-20 h-16 bg-gradient-to-t from-background/90 via-background/45 to-transparent backdrop-blur-[1px]"
-      ></div>
+      <DashboardBottomScrim />
 
       {modal === "create" || modal === "edit" ? (
         <div

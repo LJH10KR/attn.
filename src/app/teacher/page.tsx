@@ -7,6 +7,7 @@ import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { docToStudentRow, type StudentRowVM } from "@/components/academy/academy-student-panel";
+import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { getFirebaseAuth, getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
@@ -282,6 +283,8 @@ export default function TeacherDashboardPage() {
           title="선생님 대시보드"
           affiliationLabel={academyLabelForGreeting(academyName, academyId)}
           onHome={() => router.push("/")}
+          showBellOnTitle
+          showBellInBottomBar={false}
           onLogout={() => void onLogout()}
           logoutBusy={logoutBusy}
           profile={authProfile}
@@ -356,6 +359,8 @@ export default function TeacherDashboardPage() {
           )}
         </div>
       </div>
+
+      <DashboardBottomScrim />
     </div>
   );
 }

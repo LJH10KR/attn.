@@ -15,6 +15,7 @@ import { doc, getDoc } from "firebase/firestore";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
@@ -76,7 +77,7 @@ const STAT_COUNTS = [
 ];
 
 /** 하단 탭 홈 슬롯 ? `public/attn-tab-logo.svg`를 준비한 로고로 교체해 사용하세요(동일 경로·PNG 등으로 덮어쓰기 가능). */
-const ATTN_TAB_LOGO_SRC = "/attn_tab_logo.png";
+const ATTN_TAB_LOGO_SRC = "/attn_tab_logo.svg";
 
 function AttnTabLogo({ active }: { active: boolean }) {
   return (
@@ -84,18 +85,18 @@ function AttnTabLogo({ active }: { active: boolean }) {
     <img
       src={ATTN_TAB_LOGO_SRC}
       alt=""
-      width={68}
-      height={24}
+      width={78}
+      height={26}
       draggable={false}
-      className={`h-[24px] w-[68px] object-cover object-center ${
-        active ? "opacity-95" : "opacity-88"
+      className={`h-[26px] w-[78px] max-h-[26px] max-w-full object-contain object-center ${
+        active ? "opacity-100" : "opacity-88"
       }`}
     />
   );
 }
 
 function IconMonitor({ active }: { active?: boolean }) {
-  const stroke = active ? "#fff" : "#666";
+  const stroke = active ? "#171717" : "#666";
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
       <rect
@@ -106,7 +107,7 @@ function IconMonitor({ active }: { active?: boolean }) {
         rx="2"
         stroke={stroke}
         strokeWidth="1.6"
-        fill={active ? "rgba(255,255,255,0.15)" : "none"}
+        fill={active ? "rgba(0,0,0,0.06)" : "none"}
       />
       <path
         d="M8 19h8M12 16v3"
@@ -119,7 +120,7 @@ function IconMonitor({ active }: { active?: boolean }) {
 }
 
 function IconPerson({ active }: { active?: boolean }) {
-  const stroke = active ? "#fff" : "#666";
+  const stroke = active ? "#171717" : "#666";
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
       <circle cx="12" cy="8.5" r="3.2" stroke={stroke} strokeWidth="1.6" />
@@ -134,7 +135,7 @@ function IconPerson({ active }: { active?: boolean }) {
 }
 
 function IconBackpack({ active }: { active?: boolean }) {
-  const stroke = active ? "#fff" : "#666";
+  const stroke = active ? "#171717" : "#666";
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
       <path
@@ -151,7 +152,7 @@ function IconBackpack({ active }: { active?: boolean }) {
         rx="3"
         stroke={stroke}
         strokeWidth="1.6"
-        fill={active ? "rgba(255,255,255,0.12)" : "none"}
+        fill={active ? "rgba(0,0,0,0.06)" : "none"}
       />
       <path
         d="M12 11v4"
@@ -485,7 +486,8 @@ export function AcademyDashboard() {
           </section>
         ) : null}
       </main>
+
+      <DashboardBottomScrim />
     </div>
   );
 }
-

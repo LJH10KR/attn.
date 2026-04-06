@@ -6,6 +6,7 @@ import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { docToStudentRow, type StudentRowVM } from "@/components/academy/academy-student-panel";
+import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
 import { ParentPushNotificationsCard } from "@/components/parent/parent-push-notifications-card";
@@ -309,6 +310,8 @@ export default function ParentDashboardPage() {
           includeSettingsAction
           onSettings={() => router.push("/parent/settings")}
           onHome={() => router.push("/")}
+          showBellOnTitle
+          showBellInBottomBar={false}
           onLogout={() => void onLogout()}
           logoutBusy={logoutBusy}
           profile={authProfile}
@@ -382,6 +385,8 @@ export default function ParentDashboardPage() {
           }}
         />
       </div>
+
+      <DashboardBottomScrim />
     </div>
   );
 }
