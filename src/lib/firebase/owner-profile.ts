@@ -4,6 +4,7 @@ import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import type { User } from "firebase/auth";
 import { COLLECTIONS } from "./attn-schema";
 import { getFirebaseDb } from "./client-app";
+import { profilePhotoUrlForUser } from "./profile-photo-url";
 
 export async function fetchIsOwner(uid: string): Promise<boolean> {
   const snap = await getDoc(doc(getFirebaseDb(), COLLECTIONS.users, uid));
@@ -21,7 +22,7 @@ export async function upsertOwnerProfile(user: User): Promise<void> {
   const base = {
     email: user.email ?? null,
     displayName: user.displayName ?? null,
-    photoURL: user.photoURL ?? null,
+    photoURL: profilePhotoUrlForUser(user),
     platformRole: "owner" as const,
     emailVerified: user.emailVerified,
     updatedAt: serverTimestamp(),

@@ -1,14 +1,16 @@
-"use client";
+﻿"use client";
 
 import { FirebaseError } from "firebase/app";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, onSnapshot, Timestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { docToStudentRow, type StudentRowVM } from "@/components/academy/academy-student-panel";
+import { DashboardAppHeader } from "@/components/dashboard/dashboard-app-header";
 import { getFirebaseAuth, getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
+import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 
 const glassCard = "glass-card";
 
@@ -45,6 +47,7 @@ function studentRowFromCallablePayload(s: CallableStudentPayload): StudentRowVM 
 
 export default function TeacherDashboardPage() {
   const router = useRouter();
+  const authProfile = useAuthProfile();
   const [ready, setReady] = useState(false);
   const [academyId, setAcademyId] = useState<string | null>(null);
   const [academyName, setAcademyName] = useState<string | null>(null);
@@ -273,43 +276,26 @@ export default function TeacherDashboardPage() {
   }
 
   return (
-    <div className="min-h-[100dvh] bg-background px-4 pb-12 pt-8">
+    <div className="min-h-[100dvh] bg-background px-4 pb-12">
       <div className="mx-auto max-w-lg">
-        <header className="mb-6 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight text-foreground">선생님 대시보드</h1>
-            <p className="mt-1 text-xs text-neutral-600">
-              {academyName ? (
-                <span className="font-medium text-foreground">{academyName}</span>
-              ) : (
-                "학원"
-              )}
-              {academyId ? (
-                <span className="ml-1 font-mono text-[10px] text-neutral-400">({academyId})</span>
-              ) : null}
-            </p>
-            <p className="mt-2 text-[11px] leading-relaxed text-neutral-500">
-              전담 학생 정보는 <span className="font-medium text-neutral-700">조회만</span> 가능합니다. 수정·삭제는
-              학원 대시보드에서 진행됩니다.
-            </p>
-          </div>
-          <div className="flex shrink-0 flex-col items-end gap-2">
-            <button
-              type="button"
-              onClick={() => void onLogout()}
-              disabled={logoutBusy}
-              className="rounded-xl border border-neutral-300/80 bg-white/70 px-3 py-2 text-[11px] font-medium text-neutral-800 hover:bg-white disabled:opacity-60"
-            >
-              {logoutBusy ? "…" : "로그아웃"}
-            </button>
-            <Link
-              href="/"
-              className="text-[11px] font-medium text-sky-900 underline-offset-2 hover:underline"
-            >
-              홈으로
-            </Link>
-          </div>
-        </header>
+        <DashboardAppHeader
+          title="선생님 대시보드"
+          affiliationLabel={academyLabelForGreeting(academyName, academyId)}
+          showBack={false}
+          menuActions={[
+            { label: "홈으로", onSelect: () => router.push("/") },
+            {
+              label: logoutBusy ? "처리 중…" : "로그아웃",
+              onSelect: () => void onLogout(),
+              disabled: logoutBusy,
+            },
+          ]}
+          profile={authProfile}
+        />
+        <p className="mb-6 mt-1 text-[11px] leading-relaxed text-neutral-500 dark:text-neutral-400">
+          전담 학생 정보는 <span className="font-medium text-neutral-700 dark:text-neutral-300">조회만</span> 가능합니다.
+          수정·삭제는 학원 대시보드에서 진행됩니다.
+        </p>
 
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-foreground">전담 학생</h2>

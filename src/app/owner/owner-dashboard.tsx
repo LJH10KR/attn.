@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { FirebaseError } from "firebase/app";
 import { httpsCallable } from "firebase/functions";
@@ -7,7 +7,9 @@ import { signOut } from "firebase/auth";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { DashboardAppHeader } from "@/components/dashboard/dashboard-app-header";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
+import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { getFirebaseAuth, getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { fetchIsOwner } from "@/lib/firebase/owner-profile";
 import { COLLECTIONS, type Academy } from "@/lib/firebase/attn-schema";
@@ -51,6 +53,7 @@ function ownerFirebaseErrorMessage(err: FirebaseError): string {
 
 export function OwnerDashboard() {
   const router = useRouter();
+  const authProfile = useAuthProfile();
   const [gate, setGate] = useState<"loading" | "auth" | "forbidden" | "ok">("loading");
   const [academies, setAcademies] = useState<AcademyRow[]>([]);
   const [listError, setListError] = useState<string | null>(null);
@@ -362,26 +365,21 @@ export function OwnerDashboard() {
 
   return (
     <div className="min-h-[100dvh] bg-background pb-[max(2rem,env(safe-area-inset-bottom))]">
-      <header
-        className={`sticky top-0 z-10 mx-auto flex max-w-lg items-center justify-between gap-3 px-4 py-4 ${glassCard}`}
-        style={{ WebkitBackdropFilter: "blur(20px)" }}
-      >
-        <div>
-          <p className="text-[10px] font-medium uppercase tracking-wider text-neutral-500">
-            attn.
-          </p>
-          <h1 className="text-lg font-semibold text-foreground">오너 대시보드</h1>
-        </div>
-        <button
-          type="button"
-          onClick={onLogout}
-          className="shrink-0 rounded-full border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-2 text-xs font-medium text-neutral-700 backdrop-blur-md hover:bg-white/80"
-        >
-          로그아웃
-        </button>
-      </header>
+      <DashboardAppHeader
+        title="오너 대시보드"
+        affiliationLabel={
+          academies.length === 0
+            ? "등록된 학원 없음"
+            : academies.length === 1
+              ? academies[0].name
+              : `${academies[0].name} 외 ${academies.length - 1}곳`
+        }
+        showBack={false}
+        menuActions={[{ label: "로그아웃", onSelect: () => void onLogout() }]}
+        profile={authProfile}
+      />
 
-      <main className="mx-auto max-w-lg px-4 pt-6">
+      <main className="mx-auto max-w-lg px-4 pt-4">
         <div className="mb-5 flex items-center justify-between gap-3">
           <h2 className="text-base font-semibold text-foreground">내 학원</h2>
           <button

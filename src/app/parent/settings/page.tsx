@@ -1,18 +1,92 @@
-"use client";
+﻿"use client";
 
-import Link from "next/link";
-import { useState } from "react";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { doc, onSnapshot, setDoc } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
 import { ParentPushNotificationsCard } from "@/components/parent/parent-push-notifications-card";
-import { getFirebaseAuth, getFirebaseDb } from "@/lib/firebase/client-app";
-import { doc, setDoc } from "firebase/firestore";
+import { DashboardAppHeader } from "@/components/dashboard/dashboard-app-header";
+import { getFirebaseAuth, getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
+import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
 
 const glassCard = "glass-card";
 
 export default function ParentSettingsPage() {
+  const router = useRouter();
+  const authProfile = useAuthProfile();
   const [iosModalOpen, setIosModalOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [logoutBusy, setLogoutBusy] = useState(false);
+  /** undefined: 아직 로딩, null: 기본 학원 없음 */
+  const [primaryAcademyId, setPrimaryAcademyId] = useState<string | null | undefined>(undefined);
+  const [academyName, setAcademyName] = useState<string | null>(null);
+
+  useEffect(() => {
+    const auth = getFirebaseAuth();
+    let cancelled = false;
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        setPrimaryAcademyId(undefined);
+        setAcademyName(null);
+        return;
+      }
+      try {
+        await user.getIdToken();
+        const fn = httpsCallable(getFirebaseFunctions(), "getParentActivationState");
+        const res = await fn({});
+        const data = res.data as { primaryAcademyId?: string | null };
+        const aid = data?.primaryAcademyId?.trim() || null;
+        if (!cancelled) {
+          setPrimaryAcademyId(aid);
+          if (!aid) setAcademyName(null);
+        }
+      } catch {
+        if (!cancelled) {
+          setPrimaryAcademyId(null);
+          setAcademyName(null);
+        }
+      }
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!primaryAcademyId) return;
+    const db = getFirebaseDb();
+    const unsub = onSnapshot(
+      doc(db, "academies", primaryAcademyId),
+      (snap) => {
+        const n = snap.data()?.name;
+        setAcademyName(typeof n === "string" ? n : null);
+      },
+      () => setAcademyName(null),
+    );
+    return () => unsub();
+  }, [primaryAcademyId]);
+
+  const affiliationLabel =
+    primaryAcademyId === undefined
+      ? "불러오는 중…"
+      : primaryAcademyId === null
+        ? "연결된 학원 없음"
+        : academyLabelForGreeting(academyName, primaryAcademyId);
+
+  const onLogout = useCallback(async () => {
+    setLogoutBusy(true);
+    try {
+      await signOut(getFirebaseAuth());
+    } finally {
+      setLogoutBusy(false);
+      router.replace("/login?role=parent");
+    }
+  }, [router]);
 
   const openIosHint = () => {
     if (!isLikelyIos()) {
@@ -28,18 +102,28 @@ export default function ParentSettingsPage() {
   };
 
   return (
-    <div className="min-h-[100dvh] bg-background px-4 pb-12 pt-8">
+    <div className="min-h-[100dvh] bg-background px-4 pb-12">
       <div className="mx-auto max-w-lg">
-        <header className="mb-6">
-          <Link
-            href="/parent"
-            className="text-[11px] font-medium text-sky-900 underline-offset-2 hover:underline"
-          >
-            ← 학부모 대시보드
-          </Link>
-          <h1 className="mt-3 text-xl font-semibold tracking-tight text-foreground">사용자 설정</h1>
-          <p className="mt-1 text-xs text-neutral-600">알림 및 기기 안내를 관리합니다.</p>
-        </header>
+        <DashboardAppHeader
+          title="사용자 설정"
+          affiliationLabel={affiliationLabel}
+          menuIntro={
+            <span className="text-neutral-600 dark:text-neutral-400">
+              알림 및 기기 안내를 관리합니다.
+            </span>
+          }
+          showBack
+          onBack={() => router.push("/parent")}
+          backAriaLabel="학부모 대시보드로 돌아가기"
+          menuActions={[
+            {
+              label: logoutBusy ? "처리 중…" : "로그아웃",
+              onSelect: () => void onLogout(),
+              disabled: logoutBusy,
+            },
+          ]}
+          profile={authProfile}
+        />
 
         {toast ? (
           <p className="mb-4 rounded-xl bg-amber-500/15 px-3 py-2 text-center text-xs text-amber-900">

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { AcademyParentPanel } from "@/components/academy/academy-parent-panel";
 import { AcademyStudentPanel } from "@/components/academy/academy-student-panel";
@@ -12,6 +12,9 @@ import { doc, getDoc } from "firebase/firestore";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { DashboardAppHeader } from "@/components/dashboard/dashboard-app-header";
+import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
+import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 
 const glassCard = "glass-card";
 
@@ -38,20 +41,6 @@ const STAT_COUNTS = [
   { key: "parents" as const, label: "학부모", value: "30" },
   { key: "students" as const, label: "학생", value: "70" },
 ];
-
-function BellIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M12 3a6 6 0 00-6 6v2.4L4 14v1h16v-1l-2-2.6V9a6 6 0 00-6-6z"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
-      <path d="M9 19a3 3 0 006 0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
 
 function IconHome({ active }: { active?: boolean }) {
   const stroke = active ? "#fff" : "#444";
@@ -126,6 +115,7 @@ export function AcademyDashboard() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const configured = isFirebaseConfigured();
+  const authProfile = useAuthProfile();
 
   const [gate, setGate] = useState<"loading" | "ready" | "forbidden" | "auth">("loading");
   const [academyId, setAcademyId] = useState<string | null>(null);
@@ -229,6 +219,16 @@ export function AcademyDashboard() {
     }
   }, [router]);
 
+  const onHeaderLogout = useCallback(async () => {
+    setLogoutBusy(true);
+    try {
+      await signOut(getFirebaseAuth());
+    } finally {
+      setLogoutBusy(false);
+      router.replace("/login");
+    }
+  }, [router]);
+
   useEffect(() => {
     if (!configured) {
       return;
@@ -293,69 +293,43 @@ export function AcademyDashboard() {
     );
   }
 
-  return (
-    <div className="min-h-[100dvh] bg-background pb-28 pt-[env(safe-area-inset-top)]">
-      <header
-        className={`sticky top-0 z-10 mx-auto max-w-lg px-4 pt-4 pb-2 ${glassCard}`}
-        style={{ WebkitBackdropFilter: "blur(20px)" }}
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500">
-              attn.
-            </p>
-            {showBack ? (
-              <button
-                type="button"
-                onClick={() => router.push("/owner")}
-                className="mt-2 flex h-10 w-10 items-center justify-center rounded-full border border-neutral-300/60 bg-white/55 text-foreground shadow-sm backdrop-blur-md hover:bg-white/85"
-                aria-label="오너 대시보드로 돌아가기"
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path
-                    d="M15 6l-6 6 6 6"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
-            ) : (
-              <div className="mt-2 h-10 w-10" aria-hidden />
-            )}
-          </div>
-          <div className="mt-1 flex shrink-0 items-center gap-2">
-            {isAcademyPortalSession ? (
-              <button
-                type="button"
-                onClick={() => void onPortalLogout()}
-                disabled={logoutBusy}
-                className="rounded-full border border-neutral-300/50 bg-white/45 px-3 py-2 text-[11px] font-medium text-neutral-800 backdrop-blur-md hover:bg-white/75 disabled:opacity-50"
-              >
-                {logoutBusy ? "…" : "로그아웃"}
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-neutral-300/50 bg-white/45 text-neutral-700 backdrop-blur-md hover:bg-white/75"
-              aria-label="알림"
-            >
-              <BellIcon className="text-neutral-700" />
-            </button>
-          </div>
-        </div>
-        <h1 className="-mt-2 pb-1 text-center text-lg font-semibold text-foreground">학원 대시보드</h1>
-        {academyName ? (
-          <p className="pb-2 text-center text-xs text-neutral-500 truncate px-2">{academyName}</p>
-        ) : (
-          <p className="pb-2 text-center font-mono text-[10px] text-neutral-400 truncate px-2">
-            {academyId}
-          </p>
-        )}
-      </header>
+  const headerMenuActions = isAcademyPortalSession
+    ? [
+        {
+          label: logoutBusy ? "처리 중…" : "로그아웃",
+          onSelect: () => void onPortalLogout(),
+          disabled: logoutBusy,
+        },
+      ]
+    : [
+        {
+          label: logoutBusy ? "처리 중…" : "로그아웃",
+          onSelect: () => void onHeaderLogout(),
+          disabled: logoutBusy,
+        },
+      ];
 
-      <main className="mx-auto max-w-lg px-4 pt-5">
+  return (
+    <div className="min-h-[100dvh] bg-background pb-28">
+      <DashboardAppHeader
+        title="학원 대시보드"
+        affiliationLabel={academyLabelForGreeting(academyName, academyId)}
+        menuIntro={
+          showBack ? (
+            <span className="text-neutral-600 dark:text-neutral-400">
+              오너 계정에서 이 학원 대시보드를 보고 있어요.
+            </span>
+          ) : undefined
+        }
+        showBack={showBack}
+        onBack={() => router.push("/owner")}
+        backAriaLabel="오너 대시보드로 돌아가기"
+        backHint={showBack ? "내 계정으로 돌아가기" : undefined}
+        menuActions={headerMenuActions}
+        profile={authProfile}
+      />
+
+      <main className="mx-auto max-w-lg px-4 pt-4">
         <div className="grid grid-cols-3 gap-2">
           {STAT_COUNTS.map((c) => {
             const isActive = section === c.key;

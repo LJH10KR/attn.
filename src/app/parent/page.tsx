@@ -1,15 +1,17 @@
-"use client";
+﻿"use client";
 
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, onSnapshot, setDoc, Timestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { docToStudentRow, type StudentRowVM } from "@/components/academy/academy-student-panel";
+import { DashboardAppHeader } from "@/components/dashboard/dashboard-app-header";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
 import { ParentPushNotificationsCard } from "@/components/parent/parent-push-notifications-card";
 import { getFirebaseAuth, getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
+import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
 
 const glassCard = "glass-card";
@@ -47,6 +49,7 @@ function studentRowFromCallablePayload(s: CallableStudentPayload): StudentRowVM 
 
 export default function ParentDashboardPage() {
   const router = useRouter();
+  const authProfile = useAuthProfile();
   const [ready, setReady] = useState(false);
   const [academyId, setAcademyId] = useState<string | null>(null);
   const [academyName, setAcademyName] = useState<string | null>(null);
@@ -298,48 +301,26 @@ export default function ParentDashboardPage() {
   }
 
   return (
-    <div className="min-h-[100dvh] bg-background px-4 pb-12 pt-8">
+    <div className="min-h-[100dvh] bg-background px-4 pb-12">
       <div className="mx-auto max-w-lg">
-        <header className="mb-6 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight text-foreground">학부모 대시보드</h1>
-            <p className="mt-1 text-xs text-neutral-600">
-              {academyName ? (
-                <span className="font-medium text-foreground">{academyName}</span>
-              ) : (
-                "학원"
-              )}
-              {academyId ? (
-                <span className="ml-1 font-mono text-[10px] text-neutral-400">({academyId})</span>
-              ) : null}
-            </p>
-            <p className="mt-2 text-[11px] leading-relaxed text-neutral-500">
-              연결된 자녀 학생 정보를 확인할 수 있습니다.
-            </p>
-          </div>
-          <div className="flex shrink-0 flex-col items-end gap-2">
-            <button
-              type="button"
-              onClick={() => void onLogout()}
-              disabled={logoutBusy}
-              className="rounded-xl border border-neutral-300/80 bg-white/70 px-3 py-2 text-[11px] font-medium text-neutral-800 hover:bg-white disabled:opacity-60"
-            >
-              {logoutBusy ? "…" : "로그아웃"}
-            </button>
-            <Link
-              href="/parent/settings"
-              className="text-[11px] font-medium text-sky-900 underline-offset-2 hover:underline"
-            >
-              사용자 설정
-            </Link>
-            <Link
-              href="/"
-              className="text-[11px] font-medium text-sky-900 underline-offset-2 hover:underline"
-            >
-              홈으로
-            </Link>
-          </div>
-        </header>
+        <DashboardAppHeader
+          title="학부모 대시보드"
+          affiliationLabel={academyLabelForGreeting(academyName, academyId)}
+          showBack={false}
+          menuActions={[
+            { label: "사용자 설정", onSelect: () => router.push("/parent/settings") },
+            { label: "홈으로", onSelect: () => router.push("/") },
+            {
+              label: logoutBusy ? "처리 중…" : "로그아웃",
+              onSelect: () => void onLogout(),
+              disabled: logoutBusy,
+            },
+          ]}
+          profile={authProfile}
+        />
+        <p className="mb-4 mt-1 text-[11px] leading-relaxed text-neutral-500 dark:text-neutral-400">
+          연결된 자녀 학생 정보를 확인할 수 있습니다.
+        </p>
 
         <div className="mb-4">
           <ParentPushNotificationsCard />
