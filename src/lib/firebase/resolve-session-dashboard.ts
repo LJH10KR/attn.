@@ -24,12 +24,11 @@ export async function redirectIfKnownSessionDashboard(
     return "redirected";
   }
 
-  if (await fetchIsOwner(user.uid)) {
-    await upsertOwnerProfile(user);
-    replace("/owner");
-    return "redirected";
-  }
-
+  /**
+   * 선생님·학부모를 오너보다 먼저 본다. 오너 탭으로 한 번 로그인하면 `users`에
+   * `platformRole: owner`가 merge되어, 실제로는 선생님만 쓰는 계정도 fetchIsOwner가
+   * 참이 될 수 있기 때문이다.
+   */
   const teacherPath = await getTeacherActivationPath();
   if (teacherPath) {
     replace(teacherPath);
@@ -39,6 +38,12 @@ export async function redirectIfKnownSessionDashboard(
   const parentPath = await getParentActivationPath();
   if (parentPath) {
     replace(parentPath);
+    return "redirected";
+  }
+
+  if (await fetchIsOwner(user.uid)) {
+    await upsertOwnerProfile(user);
+    replace("/owner");
     return "redirected";
   }
 
