@@ -6,7 +6,7 @@ import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { docToStudentRow, type StudentRowVM } from "@/components/academy/academy-student-panel";
-import { DashboardAppHeader } from "@/components/dashboard/dashboard-app-header";
+import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
 import { ParentPushNotificationsCard } from "@/components/parent/parent-push-notifications-card";
 import { getFirebaseAuth, getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
@@ -301,21 +301,16 @@ export default function ParentDashboardPage() {
   }
 
   return (
-    <div className="min-h-[100dvh] bg-background px-4 pb-12">
+    <div className="min-h-[100dvh] bg-background px-4 pb-28">
       <div className="mx-auto max-w-lg">
-        <DashboardAppHeader
+        <DashboardRoleHeader
           title="학부모 대시보드"
           affiliationLabel={academyLabelForGreeting(academyName, academyId)}
-          showBack={false}
-          menuActions={[
-            { label: "사용자 설정", onSelect: () => router.push("/parent/settings") },
-            { label: "홈으로", onSelect: () => router.push("/") },
-            {
-              label: logoutBusy ? "처리 중…" : "로그아웃",
-              onSelect: () => void onLogout(),
-              disabled: logoutBusy,
-            },
-          ]}
+          includeSettingsAction
+          onSettings={() => router.push("/parent/settings")}
+          onHome={() => router.push("/")}
+          onLogout={() => void onLogout()}
+          logoutBusy={logoutBusy}
           profile={authProfile}
         />
         <p className="mb-4 mt-1 text-[11px] leading-relaxed text-neutral-500 dark:text-neutral-400">

@@ -2,15 +2,28 @@
 
 import { FirebaseError } from "firebase/app";
 import { httpsCallable } from "firebase/functions";
-import { collection, doc, onSnapshot, query, serverTimestamp, updateDoc, where, type Timestamp } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  updateDoc,
+  where,
+  type Timestamp,
+} from "firebase/firestore";
 import { signOut } from "firebase/auth";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { DashboardAppHeader } from "@/components/dashboard/dashboard-app-header";
+import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
-import { getFirebaseAuth, getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import {
+  getFirebaseAuth,
+  getFirebaseDb,
+  getFirebaseFunctions,
+} from "@/lib/firebase/client-app";
 import { fetchIsOwner } from "@/lib/firebase/owner-profile";
 import { COLLECTIONS, type Academy } from "@/lib/firebase/attn-schema";
 
@@ -54,7 +67,9 @@ function ownerFirebaseErrorMessage(err: FirebaseError): string {
 export function OwnerDashboard() {
   const router = useRouter();
   const authProfile = useAuthProfile();
-  const [gate, setGate] = useState<"loading" | "auth" | "forbidden" | "ok">("loading");
+  const [gate, setGate] = useState<"loading" | "auth" | "forbidden" | "ok">(
+    "loading",
+  );
   const [academies, setAcademies] = useState<AcademyRow[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -98,7 +113,10 @@ export function OwnerDashboard() {
       }
       setGate("ok");
       const db = getFirebaseDb();
-      const q = query(collection(db, COLLECTIONS.academies), where("ownerUid", "==", user.uid));
+      const q = query(
+        collection(db, COLLECTIONS.academies),
+        where("ownerUid", "==", user.uid),
+      );
       unsubAcademies?.();
       unsubAcademies = onSnapshot(
         q,
@@ -203,7 +221,10 @@ export function OwnerDashboard() {
     setBusy(true);
     setFormError(null);
     try {
-      const fn = httpsCallable(getFirebaseFunctions(), "createAcademyWithPortal");
+      const fn = httpsCallable(
+        getFirebaseFunctions(),
+        "createAcademyWithPortal",
+      );
       await fn({
         academyId,
         name,
@@ -260,7 +281,10 @@ export function OwnerDashboard() {
         updatedAt: serverTimestamp(),
       });
       if (wantsPwChange) {
-        const pwFn = httpsCallable(getFirebaseFunctions(), "updateAcademyPortalPassword");
+        const pwFn = httpsCallable(
+          getFirebaseFunctions(),
+          "updateAcademyPortalPassword",
+        );
         await pwFn({
           academyId: editTarget.id,
           portalPassword: editPortalPassword,
@@ -340,9 +364,12 @@ export function OwnerDashboard() {
     return (
       <div className="min-h-[100dvh] bg-background px-4 py-16 flex flex-col items-center justify-center">
         <div className={`w-full max-w-md p-8 text-center ${glassCard}`}>
-          <h1 className="text-lg font-semibold text-foreground">오너 전용 페이지</h1>
+          <h1 className="text-lg font-semibold text-foreground">
+            오너 전용 페이지
+          </h1>
           <p className="mt-3 text-sm text-neutral-600">
-            오너로 등록된 계정만 이용할 수 있습니다. 학원 오너 회원가입을 진행해 주세요.
+            오너로 등록된 계정만 이용할 수 있습니다. 학원 오너 회원가입을 진행해
+            주세요.
           </p>
           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
             <Link
@@ -364,8 +391,8 @@ export function OwnerDashboard() {
   }
 
   return (
-    <div className="min-h-[100dvh] bg-background pb-[max(2rem,env(safe-area-inset-bottom))]">
-      <DashboardAppHeader
+    <div className="min-h-[100dvh] bg-background pb-28">
+      <DashboardRoleHeader
         title="오너 대시보드"
         affiliationLabel={
           academies.length === 0
@@ -374,8 +401,8 @@ export function OwnerDashboard() {
               ? academies[0].name
               : `${academies[0].name} 외 ${academies.length - 1}곳`
         }
-        showBack={false}
-        menuActions={[{ label: "로그아웃", onSelect: () => void onLogout() }]}
+        onHome={() => router.push("/")}
+        onLogout={() => void onLogout()}
         profile={authProfile}
       />
 
@@ -414,8 +441,12 @@ export function OwnerDashboard() {
               <li key={a.id} className={`p-4 ${glassCard}`}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium text-foreground">{a.name}</p>
-                    <p className="mt-1 font-mono text-[10px] text-neutral-400">ID · {a.id}</p>
+                    <p className="truncate font-medium text-foreground">
+                      {a.name}
+                    </p>
+                    <p className="mt-1 font-mono text-[10px] text-neutral-400">
+                      ID · {a.id}
+                    </p>
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
                       <span
                         className={`rounded-full px-2 py-0.5 ring-1 ${
@@ -466,21 +497,29 @@ export function OwnerDashboard() {
         </p>
       </main>
 
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-x-0 bottom-0 z-20 h-16 bg-gradient-to-t from-background/90 via-background/45 to-transparent backdrop-blur-[1px]"
+      ></div>
+
       {modal === "create" || modal === "edit" ? (
         <div
-          className="fixed inset-0 z-20 flex items-end justify-center bg-black/25 p-4 sm:items-center"
+          className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-black/25 p-4 py-8"
           role="dialog"
           aria-modal="true"
           aria-labelledby="academy-form-title"
         >
           <div
-            className={`w-full max-w-md p-6 ${glassCard}`}
+            className={`my-auto flex max-h-[min(85dvh,calc(100dvh-6rem))] w-full max-w-md flex-col p-6 ${glassCard}`}
             style={{ WebkitBackdropFilter: "blur(24px)" }}
           >
-            <h3 id="academy-form-title" className="text-lg font-semibold text-foreground">
+            <h3
+              id="academy-form-title"
+              className="shrink-0 text-lg font-semibold text-foreground"
+            >
               {modal === "create" ? "학원 등록" : "학원 수정"}
             </h3>
-            <div className="mt-4 max-h-[min(70vh,520px)] space-y-3 overflow-y-auto pr-1">
+            <div className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
               {modal === "create" ? (
                 <div>
                   <label
@@ -492,7 +531,9 @@ export function OwnerDashboard() {
                   <input
                     id="ac-login-id"
                     value={formAcademyId}
-                    onChange={(e) => setFormAcademyId(e.target.value.toLowerCase())}
+                    onChange={(e) =>
+                      setFormAcademyId(e.target.value.toLowerCase())
+                    }
                     className={inputClass}
                     placeholder="예: haesal-math"
                     maxLength={48}
@@ -504,15 +545,22 @@ export function OwnerDashboard() {
                 </div>
               ) : editTarget ? (
                 <div>
-                  <p className="mb-1 text-xs font-medium text-neutral-600">학원 로그인 ID</p>
+                  <p className="mb-1 text-xs font-medium text-neutral-600">
+                    학원 로그인 ID
+                  </p>
                   <p className="rounded-2xl border border-neutral-200/80 bg-white/40 px-4 py-3 font-mono text-sm text-foreground">
                     {editTarget.id}
                   </p>
-                  <p className="mt-1 text-[11px] text-neutral-500">등록 후에는 ID를 바꿀 수 없습니다.</p>
+                  <p className="mt-1 text-[11px] text-neutral-500">
+                    등록 후에는 ID를 바꿀 수 없습니다.
+                  </p>
                 </div>
               ) : null}
               <div>
-                <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="ac-name">
+                <label
+                  className="mb-1 block text-xs font-medium text-neutral-600"
+                  htmlFor="ac-name"
+                >
                   학원 이름
                 </label>
                 <input
@@ -562,7 +610,9 @@ export function OwnerDashboard() {
                 </>
               ) : (
                 <>
-                  <p className="text-xs font-medium text-neutral-600">포털 비밀번호 변경 (선택)</p>
+                  <p className="text-xs font-medium text-neutral-600">
+                    포털 비밀번호 변경 (선택)
+                  </p>
                   <input
                     type="password"
                     value={editPortalPassword}
@@ -582,13 +632,18 @@ export function OwnerDashboard() {
                 </>
               )}
               <div>
-                <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="ac-status">
+                <label
+                  className="mb-1 block text-xs font-medium text-neutral-600"
+                  htmlFor="ac-status"
+                >
                   상태
                 </label>
                 <select
                   id="ac-status"
                   value={formStatus}
-                  onChange={(e) => setFormStatus(e.target.value as "active" | "archived")}
+                  onChange={(e) =>
+                    setFormStatus(e.target.value as "active" | "archived")
+                  }
                   className={inputClass}
                 >
                   <option value="active">운영 중</option>
@@ -597,11 +652,11 @@ export function OwnerDashboard() {
               </div>
             </div>
             {formError ? (
-              <p className="mt-3 text-sm text-red-700" role="alert">
+              <p className="mt-3 shrink-0 text-sm text-red-700" role="alert">
                 {formError}
               </p>
             ) : null}
-            <div className="mt-6 flex gap-2">
+            <div className="mt-6 flex shrink-0 gap-2">
               <button
                 type="button"
                 onClick={closeModal}
@@ -624,18 +679,24 @@ export function OwnerDashboard() {
 
       {modal === "delete" && deleteTarget ? (
         <div
-          className="fixed inset-0 z-20 flex items-end justify-center bg-black/25 p-4 sm:items-center"
+          className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-black/25 p-4 py-8"
           role="dialog"
           aria-modal="true"
           aria-labelledby="delete-title"
         >
-          <div className={`w-full max-w-md p-6 ${glassCard}`}>
-            <h3 id="delete-title" className="text-lg font-semibold text-foreground">
+          <div className={`my-auto w-full max-w-md p-6 ${glassCard}`}>
+            <h3
+              id="delete-title"
+              className="text-lg font-semibold text-foreground"
+            >
               학원 삭제
             </h3>
             <p className="mt-3 text-sm text-neutral-600">
-              <span className="font-medium text-foreground">{deleteTarget.name}</span> 정보를
-              삭제합니다. 하위 선생님·학부모 데이터는 자동으로 지워지지 않을 수 있습니다.
+              <span className="font-medium text-foreground">
+                {deleteTarget.name}
+              </span>{" "}
+              정보를 삭제합니다. 하위 선생님·학부모 데이터는 자동으로 지워지지
+              않을 수 있습니다.
             </p>
             {formError ? (
               <p className="mt-3 text-sm text-red-700" role="alert">

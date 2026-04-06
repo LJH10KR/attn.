@@ -1,9 +1,7 @@
-"use client";
+﻿"use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { greetingDisplayNameFromProfile } from "@/lib/ui/dashboard-greetings";
-
-const glassCard = "glass-card";
 
 export type DashboardHeaderMenuAction = {
   label: string;
@@ -11,19 +9,30 @@ export type DashboardHeaderMenuAction = {
   disabled?: boolean;
 };
 
+export type DashboardHeaderBottomTab = {
+  id: string;
+  label: string;
+  icon: (active: boolean) => ReactNode;
+  active: boolean;
+  onSelect: () => void;
+};
+
 export type DashboardAppHeaderProps = {
-  /** 접근성용 — 화면에는 보이지 않고 스크린 리더만 읽습니다 */
+  /** ?묎렐?깆슜 ???붾㈃?먮뒗 蹂댁씠吏 ?딄퀬 ?ㅽ겕由?由щ뜑留??쎌뒿?덈떎 */
   title: string;
-  /** 프로필 메뉴에 표시할 소속 학원(오너는 운영 학원 요약 등) */
+  /** ?꾨줈??硫붾돱???쒖떆???뚯냽 ?숈썝(?ㅻ꼫???댁쁺 ?숈썝 ?붿빟 ?? */
   affiliationLabel: string;
-  /** 구분선 아래·메뉴 항목 위 보조 안내(선택) */
+  /** 援щ텇???꾨옒쨌硫붾돱 ??ぉ ??蹂댁“ ?덈궡(?좏깮) */
   menuIntro?: ReactNode;
   showBack: boolean;
   onBack?: () => void;
   backAriaLabel?: string;
-  /** 뒤로 버튼 옆에 표시 (오너가 학원 대시보드에서 돌아갈 때 등) */
+  /** ?ㅻ줈 踰꾪듉 ?놁뿉 ?쒖떆 (?ㅻ꼫媛 ?숈썝 ??쒕낫?쒖뿉???뚯븘媛????? */
   backHint?: string;
+  onHomeClick?: () => void;
   onBellClick?: () => void;
+  showBellInBottomBar?: boolean;
+  bottomTabs?: DashboardHeaderBottomTab[];
   menuActions: DashboardHeaderMenuAction[];
   profile: {
     displayName?: string | null;
@@ -35,21 +44,40 @@ export type DashboardAppHeaderProps = {
 
 function BellIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+    <svg
+      className={className}
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+    >
       <path
         d="M12 3a6 6 0 00-6 6v2.4L4 14v1h16v-1l-2-2.6V9a6 6 0 00-6-6z"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinejoin="round"
       />
-      <path d="M9 19a3 3 0 006 0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path
+        d="M9 19a3 3 0 006 0"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
 
 function BackChevronIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+    <svg
+      className={className}
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+    >
       <path
         d="M15 6l-6 6 6 6"
         stroke="currentColor"
@@ -95,7 +123,7 @@ function ProfileAvatar({
   }
   return (
     <span
-      className={`flex items-center justify-center rounded-full bg-neutral-200/90 font-semibold text-neutral-800 shadow-inner dark:bg-white/15 dark:text-neutral-100 ${box}`}
+      className={`flex items-center justify-center rounded-full font-semibold text-neutral-800 dark:text-neutral-100 ${box}`}
     >
       {initial}
     </span>
@@ -118,122 +146,190 @@ export function DashboardAppHeader({
   onBack,
   backAriaLabel = "뒤로 가기",
   backHint,
+  onHomeClick,
   onBellClick,
+  showBellInBottomBar = true,
+  bottomTabs,
   menuActions,
   profile,
   className = "",
 }: DashboardAppHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const menuWrapRef = useRef<HTMLDivElement>(null);
 
   const closeMenu = useCallback(() => setMenuOpen(false), []);
 
   useEffect(() => {
     if (!menuOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      const el = menuWrapRef.current;
-      if (el && !el.contains(e.target as Node)) {
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
         setMenuOpen(false);
       }
     };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onEsc);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onEsc);
+      document.body.style.overflow = "";
+    };
   }, [menuOpen]);
 
   const initial = dashboardProfileInitial(profile?.displayName, profile?.email);
+  const hasProfilePhoto = Boolean(profile?.photoURL?.trim());
 
   return (
     <header
-      className={`sticky top-0 z-30 mx-auto max-w-lg px-4 pb-3 pt-[max(0.65rem,env(safe-area-inset-top))] ${className}`}
+      className={`fixed inset-x-0 bottom-[25px] z-30 mx-auto max-w-lg px-4 ${className}`}
     >
       <h1 className="sr-only">{title}</h1>
-      {/* 글래스 테두리는 로고·알림·프로필 행에만 적용 */}
-      <div className={`${glassCard} px-3 py-2.5`} style={{ WebkitBackdropFilter: "blur(20px)" }}>
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-[17px] font-bold tracking-tight text-foreground">attn.</p>
-          <div className="flex flex-1 justify-end">
-            <div className="relative flex items-center gap-1.5" ref={menuWrapRef}>
-              <button
-                type="button"
-                onClick={() => onBellClick?.()}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-neutral-300/50 bg-white/45 text-neutral-700 shadow-sm backdrop-blur-md transition hover:bg-white/75 dark:border-white/12 dark:bg-white/10 dark:text-neutral-200 dark:hover:bg-white/15"
-                aria-label="알림"
-              >
-                <BellIcon className="text-current" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setMenuOpen((o) => !o)}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/45 shadow-sm backdrop-blur-md transition hover:bg-white/75 dark:bg-white/10 dark:hover:bg-white/15"
-                aria-expanded={menuOpen}
-                aria-haspopup="menu"
-                aria-label="계정 메뉴"
-              >
-                <ProfileAvatar photoURL={profile?.photoURL} initial={initial} />
-              </button>
-              {menuOpen ? (
-                <div
-                  className="absolute right-0 top-[calc(100%+10px)] z-[100] max-w-[min(22rem,calc(100vw-2rem))] min-w-[16rem] overflow-hidden rounded-2xl border border-neutral-300/40 bg-white/90 shadow-[0_16px_48px_-12px_rgba(0,0,0,0.2)] backdrop-blur-2xl dark:border-white/12 dark:bg-neutral-900/92"
-                  role="menu"
+      <div className="flex items-center gap-2">
+        {/* 메인 하단 바 */}
+        <div
+          className="flex h-[60px] min-w-0 flex-1 items-center justify-between rounded-full bg-white/38 px-3 shadow-[0_12px_30px_-14px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.78)] dark:bg-white/10 dark:shadow-[0_14px_34px_-16px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.18)]"
+          style={{ WebkitBackdropFilter: "blur(20px) saturate(1.15)" }}
+        >
+          {bottomTabs && bottomTabs.length > 0 ? (
+            <nav className="grid w-full grid-cols-4 items-center gap-0.5" aria-label="대시보드 메뉴">
+              {bottomTabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={tab.onSelect}
+                  className={`flex h-[57px] min-w-0 flex-col items-center justify-center gap-0 rounded-full px-1 py-0.5 transition ${
+                    tab.active
+                      ? "mx-[1.5px] mt-[1.5px] bg-[#222]/70 px-2 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.16)]"
+                      : "text-neutral-700"
+                  }`}
+                  aria-current={tab.active ? "page" : undefined}
                 >
-                  <div className="px-4 pb-3 pt-3">
-                    <div className="flex gap-3">
-                      <div className="shrink-0 self-center">
-                        <ProfileAvatar
-                          photoURL={profile?.photoURL}
-                          initial={initial}
-                          size="lg"
-                        />
-                      </div>
-                      <div className="flex min-w-0 flex-1 flex-col justify-center gap-1 text-left text-[11px] leading-tight">
-                        <p className="truncate font-semibold text-foreground">
-                          {menuProfileDisplayName(profile)}
-                        </p>
-                        <p className="truncate text-neutral-800 dark:text-neutral-200">
-                          {profile?.email?.trim() || "—"}
-                        </p>
-                        <p className="truncate text-neutral-800 dark:text-neutral-200">
-                          {affiliationLabel.trim() || "—"}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  <div
-                    className="mx-4 border-t border-neutral-200/90 dark:border-white/10"
-                    role="separator"
-                  />
-                  {menuIntro != null && menuIntro !== false ? (
-                    <div className="px-4 py-2.5 text-xs leading-relaxed text-neutral-600 dark:text-neutral-400">
-                      {menuIntro}
-                    </div>
-                  ) : null}
-                  <div className="py-1">
-                    {menuActions.map((a, i) => (
-                      <button
-                        key={`${a.label}-${i}`}
-                        type="button"
-                        role="menuitem"
-                        disabled={a.disabled}
-                        className="flex w-full px-4 py-3 text-left text-sm font-medium text-foreground hover:bg-black/[0.04] disabled:opacity-45 dark:hover:bg-white/10"
-                        onClick={() => {
-                          if (a.disabled) return;
-                          a.onSelect();
-                          closeMenu();
-                        }}
-                      >
-                        {a.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                  <span className={`flex items-center justify-center ${tab.id === "home" ? "h-8 w-[4.1rem]" : "h-7 w-7"}`}>{tab.icon(tab.active)}</span>
+                  <span className="truncate text-[10px] font-medium">{tab.label}</span>
+                </button>
+              ))}
+            </nav>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => onHomeClick?.()}
+                className="rounded-2xl px-2 py-1 text-[17px] font-bold tracking-tight text-foreground transition hover:bg-black/[0.04] dark:hover:bg-white/10"
+                aria-label="홈으로 이동"
+              >
+                attn.
+              </button>
+              {showBellInBottomBar ? (
+                <button
+                  type="button"
+                  onClick={() => onBellClick?.()}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-neutral-300/50 bg-white/45 text-neutral-700 shadow-sm backdrop-blur-md transition hover:bg-white/75 dark:border-white/12 dark:bg-white/10 dark:text-neutral-200 dark:hover:bg-white/15"
+                  aria-label="알림"
+                >
+                  <BellIcon className="text-current" />
+                </button>
               ) : null}
+            </>
+          )}
+        </div>
+
+        {/* 우측 단일 원형 프로필 버튼 */}
+        <button
+          type="button"
+          onClick={() => setMenuOpen((o) => !o)}
+          className={
+            hasProfilePhoto
+              ? "relative flex h-[60px] w-[60px] shrink-0 items-center justify-center overflow-hidden rounded-full shadow-[0_10px_28px_-10px_rgba(0,0,0,0.38)] transition hover:brightness-105"
+              : "relative flex h-[60px] w-[60px] shrink-0 items-center justify-center rounded-full border border-white/65 bg-white/38 p-0.5 shadow-[0_10px_28px_-10px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.8)] backdrop-blur-xl transition hover:bg-white/52 dark:border-white/20 dark:bg-white/12 dark:shadow-[0_12px_30px_-12px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.2)] dark:hover:bg-white/18"
+          }
+          style={
+            hasProfilePhoto
+              ? undefined
+              : { WebkitBackdropFilter: "blur(18px) saturate(1.15)" }
+          }
+          aria-expanded={menuOpen}
+          aria-haspopup="menu"
+          aria-label="계정 메뉴"
+        >
+          {!hasProfilePhoto ? (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-[2px] rounded-full bg-gradient-to-br from-white/70 via-white/20 to-transparent dark:from-white/20 dark:via-white/5 dark:to-transparent"
+            />
+          ) : null}
+          <ProfileAvatar
+            photoURL={profile?.photoURL}
+            initial={initial}
+            size="lg"
+          />
+        </button>
+      </div>
+
+      {menuOpen ? (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/35 backdrop-blur-[1px]"
+            onClick={closeMenu}
+            aria-label="계정 메뉴 닫기"
+          />
+          <div
+            className="relative z-[101] w-full max-w-[22rem] overflow-hidden rounded-2xl border border-neutral-300/40 bg-white/95 shadow-[0_20px_54px_-14px_rgba(0,0,0,0.25)] backdrop-blur-2xl dark:border-white/12 dark:bg-neutral-900/94"
+            role="menu"
+            aria-label="계정 메뉴"
+          >
+            <div className="px-4 pb-3 pt-3">
+              <div className="flex gap-3">
+                <div className="shrink-0 self-center">
+                  <ProfileAvatar
+                    photoURL={profile?.photoURL}
+                    initial={initial}
+                    size="lg"
+                  />
+                </div>
+                <div className="flex min-w-0 flex-1 flex-col justify-center gap-1 text-left text-[11px] leading-tight">
+                  <p className="truncate font-semibold text-foreground">
+                    {menuProfileDisplayName(profile)}
+                  </p>
+                  <p className="truncate text-neutral-800 dark:text-neutral-200">
+                    {profile?.email?.trim() || "—"}
+                  </p>
+                  <p className="truncate text-neutral-800 dark:text-neutral-200">
+                    {affiliationLabel.trim() || "—"}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div
+              className="mx-4 border-t border-neutral-200/90 dark:border-white/10"
+              role="separator"
+            />
+            {menuIntro != null && menuIntro !== false ? (
+              <div className="px-4 py-2.5 text-xs leading-relaxed text-neutral-600 dark:text-neutral-400">
+                {menuIntro}
+              </div>
+            ) : null}
+            <div className="py-1">
+              {menuActions.map((a, i) => (
+                <button
+                  key={`${a.label}-${i}`}
+                  type="button"
+                  role="menuitem"
+                  disabled={a.disabled}
+                  className="flex w-full px-4 py-3 text-left text-sm font-medium text-foreground hover:bg-black/[0.04] disabled:opacity-45 dark:hover:bg-white/10"
+                  onClick={() => {
+                    if (a.disabled) return;
+                    a.onSelect();
+                    closeMenu();
+                  }}
+                >
+                  {a.label}
+                </button>
+              ))}
             </div>
           </div>
         </div>
-      </div>
+      ) : null}
 
       {showBack ? (
-        <div className="mt-2 flex items-center gap-2">
+        <div className="mb-2 flex items-center gap-2">
           <button
             type="button"
             onClick={onBack}
@@ -243,11 +339,13 @@ export function DashboardAppHeader({
             <BackChevronIcon />
           </button>
           {backHint ? (
-            <span className="min-w-0 text-sm font-medium leading-snug text-foreground">{backHint}</span>
+            <span className="min-w-0 text-sm font-medium leading-snug text-foreground">
+              {backHint}
+            </span>
           ) : null}
         </div>
       ) : null}
-
     </header>
   );
 }
+
