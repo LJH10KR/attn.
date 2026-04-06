@@ -1,8 +1,37 @@
 @import "tailwindcss";
 
+@variant dark (@media (prefers-color-scheme: dark));
+
 :root {
+  color-scheme: light;
   --background: #ffffff;
   --foreground: #171717;
+  --glass-border: rgba(0, 0, 0, 0.07);
+  --glass-fill: rgba(255, 255, 255, 0.52);
+  --glass-fill-hover: rgba(255, 255, 255, 0.68);
+  --glass-shadow: 0 24px 80px -20px rgba(0, 0, 0, 0.11);
+  --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  --glass-tile-shadow: 0 12px 40px -16px rgba(0, 0, 0, 0.09);
+  --glass-dock-fill: rgba(255, 255, 255, 0.82);
+  --glass-dock-border: rgba(255, 255, 255, 0.75);
+  --glass-dock-shadow: 0 12px 40px -12px rgba(0, 0, 0, 0.18);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --background: #000000;
+    --foreground: #ededed;
+    --glass-border: rgba(255, 255, 255, 0.14);
+    --glass-fill: rgba(255, 255, 255, 0.07);
+    --glass-fill-hover: rgba(255, 255, 255, 0.11);
+    --glass-shadow: 0 24px 80px -20px rgba(0, 0, 0, 0.75);
+    --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    --glass-tile-shadow: 0 12px 40px -16px rgba(0, 0, 0, 0.55);
+    --glass-dock-fill: rgba(30, 30, 32, 0.78);
+    --glass-dock-border: rgba(255, 255, 255, 0.16);
+    --glass-dock-shadow: 0 12px 40px -12px rgba(0, 0, 0, 0.55);
+  }
 }
 
 @theme inline {
@@ -12,15 +41,61 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-noto-kr), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* 리퀴드 글래스 패널 — 라이트/다크에서 동일한 블러·채도, 토큰만 전환 */
+.glass-card {
+  border-radius: 1.75rem;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-fill);
+  box-shadow: var(--glass-shadow), var(--glass-inset);
+  -webkit-backdrop-filter: blur(28px) saturate(1.25);
+  backdrop-filter: blur(28px) saturate(1.25);
+}
+
+.glass-card-lg {
+  border-radius: 2.5rem;
+}
+
+.glass-card-hero {
+  border-radius: 2.5rem;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-fill);
+  box-shadow: var(--glass-shadow), var(--glass-inset);
+  -webkit-backdrop-filter: blur(32px) saturate(1.35);
+  backdrop-filter: blur(32px) saturate(1.35);
+}
+
+.glass-card-soft {
+  border-radius: 2rem;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-fill);
+  box-shadow: var(--glass-shadow), var(--glass-inset);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  backdrop-filter: blur(20px) saturate(1.2);
+}
+
+.glass-tile {
+  border-radius: 1.75rem;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-fill);
+  box-shadow: var(--glass-tile-shadow), var(--glass-inset);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  backdrop-filter: blur(24px) saturate(1.2);
+}
+
+.glass-tile-hover:hover {
+  background: var(--glass-fill-hover);
+}
+
+.glass-dock {
+  border: 1px solid var(--glass-dock-border);
+  background: var(--glass-dock-fill);
+  box-shadow: var(--glass-dock-shadow), var(--glass-inset);
+  -webkit-backdrop-filter: blur(28px) saturate(1.25);
+  backdrop-filter: blur(28px) saturate(1.25);
 }

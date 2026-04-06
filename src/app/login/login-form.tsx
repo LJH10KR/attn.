@@ -442,7 +442,7 @@ export function LoginForm() {
   }, [configured, email, role]);
 
   return (
-    <div className="min-h-[100dvh] bg-[#f2f1eb] px-4 py-10 flex flex-col items-center justify-center pb-[max(2rem,env(safe-area-inset-bottom))]">
+    <div className="min-h-[100dvh] bg-background px-4 py-10 flex flex-col items-center justify-center pb-[max(2rem,env(safe-area-inset-bottom))]">
       {!configured ? (
         <p className="mb-4 max-w-md rounded-2xl border border-amber-200/80 bg-amber-50/90 px-4 py-3 text-center text-sm text-amber-950 backdrop-blur-sm">
           <code className="font-mono text-xs">.env.example</code>을 참고해{" "}
@@ -453,10 +453,10 @@ export function LoginForm() {
       ) : null}
 
       <div
-        className="w-full max-w-[400px] rounded-[2.5rem] border border-white/70 bg-[rgba(236,235,228,0.45)] p-8 shadow-[0_24px_80px_-20px_rgba(0,0,0,0.14),inset_0_1px_0_rgba(255,255,255,0.85)] backdrop-blur-2xl backdrop-saturate-150"
+        className="glass-card-hero w-full max-w-[400px] p-8"
         style={{ WebkitBackdropFilter: "blur(24px) saturate(1.2)" }}
       >
-        <h1 className="text-center text-2xl font-semibold tracking-tight text-[#111]">
+        <h1 className="text-center text-2xl font-semibold tracking-tight text-foreground">
           로그인
         </h1>
 
@@ -475,7 +475,7 @@ export function LoginForm() {
               }}
               className={`rounded-full px-3.5 py-2 text-xs font-medium transition-all ${
                 role === r.id
-                  ? "bg-white/75 text-[#111] shadow-[0_4px_20px_rgba(0,0,0,0.08)] ring-1 ring-black/10"
+                  ? "bg-white/75 text-foreground shadow-[0_4px_20px_rgba(0,0,0,0.08)] ring-1 ring-black/10"
                   : "bg-white/35 text-neutral-600 ring-1 ring-black/5 hover:bg-white/55"
               } disabled:opacity-50`}
             >
@@ -503,7 +503,7 @@ export function LoginForm() {
                 type="button"
                 disabled={busy || logoutBusy || !configured}
                 onClick={onContinueAsSession}
-                className="flex-1 rounded-xl bg-[#222] px-3 py-2.5 text-xs font-medium text-white shadow-sm transition hover:bg-[#333] active:scale-[0.99] disabled:opacity-50"
+                className="flex-1 rounded-xl bg-[#222] dark:bg-neutral-100 px-3 py-2.5 text-xs font-medium text-white dark:text-neutral-950 shadow-sm transition hover:bg-[#333] dark:hover:bg-white active:scale-[0.99] disabled:opacity-50"
               >
                 {busy ? "처리 중…" : "선택한 역할 화면으로 이동"}
               </button>
@@ -553,7 +553,7 @@ export function LoginForm() {
                 autoComplete="username"
                 value={academyId}
                 onChange={(e) => setAcademyId(e.target.value)}
-                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 px-4 py-3.5 text-[#111] shadow-inner shadow-white/40 outline-none ring-0 transition placeholder:text-neutral-400 focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]"
+                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 text-foreground shadow-inner shadow-white/40 outline-none ring-0 transition placeholder:text-neutral-400 focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]"
                 placeholder="오너가 설정한 학원 로그인 ID"
               />
             </div>
@@ -571,14 +571,14 @@ export function LoginForm() {
                 autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 px-4 py-3.5 text-[#111] shadow-inner shadow-white/40 outline-none focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]"
+                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 text-foreground shadow-inner shadow-white/40 outline-none focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]"
                 placeholder="포털 비밀번호"
               />
             </div>
             <button
               type="submit"
               disabled={busy || !configured || sessionBlocked}
-              className="mt-2 w-full rounded-2xl bg-[#222] py-3.5 text-[15px] font-medium text-white shadow-[0_8px_24px_rgba(0,0,0,0.18)] transition hover:bg-[#333] active:scale-[0.99] disabled:opacity-50"
+              className="mt-2 w-full rounded-2xl bg-[#222] dark:bg-neutral-100 py-3.5 text-[15px] font-medium text-white dark:text-neutral-950 shadow-[0_8px_24px_rgba(0,0,0,0.18)] transition hover:bg-[#333] dark:hover:bg-white active:scale-[0.99] disabled:opacity-50"
             >
               {busy ? "처리 중…" : "로그인"}
             </button>
@@ -599,7 +599,7 @@ export function LoginForm() {
                 autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 px-4 py-3.5 text-[#111] shadow-inner shadow-white/40 outline-none focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]"
+                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 text-foreground shadow-inner shadow-white/40 outline-none focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]"
                 placeholder="name@example.com"
               />
             </div>
@@ -617,13 +617,13 @@ export function LoginForm() {
                 autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 px-4 py-3.5 text-[#111] shadow-inner shadow-white/40 outline-none focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]"
+                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 text-foreground shadow-inner shadow-white/40 outline-none focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]"
               />
             </div>
             <button
               type="submit"
               disabled={busy || !configured || sessionBlocked}
-              className="mt-2 w-full rounded-2xl bg-[#222] py-3.5 text-[15px] font-medium text-white shadow-[0_8px_24px_rgba(0,0,0,0.18)] transition hover:bg-[#333] active:scale-[0.99] disabled:opacity-50"
+              className="mt-2 w-full rounded-2xl bg-[#222] dark:bg-neutral-100 py-3.5 text-[15px] font-medium text-white dark:text-neutral-950 shadow-[0_8px_24px_rgba(0,0,0,0.18)] transition hover:bg-[#333] dark:hover:bg-white active:scale-[0.99] disabled:opacity-50"
             >
               {busy ? "처리 중…" : "로그인"}
             </button>
@@ -643,7 +643,7 @@ export function LoginForm() {
               type="button"
               disabled={busy || !configured || sessionBlocked}
               onClick={onGoogleLogin}
-              className="flex w-full items-center justify-center gap-3 rounded-2xl border border-neutral-300/70 bg-white/60 py-3.5 text-[15px] font-medium text-[#222] shadow-sm backdrop-blur-md transition hover:bg-white/85 active:scale-[0.99] disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-3 rounded-2xl border border-neutral-300/70 bg-white/60 dark:border-white/12 dark:bg-white/10 py-3.5 text-[15px] font-medium text-foreground shadow-sm backdrop-blur-md transition hover:bg-white/85 active:scale-[0.99] disabled:opacity-50"
             >
               <GoogleMark />
               Google 계정으로 시작

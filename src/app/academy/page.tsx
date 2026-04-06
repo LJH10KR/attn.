@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import { Suspense } from "react";
 import { AcademyDashboard } from "./academy-dashboard";
 
@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 function AcademyFallback() {
   return (
-    <div className="min-h-[100dvh] bg-[#f2f1eb] flex items-center justify-center">
+    <div className="min-h-[100dvh] bg-background flex items-center justify-center">
       <p className="text-sm text-neutral-500">불러오는 중…</p>
     </div>
   );

@@ -9,9 +9,9 @@ export const metadata: Metadata = {
 
 export default function TeacherCompletePage() {
   return (
-    <div className="min-h-[100dvh] bg-[#f2f1eb] px-4 py-12 flex flex-col items-center justify-center">
-      <div className="w-full max-w-md rounded-[1.75rem] border border-white/70 bg-[rgba(236,235,228,0.55)] p-8 shadow-lg backdrop-blur-xl">
-        <h1 className="text-lg font-semibold text-[#111]">선생님 초청</h1>
+    <div className="min-h-[100dvh] bg-background px-4 py-12 flex flex-col items-center justify-center">
+      <div className="glass-card-soft w-full max-w-md p-8 text-center">
+        <h1 className="text-lg font-semibold text-foreground">선생님 초청</h1>
         <Suspense
           fallback={<p className="mt-4 text-sm text-neutral-500">불러오는 중…</p>}
         >

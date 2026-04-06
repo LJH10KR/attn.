@@ -27,12 +27,12 @@ export function ParentChrome({ children }: { children: React.ReactNode }) {
       {attnOpen ? (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4">
           <div className={`w-full max-w-sm ${glassOverlay}`} role="alertdialog" aria-live="polite">
-            <p className="text-sm font-medium text-[#111]">알림</p>
+            <p className="text-sm font-medium text-foreground">알림</p>
             <p className="mt-3 text-sm text-neutral-700">{attnBody}</p>
             <button
               type="button"
               onClick={() => setAttnOpen(false)}
-              className="mt-5 w-full rounded-2xl bg-[#222] py-2.5 text-sm font-medium text-white"
+              className="mt-5 w-full rounded-2xl bg-[#222] dark:bg-neutral-100 py-2.5 text-sm font-medium text-white dark:text-neutral-950"
             >
               확인
             </button>

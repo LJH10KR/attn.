@@ -174,7 +174,7 @@ export function TeacherCompleteForm() {
         ) : null}
         <Link
           href="/login?role=teacher"
-          className="inline-flex w-full justify-center rounded-2xl bg-[#222] py-3 text-center font-medium text-white"
+          className="inline-flex w-full justify-center rounded-2xl bg-[#222] dark:bg-neutral-100 py-3 text-center font-medium text-white dark:text-neutral-950"
         >
           선생님 로그인
         </Link>
@@ -220,7 +220,7 @@ export function TeacherCompleteForm() {
         type="button"
         disabled={busy}
         onClick={() => void onFinalize()}
-        className="w-full rounded-2xl bg-[#222] py-3 text-sm font-medium text-white disabled:opacity-60"
+        className="w-full rounded-2xl bg-[#222] dark:bg-neutral-100 py-3 text-sm font-medium text-white dark:text-neutral-950 disabled:opacity-60"
       >
         {busy ? "처리 중…" : "등록 완료 처리"}
       </button>

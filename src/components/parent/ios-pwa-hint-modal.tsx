@@ -24,7 +24,7 @@ export function IosPwaHintModal({ open, onCloseAction, onConfirmAction }: Props)
         aria-modal="true"
         aria-labelledby="ios-pwa-hint-title"
       >
-        <h2 id="ios-pwa-hint-title" className="text-base font-semibold text-[#111]">
+        <h2 id="ios-pwa-hint-title" className="text-base font-semibold text-foreground">
           iOS에서 알림을 받으려면
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-neutral-700 whitespace-pre-line">
@@ -77,7 +77,7 @@ export function IosPwaHintModal({ open, onCloseAction, onConfirmAction }: Props)
                 }
               })();
             }}
-            className="rounded-2xl bg-[#222] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#333] disabled:opacity-50"
+            className="rounded-2xl bg-[#222] dark:bg-neutral-100 px-4 py-2.5 text-sm font-medium text-white dark:text-neutral-950 hover:bg-[#333] dark:hover:bg-white disabled:opacity-50"
           >
             {busy ? "처리 중…" : "확인"}
           </button>

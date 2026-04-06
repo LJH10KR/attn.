@@ -191,7 +191,7 @@ export function AuthActionForm() {
       <form onSubmit={onSubmitPassword} className="mt-2 space-y-4">
         {resetEmail ? (
           <p className="text-xs text-neutral-500 break-all">
-            계정: <span className="font-mono text-[#111]">{resetEmail}</span>
+            계정: <span className="font-mono text-foreground">{resetEmail}</span>
           </p>
         ) : null}
         <div>
@@ -224,7 +224,7 @@ export function AuthActionForm() {
         <button
           type="submit"
           disabled={submitBusy}
-          className="w-full rounded-2xl bg-[#222] py-3 text-sm font-medium text-white disabled:opacity-60"
+          className="w-full rounded-2xl bg-[#222] dark:bg-neutral-100 py-3 text-sm font-medium text-white dark:text-neutral-950 disabled:opacity-60"
         >
           {submitBusy ? "저장 중…" : "비밀번호 저장"}
         </button>

@@ -12,8 +12,7 @@ import { ParentPushNotificationsCard } from "@/components/parent/parent-push-not
 import { getFirebaseAuth, getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
 
-const glassCard =
-  "rounded-[1.75rem] border border-white/70 bg-[rgba(236,235,228,0.45)] shadow-[0_24px_80px_-20px_rgba(0,0,0,0.14),inset_0_1px_0_rgba(255,255,255,0.85)] backdrop-blur-2xl backdrop-saturate-150";
+const glassCard = "glass-card";
 
 function sortByName(a: StudentRowVM, b: StudentRowVM): number {
   return a.name.localeCompare(b.name, "ko");
@@ -274,7 +273,7 @@ export default function ParentDashboardPage() {
 
   if (!ready) {
     return (
-      <div className="flex min-h-[100dvh] items-center justify-center bg-[#f2f1eb] px-4">
+      <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
         <p className="text-sm text-neutral-600">불러오는 중…</p>
       </div>
     );
@@ -282,14 +281,14 @@ export default function ParentDashboardPage() {
 
   if (initError) {
     return (
-      <div className="min-h-[100dvh] bg-[#f2f1eb] px-4 py-10 flex flex-col items-center justify-center">
+      <div className="min-h-[100dvh] bg-background px-4 py-10 flex flex-col items-center justify-center">
         <div className={`w-full max-w-[520px] p-8 ${glassCard}`}>
           <p className="text-center text-sm text-neutral-700">{initError}</p>
           <button
             type="button"
             onClick={() => void onLogout()}
             disabled={logoutBusy}
-            className="mt-6 w-full rounded-2xl bg-[#222] py-3 text-sm font-medium text-white disabled:opacity-60"
+            className="mt-6 w-full rounded-2xl bg-[#222] dark:bg-neutral-100 py-3 text-sm font-medium text-white dark:text-neutral-950 disabled:opacity-60"
           >
             {logoutBusy ? "처리 중…" : "로그아웃"}
           </button>
@@ -299,14 +298,14 @@ export default function ParentDashboardPage() {
   }
 
   return (
-    <div className="min-h-[100dvh] bg-[#f2f1eb] px-4 pb-12 pt-8">
+    <div className="min-h-[100dvh] bg-background px-4 pb-12 pt-8">
       <div className="mx-auto max-w-lg">
         <header className="mb-6 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-xl font-semibold tracking-tight text-[#111]">학부모 대시보드</h1>
+            <h1 className="text-xl font-semibold tracking-tight text-foreground">학부모 대시보드</h1>
             <p className="mt-1 text-xs text-neutral-600">
               {academyName ? (
-                <span className="font-medium text-[#111]">{academyName}</span>
+                <span className="font-medium text-foreground">{academyName}</span>
               ) : (
                 "학원"
               )}
@@ -347,7 +346,7 @@ export default function ParentDashboardPage() {
         </div>
 
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-[#111]">자녀 학생</h2>
+          <h2 className="text-sm font-semibold text-foreground">자녀 학생</h2>
           <button
             type="button"
             onClick={() => void refreshChildrenList()}
@@ -372,15 +371,15 @@ export default function ParentDashboardPage() {
           ) : (
             students.map((s) => (
               <div key={s.id} className={`p-4 ${glassCard}`}>
-                <p className="font-medium text-[#111]">
+                <p className="font-medium text-foreground">
                   {s.name}
                   <span className="font-normal text-neutral-500"> · 만 {s.age}세</span>
                 </p>
                 <p className="mt-2 text-[11px] text-neutral-600">
-                  연락 <span className="text-[#111]">{s.phone || "—"}</span>
+                  연락 <span className="text-foreground">{s.phone || "—"}</span>
                 </p>
                 <p className="mt-0.5 text-[11px] text-neutral-600">
-                  비상 연락 <span className="text-[#111]">{s.emergencyContact || "—"}</span>
+                  비상 연락 <span className="text-foreground">{s.emergencyContact || "—"}</span>
                 </p>
               </div>
             ))

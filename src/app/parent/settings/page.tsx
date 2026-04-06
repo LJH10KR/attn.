@@ -8,8 +8,7 @@ import { getFirebaseAuth, getFirebaseDb } from "@/lib/firebase/client-app";
 import { doc, setDoc } from "firebase/firestore";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
 
-const glassCard =
-  "rounded-[1.75rem] border border-white/70 bg-[rgba(236,235,228,0.45)] shadow-[0_24px_80px_-20px_rgba(0,0,0,0.14),inset_0_1px_0_rgba(255,255,255,0.85)] backdrop-blur-2xl backdrop-saturate-150";
+const glassCard = "glass-card";
 
 export default function ParentSettingsPage() {
   const [iosModalOpen, setIosModalOpen] = useState(false);
@@ -29,7 +28,7 @@ export default function ParentSettingsPage() {
   };
 
   return (
-    <div className="min-h-[100dvh] bg-[#f2f1eb] px-4 pb-12 pt-8">
+    <div className="min-h-[100dvh] bg-background px-4 pb-12 pt-8">
       <div className="mx-auto max-w-lg">
         <header className="mb-6">
           <Link
@@ -38,7 +37,7 @@ export default function ParentSettingsPage() {
           >
             ← 학부모 대시보드
           </Link>
-          <h1 className="mt-3 text-xl font-semibold tracking-tight text-[#111]">사용자 설정</h1>
+          <h1 className="mt-3 text-xl font-semibold tracking-tight text-foreground">사용자 설정</h1>
           <p className="mt-1 text-xs text-neutral-600">알림 및 기기 안내를 관리합니다.</p>
         </header>
 
@@ -51,7 +50,7 @@ export default function ParentSettingsPage() {
         <div className="space-y-4">
           <ParentPushNotificationsCard />
           <section className={`p-4 ${glassCard}`}>
-            <h2 className="text-sm font-semibold text-[#111]">iOS (Safari)</h2>
+            <h2 className="text-sm font-semibold text-foreground">iOS (Safari)</h2>
             <p className="mt-2 text-[11px] leading-relaxed text-neutral-600">
               푸시를 안정적으로 쓰려면 홈 화면에 추가한 뒤 해당 아이콘으로 여는 것이 좋습니다. 안내를
               다시 보려면 아래를 누르세요.

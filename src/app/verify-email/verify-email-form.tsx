@@ -104,7 +104,7 @@ export function VerifyEmailForm() {
 
   if (!configured) {
     return (
-      <div className="min-h-[100dvh] bg-[#f2f1eb] flex items-center justify-center px-4">
+      <div className="min-h-[100dvh] bg-background flex items-center justify-center px-4">
         <p className="text-center text-sm text-neutral-600">
           Firebase 설정이 필요합니다.
         </p>
@@ -114,12 +114,12 @@ export function VerifyEmailForm() {
 
   if (user === null) {
     return (
-      <div className="min-h-[100dvh] bg-[#f2f1eb] px-4 py-16 flex flex-col items-center justify-center">
-        <div className="w-full max-w-md rounded-[2rem] border border-white/70 bg-[rgba(236,235,228,0.5)] p-8 text-center shadow-lg backdrop-blur-xl">
-          <p className="text-sm text-neutral-700">로그인된 세션이 없습니다.</p>
+      <div className="min-h-[100dvh] bg-background px-4 py-16 flex flex-col items-center justify-center">
+        <div className="glass-card-soft w-full max-w-md p-8 text-center">
+          <p className="text-sm text-neutral-700 dark:text-neutral-300">로그인된 세션이 없습니다.</p>
           <Link
             href="/login"
-            className="mt-6 inline-block rounded-2xl bg-[#222] px-6 py-3 text-sm font-medium text-white"
+            className="mt-6 inline-block rounded-2xl bg-[#222] dark:bg-neutral-100 px-6 py-3 text-sm font-medium text-white dark:text-neutral-950"
           >
             로그인
           </Link>
@@ -130,9 +130,9 @@ export function VerifyEmailForm() {
 
   if (user.emailVerified) {
     return (
-      <div className="min-h-[100dvh] bg-[#f2f1eb] px-4 py-16 flex flex-col items-center justify-center">
-        <div className="w-full max-w-md rounded-[2rem] border border-white/70 bg-[rgba(236,235,228,0.5)] p-8 text-center shadow-lg backdrop-blur-xl">
-          <p className="text-sm text-neutral-700">이미 인증이 완료된 계정입니다.</p>
+      <div className="min-h-[100dvh] bg-background px-4 py-16 flex flex-col items-center justify-center">
+        <div className="glass-card-soft w-full max-w-md p-8 text-center">
+          <p className="text-sm text-neutral-700 dark:text-neutral-300">이미 인증이 완료된 계정입니다.</p>
           <button
             type="button"
             disabled={busy}
@@ -145,7 +145,7 @@ export function VerifyEmailForm() {
                 setBusy(false);
               }
             }}
-            className="mt-6 w-full rounded-2xl bg-[#222] py-3 text-sm font-medium text-white disabled:opacity-50"
+            className="mt-6 w-full rounded-2xl bg-[#222] dark:bg-neutral-100 py-3 text-sm font-medium text-white dark:text-neutral-950 disabled:opacity-50"
           >
             {busy ? "처리 중…" : "시작하기"}
           </button>
@@ -155,17 +155,14 @@ export function VerifyEmailForm() {
   }
 
   return (
-    <div className="min-h-[100dvh] bg-[#f2f1eb] px-4 py-10 flex flex-col items-center justify-center pb-[max(2rem,env(safe-area-inset-bottom))]">
-      <div
-        className="w-full max-w-[400px] rounded-[2.5rem] border border-white/70 bg-[rgba(236,235,228,0.45)] p-8 shadow-[0_24px_80px_-20px_rgba(0,0,0,0.14),inset_0_1px_0_rgba(255,255,255,0.85)] backdrop-blur-2xl backdrop-saturate-150"
-        style={{ WebkitBackdropFilter: "blur(24px) saturate(1.2)" }}
-      >
-        <h1 className="text-center text-xl font-semibold text-[#111]">이메일 인증</h1>
-        <p className="mt-3 text-center text-sm leading-relaxed text-neutral-600">
+    <div className="min-h-[100dvh] bg-background px-4 py-10 flex flex-col items-center justify-center pb-[max(2rem,env(safe-area-inset-bottom))]">
+      <div className="glass-card-hero w-full max-w-[400px] p-8">
+        <h1 className="text-center text-xl font-semibold text-foreground">이메일 인증</h1>
+        <p className="mt-3 text-center text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">
           아래 주소로 인증 메일을 보냈습니다. 메일의 링크를 눌러 인증을 완료한 뒤{" "}
-          <span className="font-medium text-[#111]">「인증 완료 확인」</span>을 눌러 주세요.
+          <span className="font-medium text-foreground">「인증 완료 확인」</span>을 눌러 주세요.
         </p>
-        <p className="mt-4 rounded-2xl bg-white/50 px-3 py-2 text-center text-sm font-medium text-[#222] ring-1 ring-black/5">
+        <p className="mt-4 rounded-2xl bg-white/50 px-3 py-2 text-center text-sm font-medium text-foreground ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10">
           {user.email}
         </p>
 
@@ -188,7 +185,7 @@ export function VerifyEmailForm() {
             type="button"
             disabled={busy || cooldown > 0}
             onClick={onConfirmVerified}
-            className="w-full rounded-2xl bg-[#222] py-3.5 text-[15px] font-medium text-white shadow-lg transition hover:bg-[#333] disabled:opacity-50"
+            className="w-full rounded-2xl bg-[#222] dark:bg-neutral-100 py-3.5 text-[15px] font-medium text-white dark:text-neutral-950 shadow-lg transition hover:bg-[#333] dark:hover:bg-white disabled:opacity-50"
           >
             {busy ? "처리 중…" : "인증 완료 확인"}
           </button>
@@ -196,7 +193,7 @@ export function VerifyEmailForm() {
             type="button"
             disabled={busy || cooldown > 0}
             onClick={onResend}
-            className="w-full rounded-2xl border border-neutral-300/70 bg-white/50 py-3.5 text-[15px] font-medium text-[#222] backdrop-blur-md transition hover:bg-white/80 disabled:opacity-50"
+            className="w-full rounded-2xl border border-neutral-300/70 bg-white/50 py-3.5 text-[15px] font-medium text-foreground backdrop-blur-md transition hover:bg-white/80 disabled:opacity-50"
           >
             {cooldown > 0
               ? `인증 메일 다시 보내기 (${cooldown}초)`

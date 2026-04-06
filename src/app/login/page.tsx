@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import { Suspense } from "react";
 import { LoginForm } from "./login-form";
 import { LoginSessionAutoRedirect } from "./login-session-auto-redirect";
@@ -12,7 +12,7 @@ export default function LoginPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-[100dvh] items-center justify-center bg-[#f2f1eb]">
+        <div className="flex min-h-[100dvh] items-center justify-center bg-background">
           <span className="text-sm text-neutral-500">로딩 중…</span>
         </div>
       }

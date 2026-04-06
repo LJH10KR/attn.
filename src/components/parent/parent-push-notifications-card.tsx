@@ -11,8 +11,7 @@ import {
   removeFcmTokenLocal,
 } from "@/lib/firebase/web-push";
 
-const cardClass =
-  "rounded-[1.75rem] border border-white/70 bg-[rgba(236,235,228,0.45)] p-4 shadow-[0_12px_40px_-16px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.85)] backdrop-blur-2xl";
+const cardClass = "glass-card p-4";
 
 export function ParentPushNotificationsCard() {
   const [uid, setUid] = useState<string | null>(null);
@@ -97,7 +96,7 @@ export function ParentPushNotificationsCard() {
 
   return (
     <section className={cardClass}>
-      <h2 className="text-sm font-semibold text-[#111]">출석·결석 알림 (웹 푸시)</h2>
+      <h2 className="text-sm font-semibold text-foreground">출석·결석 알림 (웹 푸시)</h2>
       <p className="mt-2 text-[11px] leading-relaxed text-neutral-600">
         켜 두면 선생님이 보낸 출석·결석 알림을 브라우저 알림으로 받을 수 있습니다. 끄면 앱에서만 확인할
         수 있으며, 자녀 목록 등 다른 기능은 그대로 이용할 수 있습니다.

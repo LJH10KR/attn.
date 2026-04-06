@@ -13,8 +13,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-const glassCard =
-  "rounded-[1.75rem] border border-white/70 bg-[rgba(236,235,228,0.45)] shadow-[0_20px_60px_-18px_rgba(0,0,0,0.12),inset_0_1px_0_rgba(255,255,255,0.85)] backdrop-blur-2xl backdrop-saturate-150";
+const glassCard = "glass-card";
 
 type AcademySection = "home" | "teachers" | "parents" | "students";
 
@@ -247,7 +246,7 @@ export function AcademyDashboard() {
 
   if (!configured) {
     return (
-      <div className="min-h-[100dvh] bg-[#f2f1eb] flex items-center justify-center px-4">
+      <div className="min-h-[100dvh] bg-background flex items-center justify-center px-4">
         <p className="text-sm text-neutral-600">Firebase 설정이 필요합니다.</p>
       </div>
     );
@@ -255,11 +254,11 @@ export function AcademyDashboard() {
 
   if (gate === "auth") {
     return (
-      <div className="min-h-[100dvh] bg-[#f2f1eb] flex flex-col items-center justify-center gap-4 px-4">
+      <div className="min-h-[100dvh] bg-background flex flex-col items-center justify-center gap-4 px-4">
         <p className="text-sm text-neutral-600">로그인이 필요합니다.</p>
         <Link
           href="/login"
-          className="rounded-2xl bg-[#222] px-6 py-3 text-sm font-medium text-white"
+          className="rounded-2xl bg-[#222] px-6 py-3 text-sm font-medium text-white dark:text-neutral-950 dark:bg-neutral-100 dark:text-neutral-950"
         >
           로그인
         </Link>
@@ -269,13 +268,13 @@ export function AcademyDashboard() {
 
   if (gate === "forbidden") {
     return (
-      <div className="min-h-[100dvh] bg-[#f2f1eb] flex flex-col items-center justify-center gap-4 px-4">
+      <div className="min-h-[100dvh] bg-background flex flex-col items-center justify-center gap-4 px-4">
         <p className="text-sm text-neutral-600 text-center max-w-xs">
           이 학원 대시보드에 접근할 권한이 없거나 주소가 올바르지 않습니다.
         </p>
         <Link
           href="/owner"
-          className="rounded-2xl border border-neutral-300/70 bg-white/60 px-6 py-3 text-sm font-medium text-[#222]"
+          className="rounded-2xl border border-neutral-300/70 bg-white/60 dark:border-white/12 dark:bg-white/10 px-6 py-3 text-sm font-medium text-foreground"
         >
           오너 대시보드
         </Link>
@@ -288,14 +287,14 @@ export function AcademyDashboard() {
 
   if (gate === "loading" || !academyId) {
     return (
-      <div className="min-h-[100dvh] bg-[#f2f1eb] flex items-center justify-center">
+      <div className="min-h-[100dvh] bg-background flex items-center justify-center">
         <p className="text-sm text-neutral-500">불러오는 중…</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-[100dvh] bg-[#f2f1eb] pb-28 pt-[env(safe-area-inset-top)]">
+    <div className="min-h-[100dvh] bg-background pb-28 pt-[env(safe-area-inset-top)]">
       <header
         className={`sticky top-0 z-10 mx-auto max-w-lg px-4 pt-4 pb-2 ${glassCard}`}
         style={{ WebkitBackdropFilter: "blur(20px)" }}
@@ -309,7 +308,7 @@ export function AcademyDashboard() {
               <button
                 type="button"
                 onClick={() => router.push("/owner")}
-                className="mt-2 flex h-10 w-10 items-center justify-center rounded-full border border-neutral-300/60 bg-white/55 text-[#111] shadow-sm backdrop-blur-md hover:bg-white/85"
+                className="mt-2 flex h-10 w-10 items-center justify-center rounded-full border border-neutral-300/60 bg-white/55 text-foreground shadow-sm backdrop-blur-md hover:bg-white/85"
                 aria-label="오너 대시보드로 돌아가기"
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -346,7 +345,7 @@ export function AcademyDashboard() {
             </button>
           </div>
         </div>
-        <h1 className="-mt-2 pb-1 text-center text-lg font-semibold text-[#111]">학원 대시보드</h1>
+        <h1 className="-mt-2 pb-1 text-center text-lg font-semibold text-foreground">학원 대시보드</h1>
         {academyName ? (
           <p className="pb-2 text-center text-xs text-neutral-500 truncate px-2">{academyName}</p>
         ) : (
@@ -366,24 +365,22 @@ export function AcademyDashboard() {
                 key={c.key}
                 type="button"
                 onClick={() => navigateSection(c.key)}
-                className={`flex flex-col items-center justify-center rounded-[1.75rem] border py-4 px-2 transition ${
+                className={`flex flex-col items-center justify-center py-4 px-2 transition ${
                   isActive
-                    ? "border-[#222]/20 bg-[#222] text-white shadow-md"
-                    : `border-white/70 bg-[rgba(236,235,228,0.45)] shadow-[0_12px_40px_-16px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.85)] backdrop-blur-2xl ${
-                        isHomeCards ? "hover:bg-[rgba(236,235,228,0.65)]" : ""
-                      }`
+                    ? "rounded-[1.75rem] border border-[#222]/20 bg-[#222] text-white shadow-md dark:border-white/25 dark:bg-neutral-100 dark:text-neutral-950"
+                    : `glass-tile ${isHomeCards ? "glass-tile-hover" : ""}`
                 }`}
               >
                 <span
                   className={`text-[11px] font-medium ${
-                    isActive ? "text-white/90" : "text-neutral-500"
+                    isActive ? "text-white/90 dark:text-neutral-600" : "text-neutral-500 dark:text-neutral-400"
                   }`}
                 >
                   {c.label}
                 </span>
                 <span
                   className={`mt-1 text-xl font-semibold tabular-nums ${
-                    isActive ? "text-white" : "text-[#111]"
+                    isActive ? "text-white dark:text-neutral-950" : "text-foreground"
                   }`}
                 >
                   {c.value}
@@ -395,7 +392,7 @@ export function AcademyDashboard() {
 
         {section === "home" ? (
           <section className="mt-6">
-            <h2 className="mb-3 text-sm font-semibold text-[#111]">히트맵</h2>
+            <h2 className="mb-3 text-sm font-semibold text-foreground">히트맵</h2>
             <div className={`p-4 ${glassCard}`}>
               <AcademyTreemap items={PLACEHOLDER_HEATMAP} />
               <p className="mt-3 text-[10px] leading-relaxed text-neutral-500">
@@ -428,9 +425,7 @@ export function AcademyDashboard() {
         className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-20 w-[min(100%,22rem)] -translate-x-1/2 px-4"
         aria-label="학원 메인 메뉴"
       >
-        <div
-          className={`flex items-center justify-between gap-1 rounded-full border border-white/80 bg-[rgba(245,244,238,0.92)] px-3 py-2.5 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.25)] backdrop-blur-2xl`}
-        >
+        <div className="glass-dock flex items-center justify-between gap-1 rounded-full px-3 py-2.5">
           {(
             [
               { id: "home" as const, label: "홈", icon: IconHome },
@@ -447,7 +442,9 @@ export function AcademyDashboard() {
                 type="button"
                 onClick={() => navigateSection(item.id)}
                 className={`flex flex-1 flex-col items-center gap-0.5 rounded-2xl py-1 transition ${
-                  active ? "bg-[#222] text-white shadow-inner" : "text-neutral-600 opacity-75"
+                  active
+                    ? "bg-[#222] text-white shadow-inner dark:bg-neutral-100 dark:text-neutral-950"
+                    : "text-neutral-600 opacity-75 dark:text-neutral-400"
                 }`}
               >
                 <span className="flex h-9 w-9 items-center justify-center">

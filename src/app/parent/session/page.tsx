@@ -39,16 +39,16 @@ export default function ParentSessionPage() {
   }, [router]);
 
   return (
-    <div className="min-h-[100dvh] bg-[#f2f1eb] px-4 py-10 flex flex-col items-center justify-center">
-      <div className="w-full max-w-[520px] rounded-[2.5rem] border border-white/70 bg-[rgba(236,235,228,0.45)] p-8 shadow-[0_24px_80px_-20px_rgba(0,0,0,0.14),inset_0_1px_0_rgba(255,255,255,0.85)] backdrop-blur-2xl backdrop-saturate-150">
-        <h1 className="text-center text-2xl font-semibold tracking-tight text-[#111]">로그인 제한</h1>
+    <div className="min-h-[100dvh] bg-background px-4 py-10 flex flex-col items-center justify-center">
+      <div className="glass-card-hero w-full max-w-[520px] p-8">
+        <h1 className="text-center text-2xl font-semibold tracking-tight text-foreground">로그인 제한</h1>
         <p className="mt-4 text-center text-sm text-neutral-700">{message}</p>
         {academyId ? <p className="mt-2 text-center text-[11px] text-neutral-500">학원 ID: {academyId}</p> : null}
         <button
           type="button"
           onClick={() => void onLogout()}
           disabled={busy}
-          className="mt-6 w-full rounded-2xl bg-[#222] py-3 text-sm font-medium text-white disabled:opacity-60"
+          className="mt-6 w-full rounded-2xl bg-[#222] dark:bg-neutral-100 py-3 text-sm font-medium text-white dark:text-neutral-950 disabled:opacity-60"
         >
           {busy ? "처리 중…" : "로그아웃하고 로그인 화면으로"}
         </button>

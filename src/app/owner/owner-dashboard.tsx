@@ -14,11 +14,10 @@ import { COLLECTIONS, type Academy } from "@/lib/firebase/attn-schema";
 
 type AcademyRow = Academy & { id: string };
 
-const glassCard =
-  "rounded-[1.75rem] border border-white/70 bg-[rgba(236,235,228,0.45)] shadow-[0_20px_60px_-18px_rgba(0,0,0,0.12),inset_0_1px_0_rgba(255,255,255,0.85)] backdrop-blur-2xl backdrop-saturate-150";
+const glassCard = "glass-card";
 
 const inputClass =
-  "w-full rounded-2xl border border-neutral-300/60 bg-white/50 px-4 py-3 text-[#111] shadow-inner outline-none focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]";
+  "w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3 text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]";
 
 function formatDate(ts: Timestamp | undefined): string {
   if (!ts?.toDate) {
@@ -312,7 +311,7 @@ export function OwnerDashboard() {
 
   if (!configured) {
     return (
-      <div className="min-h-[100dvh] bg-[#f2f1eb] flex items-center justify-center px-4">
+      <div className="min-h-[100dvh] bg-background flex items-center justify-center px-4">
         <p className="text-sm text-neutral-600">Firebase 설정이 필요합니다.</p>
       </div>
     );
@@ -320,7 +319,7 @@ export function OwnerDashboard() {
 
   if (gate === "loading") {
     return (
-      <div className="min-h-[100dvh] bg-[#f2f1eb] flex items-center justify-center">
+      <div className="min-h-[100dvh] bg-background flex items-center justify-center">
         <p className="text-sm text-neutral-500">불러오는 중…</p>
       </div>
     );
@@ -328,7 +327,7 @@ export function OwnerDashboard() {
 
   if (gate === "auth") {
     return (
-      <div className="min-h-[100dvh] bg-[#f2f1eb] flex items-center justify-center">
+      <div className="min-h-[100dvh] bg-background flex items-center justify-center">
         <p className="text-sm text-neutral-500">로그인 페이지로 이동합니다…</p>
       </div>
     );
@@ -336,22 +335,22 @@ export function OwnerDashboard() {
 
   if (gate === "forbidden") {
     return (
-      <div className="min-h-[100dvh] bg-[#f2f1eb] px-4 py-16 flex flex-col items-center justify-center">
+      <div className="min-h-[100dvh] bg-background px-4 py-16 flex flex-col items-center justify-center">
         <div className={`w-full max-w-md p-8 text-center ${glassCard}`}>
-          <h1 className="text-lg font-semibold text-[#111]">오너 전용 페이지</h1>
+          <h1 className="text-lg font-semibold text-foreground">오너 전용 페이지</h1>
           <p className="mt-3 text-sm text-neutral-600">
             오너로 등록된 계정만 이용할 수 있습니다. 학원 오너 회원가입을 진행해 주세요.
           </p>
           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
             <Link
               href="/signup"
-              className="inline-flex justify-center rounded-2xl bg-[#222] px-6 py-3 text-sm font-medium text-white"
+              className="inline-flex justify-center rounded-2xl bg-[#222] dark:bg-neutral-100 px-6 py-3 text-sm font-medium text-white dark:text-neutral-950"
             >
               오너 회원가입
             </Link>
             <Link
               href="/login"
-              className="inline-flex justify-center rounded-2xl border border-neutral-300/70 bg-white/50 px-6 py-3 text-sm font-medium text-[#222]"
+              className="inline-flex justify-center rounded-2xl border border-neutral-300/70 bg-white/50 px-6 py-3 text-sm font-medium text-foreground"
             >
               로그인
             </Link>
@@ -362,7 +361,7 @@ export function OwnerDashboard() {
   }
 
   return (
-    <div className="min-h-[100dvh] bg-[#f2f1eb] pb-[max(2rem,env(safe-area-inset-bottom))]">
+    <div className="min-h-[100dvh] bg-background pb-[max(2rem,env(safe-area-inset-bottom))]">
       <header
         className={`sticky top-0 z-10 mx-auto flex max-w-lg items-center justify-between gap-3 px-4 py-4 ${glassCard}`}
         style={{ WebkitBackdropFilter: "blur(20px)" }}
@@ -371,12 +370,12 @@ export function OwnerDashboard() {
           <p className="text-[10px] font-medium uppercase tracking-wider text-neutral-500">
             attn.
           </p>
-          <h1 className="text-lg font-semibold text-[#111]">오너 대시보드</h1>
+          <h1 className="text-lg font-semibold text-foreground">오너 대시보드</h1>
         </div>
         <button
           type="button"
           onClick={onLogout}
-          className="shrink-0 rounded-full border border-neutral-300/60 bg-white/50 px-4 py-2 text-xs font-medium text-neutral-700 backdrop-blur-md hover:bg-white/80"
+          className="shrink-0 rounded-full border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-2 text-xs font-medium text-neutral-700 backdrop-blur-md hover:bg-white/80"
         >
           로그아웃
         </button>
@@ -384,11 +383,11 @@ export function OwnerDashboard() {
 
       <main className="mx-auto max-w-lg px-4 pt-6">
         <div className="mb-5 flex items-center justify-between gap-3">
-          <h2 className="text-base font-semibold text-[#111]">내 학원</h2>
+          <h2 className="text-base font-semibold text-foreground">내 학원</h2>
           <button
             type="button"
             onClick={openCreate}
-            className="rounded-full bg-[#222] px-4 py-2 text-xs font-medium text-white shadow-md hover:bg-[#333]"
+            className="rounded-full bg-[#222] dark:bg-neutral-100 px-4 py-2 text-xs font-medium text-white dark:text-neutral-950 shadow-md hover:bg-[#333] dark:hover:bg-white"
           >
             + 학원 등록
           </button>
@@ -406,7 +405,7 @@ export function OwnerDashboard() {
             <button
               type="button"
               onClick={openCreate}
-              className="mt-4 rounded-2xl bg-[#222] px-6 py-3 text-sm font-medium text-white"
+              className="mt-4 rounded-2xl bg-[#222] dark:bg-neutral-100 px-6 py-3 text-sm font-medium text-white dark:text-neutral-950"
             >
               첫 학원 등록하기
             </button>
@@ -417,7 +416,7 @@ export function OwnerDashboard() {
               <li key={a.id} className={`p-4 ${glassCard}`}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium text-[#111]">{a.name}</p>
+                    <p className="truncate font-medium text-foreground">{a.name}</p>
                     <p className="mt-1 font-mono text-[10px] text-neutral-400">ID · {a.id}</p>
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
                       <span
@@ -436,7 +435,7 @@ export function OwnerDashboard() {
                 <div className="mt-4 flex flex-col gap-2">
                   <Link
                     href={`/academy?id=${encodeURIComponent(a.id)}&from=owner`}
-                    className="w-full rounded-xl bg-[#222] py-2.5 text-center text-xs font-medium text-white shadow-sm hover:bg-[#333]"
+                    className="w-full rounded-xl bg-[#222] dark:bg-neutral-100 py-2.5 text-center text-xs font-medium text-white dark:text-neutral-950 shadow-sm hover:bg-[#333] dark:hover:bg-white"
                   >
                     학원 대시보드
                   </Link>
@@ -444,7 +443,7 @@ export function OwnerDashboard() {
                     <button
                       type="button"
                       onClick={() => openEdit(a)}
-                      className="flex-1 rounded-xl border border-neutral-300/60 bg-white/40 py-2 text-xs font-medium text-[#222] hover:bg-white/70"
+                      className="flex-1 rounded-xl border border-neutral-300/60 bg-white/40 py-2 text-xs font-medium text-foreground hover:bg-white/70"
                     >
                       수정
                     </button>
@@ -480,7 +479,7 @@ export function OwnerDashboard() {
             className={`w-full max-w-md p-6 ${glassCard}`}
             style={{ WebkitBackdropFilter: "blur(24px)" }}
           >
-            <h3 id="academy-form-title" className="text-lg font-semibold text-[#111]">
+            <h3 id="academy-form-title" className="text-lg font-semibold text-foreground">
               {modal === "create" ? "학원 등록" : "학원 수정"}
             </h3>
             <div className="mt-4 max-h-[min(70vh,520px)] space-y-3 overflow-y-auto pr-1">
@@ -508,7 +507,7 @@ export function OwnerDashboard() {
               ) : editTarget ? (
                 <div>
                   <p className="mb-1 text-xs font-medium text-neutral-600">학원 로그인 ID</p>
-                  <p className="rounded-2xl border border-neutral-200/80 bg-white/40 px-4 py-3 font-mono text-sm text-[#111]">
+                  <p className="rounded-2xl border border-neutral-200/80 bg-white/40 px-4 py-3 font-mono text-sm text-foreground">
                     {editTarget.id}
                   </p>
                   <p className="mt-1 text-[11px] text-neutral-500">등록 후에는 ID를 바꿀 수 없습니다.</p>
@@ -616,7 +615,7 @@ export function OwnerDashboard() {
                 type="button"
                 disabled={busy}
                 onClick={modal === "create" ? onCreate : onUpdate}
-                className="flex-1 rounded-2xl bg-[#222] py-3 text-sm font-medium text-white disabled:opacity-50"
+                className="flex-1 rounded-2xl bg-[#222] dark:bg-neutral-100 py-3 text-sm font-medium text-white dark:text-neutral-950 disabled:opacity-50"
               >
                 {busy ? "처리 중…" : modal === "create" ? "등록" : "저장"}
               </button>
@@ -633,11 +632,11 @@ export function OwnerDashboard() {
           aria-labelledby="delete-title"
         >
           <div className={`w-full max-w-md p-6 ${glassCard}`}>
-            <h3 id="delete-title" className="text-lg font-semibold text-[#111]">
+            <h3 id="delete-title" className="text-lg font-semibold text-foreground">
               학원 삭제
             </h3>
             <p className="mt-3 text-sm text-neutral-600">
-              <span className="font-medium text-[#111]">{deleteTarget.name}</span> 정보를
+              <span className="font-medium text-foreground">{deleteTarget.name}</span> 정보를
               삭제합니다. 하위 선생님·학부모 데이터는 자동으로 지워지지 않을 수 있습니다.
             </p>
             {formError ? (
@@ -657,7 +656,7 @@ export function OwnerDashboard() {
                 type="button"
                 disabled={busy}
                 onClick={onDelete}
-                className="flex-1 rounded-2xl bg-red-600 py-3 text-sm font-medium text-white disabled:opacity-50"
+                className="flex-1 rounded-2xl bg-red-600 py-3 text-sm font-medium text-white dark:text-neutral-950 disabled:opacity-50"
               >
                 {busy ? "처리 중…" : "삭제"}
               </button>

@@ -21,14 +21,13 @@ import {
 } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
 
-const glassCard =
-  "rounded-[1.75rem] border border-white/70 bg-[rgba(236,235,228,0.45)] shadow-[0_20px_60px_-18px_rgba(0,0,0,0.12),inset_0_1px_0_rgba(255,255,255,0.85)] backdrop-blur-2xl backdrop-saturate-150";
+const glassCard = "glass-card";
 
 const inputClass =
-  "min-w-0 w-full rounded-2xl border border-neutral-300/60 bg-white/50 px-4 py-2.5 text-sm text-[#111] shadow-inner outline-none placeholder:text-neutral-400 focus:border-[#4a90e2]/50 focus:bg-white/70";
+  "min-w-0 w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-2.5 text-sm text-foreground shadow-inner outline-none placeholder:text-neutral-400 focus:border-[#4a90e2]/50 focus:bg-white/70";
 
 const miniBtnClass =
-  "rounded-lg border border-neutral-300/70 bg-white/55 px-2 py-1 text-[10px] font-medium text-[#222] hover:bg-white/90 disabled:opacity-45";
+  "rounded-lg border border-neutral-300/70 bg-white/55 px-2 py-1 text-[10px] font-medium text-foreground hover:bg-white/90 disabled:opacity-45";
 
 export type StudentRowVM = {
   id: string;
@@ -196,11 +195,11 @@ function EditStudentModal({
         className={`${glassCard} w-full max-w-md max-h-[min(90dvh,640px)] overflow-y-auto p-6 shadow-2xl`}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="edit-student-title" className="text-base font-semibold text-[#111]">
+        <h2 id="edit-student-title" className="text-base font-semibold text-foreground">
           학생 정보 수정
         </h2>
         <p className="mt-1 text-xs text-neutral-700">
-          대상: <span className="font-medium text-[#111]">{student.name}</span>
+          대상: <span className="font-medium text-foreground">{student.name}</span>
         </p>
         <p className="mt-0.5 text-[11px] text-neutral-500">
           학원 ID: <span className="font-mono">{academyId}</span>
@@ -277,7 +276,7 @@ function EditStudentModal({
           <button
             type="button"
             disabled={busy}
-            className="rounded-2xl bg-[#222] px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+            className="rounded-2xl bg-[#222] dark:bg-neutral-100 px-4 py-2.5 text-sm font-medium text-white dark:text-neutral-950 disabled:opacity-50"
             onClick={() => onSubmit()}
           >
             {busy ? "저장 중…" : "저장"}
@@ -325,7 +324,7 @@ function DeleteStudentConfirmModal({
         className={`${glassCard} w-full max-w-md p-6 shadow-2xl`}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="del-student-title" className="text-base font-semibold text-[#111]">
+        <h2 id="del-student-title" className="text-base font-semibold text-foreground">
           학생을 삭제할까요?
         </h2>
         <p className="mt-3 text-sm text-neutral-700">
@@ -346,7 +345,7 @@ function DeleteStudentConfirmModal({
           <button
             type="button"
             disabled={busy}
-            className="rounded-2xl bg-red-700 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+            className="rounded-2xl bg-red-700 px-4 py-2.5 text-sm font-medium text-white dark:text-neutral-950 disabled:opacity-50"
             onClick={onConfirm}
           >
             {busy ? "삭제 중…" : "삭제"}
@@ -409,21 +408,21 @@ function StudentAssignedTeachersModal({
         className={`${glassCard} flex max-h-[min(90dvh,560px)] w-full max-w-md flex-col p-6 shadow-2xl`}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="student-assign-teachers-title" className="shrink-0 text-base font-semibold text-[#111]">
+        <h2 id="student-assign-teachers-title" className="shrink-0 text-base font-semibold text-foreground">
           전담 선생님
         </h2>
         <p className="mt-1 shrink-0 text-xs text-neutral-600">
-          <span className="font-medium text-[#111]">{s.name}</span>
+          <span className="font-medium text-foreground">{s.name}</span>
           <span className="text-neutral-500"> · 만 {s.age}세</span>
         </p>
         <p className="mt-0.5 shrink-0 text-[11px] text-neutral-500">
-          학부모: <span className="font-medium text-[#111]">{s.parentName}</span>
+          학부모: <span className="font-medium text-foreground">{s.parentName}</span>
           <span className="font-mono text-[10px] text-neutral-400"> ({s.parentUserId})</span>
         </p>
         <p className="mt-2 shrink-0 text-[11px] leading-relaxed text-neutral-600">
           활성 선생님을 복수 선택할 수 있습니다. 학생당 최대{" "}
           {MAX_ASSIGNED_TEACHERS_PER_STUDENT}명 · 학원{" "}
-          <span className="font-mono text-[10px] text-[#111]">{academyId}</span>
+          <span className="font-mono text-[10px] text-foreground">{academyId}</span>
         </p>
         <div className="mt-4 flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
           <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/60 bg-white/25 px-2 py-2">
@@ -439,7 +438,7 @@ function StudentAssignedTeachersModal({
                   return (
                     <label
                       key={t.id}
-                      className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 text-[11px] text-[#111] hover:bg-white/50"
+                      className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 text-[11px] text-foreground hover:bg-white/50"
                     >
                       <input
                         type="checkbox"
@@ -624,7 +623,7 @@ export function AcademyParentStudentList({
 
   return (
     <div className="mb-4">
-      <h4 className="mb-2 text-xs font-semibold text-[#111]">자녀(학생) 목록</h4>
+      <h4 className="mb-2 text-xs font-semibold text-foreground">자녀(학생) 목록</h4>
       {listError ? (
         <p className="text-xs text-red-600">{listError}</p>
       ) : rows.length === 0 ? (
@@ -638,7 +637,7 @@ export function AcademyParentStudentList({
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <span className="font-medium text-[#111]">{s.name}</span>
+                  <span className="font-medium text-foreground">{s.name}</span>
                   <span className="text-neutral-500"> · 만 {s.age}세</span>
                   <div className="mt-0.5 text-[11px] text-neutral-600">
                     연락 {s.phone || "—"} · 비상 {s.emergencyContact || "—"}
@@ -967,13 +966,13 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
       ) : null}
 
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-[#111]">학생 관리</h2>
+        <h2 className="text-sm font-semibold text-foreground">학생 관리</h2>
       </div>
 
       <div className="flex gap-2">
         <input
           type="search"
-          className="min-w-0 flex-1 rounded-2xl border border-neutral-300/60 bg-white/50 px-4 py-2.5 text-sm text-[#111] shadow-inner outline-none placeholder:text-neutral-400 focus:border-[#4a90e2]/50 focus:bg-white/70"
+          className="min-w-0 flex-1 rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-2.5 text-sm text-foreground shadow-inner outline-none placeholder:text-neutral-400 focus:border-[#4a90e2]/50 focus:bg-white/70"
           placeholder="이름·학부모·연락처·나이·학부모ID·전담선생으로 검색"
           value={queryText}
           onChange={(e) => setQueryText(e.target.value)}
@@ -981,7 +980,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
         />
         <button
           type="button"
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#222] text-white shadow-sm hover:bg-[#333]"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#222] dark:bg-neutral-100 text-white shadow-sm hover:bg-[#333] dark:hover:bg-white"
           aria-label="검색"
         >
           <SearchIcon />
@@ -1014,7 +1013,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                     }
                   >
                     <span className="min-w-0 flex-1">
-                      <span className="block font-medium text-[#111]">{s.name}</span>
+                      <span className="block font-medium text-foreground">{s.name}</span>
                       <span className="mt-0.5 block truncate text-xs text-neutral-500">
                         학부모 {s.parentName} · 만 {s.age}세
                       </span>
@@ -1038,14 +1037,14 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                   <div className="flex shrink-0 flex-col justify-center gap-1.5 sm:flex-row sm:items-center">
                     <button
                       type="button"
-                      className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-[#222] shadow-sm hover:bg-white/90"
+                      className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90"
                       onClick={() => openEdit(s)}
                     >
                       수정
                     </button>
                     <button
                       type="button"
-                      className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-[#222] shadow-sm hover:bg-white/90"
+                      className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90"
                       onClick={() => {
                         setTeacherModalStudentId(null);
                         setDeleteTarget(s);

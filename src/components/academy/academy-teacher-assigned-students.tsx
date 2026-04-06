@@ -22,11 +22,10 @@ import {
 } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
 
-const glassCard =
-  "rounded-[1.75rem] border border-white/70 bg-[rgba(236,235,228,0.45)] shadow-[0_20px_60px_-18px_rgba(0,0,0,0.12),inset_0_1px_0_rgba(255,255,255,0.85)] backdrop-blur-2xl backdrop-saturate-150";
+const glassCard = "glass-card";
 
 const miniBtnClass =
-  "rounded-lg border border-neutral-300/70 bg-white/55 px-2 py-1 text-[10px] font-medium text-[#222] hover:bg-white/90 disabled:opacity-45";
+  "rounded-lg border border-neutral-300/70 bg-white/55 px-2 py-1 text-[10px] font-medium text-foreground hover:bg-white/90 disabled:opacity-45";
 
 function fsErr(err: unknown): string {
   if (err instanceof FirebaseError) {
@@ -92,11 +91,11 @@ function AssignStudentsModal({
         className={`${glassCard} flex max-h-[min(88dvh,560px)] w-full max-w-md flex-col p-6 shadow-2xl`}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="assign-students-title" className="shrink-0 text-base font-semibold text-[#111]">
+        <h2 id="assign-students-title" className="shrink-0 text-base font-semibold text-foreground">
           학생 전담 연결
         </h2>
         <p className="mt-2 shrink-0 text-xs leading-relaxed text-neutral-600">
-          <span className="font-medium text-[#111]">{teacherName}</span> 선생님을 전담에 추가합니다.
+          <span className="font-medium text-foreground">{teacherName}</span> 선생님을 전담에 추가합니다.
           이미 다른 선생님 전담이 있어도 그대로 두고, 이 선생님만{" "}
           <span className="font-medium">추가</span>됩니다(학생당 최대 {MAX_ASSIGNED_TEACHERS_PER_STUDENT}
           명). 학원: <span className="font-mono text-[10px]">{academyId}</span>
@@ -127,7 +126,7 @@ function AssignStudentsModal({
                       className="mt-0.5 h-4 w-4 rounded border-neutral-400"
                     />
                     <span>
-                      <span className="font-medium text-[#111]">{s.name}</span>
+                      <span className="font-medium text-foreground">{s.name}</span>
                       <span className="text-neutral-500"> · 만 {s.age}세</span>
                       {s.assignedTeacherUids.length > 0 ? (
                         <span className="ml-1 text-[10px] text-neutral-600">
@@ -155,7 +154,7 @@ function AssignStudentsModal({
           <button
             type="button"
             disabled={busy || selectedIds.size === 0}
-            className="rounded-2xl bg-[#222] px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+            className="rounded-2xl bg-[#222] dark:bg-neutral-100 px-4 py-2.5 text-sm font-medium text-white dark:text-neutral-950 disabled:opacity-50"
             onClick={() => onConfirm()}
           >
             {busy ? "저장 중…" : `선택 ${selectedIds.size}명 연결`}
@@ -364,7 +363,7 @@ export function TeacherAssignedStudentsBlock({
   return (
     <div className="mb-4 border-b border-white/50 pb-4">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <h4 className="text-xs font-semibold text-[#111]">전담 학생</h4>
+        <h4 className="text-xs font-semibold text-foreground">전담 학생</h4>
         <button
           type="button"
           className={miniBtnClass}
@@ -385,7 +384,7 @@ export function TeacherAssignedStudentsBlock({
               className="flex items-center justify-between gap-2 rounded-xl border border-white/60 bg-white/25 px-3 py-2 text-xs"
             >
               <span className="min-w-0">
-                <span className="font-medium text-[#111]">{s.name}</span>
+                <span className="font-medium text-foreground">{s.name}</span>
                 <span className="text-neutral-500"> · 만 {s.age}세</span>
               </span>
               <button

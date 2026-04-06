@@ -18,11 +18,10 @@ import {
 } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
 
-const glassCard =
-  "rounded-[1.75rem] border border-white/70 bg-[rgba(236,235,228,0.45)] shadow-[0_20px_60px_-18px_rgba(0,0,0,0.12),inset_0_1px_0_rgba(255,255,255,0.85)] backdrop-blur-2xl backdrop-saturate-150";
+const glassCard = "glass-card";
 
 const inputClass =
-  "min-w-0 flex-1 rounded-2xl border border-neutral-300/60 bg-white/50 px-4 py-2.5 text-sm text-[#111] shadow-inner outline-none placeholder:text-neutral-400 focus:border-[#4a90e2]/50 focus:bg-white/70";
+  "min-w-0 flex-1 rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-2.5 text-sm text-foreground shadow-inner outline-none placeholder:text-neutral-400 focus:border-[#4a90e2]/50 focus:bg-white/70";
 
 export type TeacherRowVM = {
   id: string;
@@ -123,7 +122,7 @@ function SearchIcon() {
 }
 
 const actionBtnClass =
-  "rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-[#222] shadow-sm hover:bg-white/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45";
+  "rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45";
 
 function DeleteTeacherConfirmModal({
   row,
@@ -164,11 +163,11 @@ function DeleteTeacherConfirmModal({
         className={`${glassCard} w-full max-w-md p-6 shadow-2xl`}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="delete-teacher-dialog-title" className="text-base font-semibold text-[#111]">
+        <h2 id="delete-teacher-dialog-title" className="text-base font-semibold text-foreground">
           선생님을 삭제할까요?
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-neutral-700">
-          <span className="font-medium text-[#111]">{row.name || "(이름 없음)"}</span>
+          <span className="font-medium text-foreground">{row.name || "(이름 없음)"}</span>
           {row.email ? (
             <>
               {" "}
@@ -191,7 +190,7 @@ function DeleteTeacherConfirmModal({
           <button
             type="button"
             disabled={busy}
-            className="rounded-2xl bg-red-700 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-800 disabled:opacity-50"
+            className="rounded-2xl bg-red-700 px-4 py-2.5 text-sm font-medium text-white dark:text-neutral-950 hover:bg-red-800 disabled:opacity-50"
             onClick={onConfirm}
           >
             {busy ? "삭제 중…" : "삭제"}
@@ -599,14 +598,14 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
       ) : null}
 
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-[#111]">선생님 관리</h2>
+        <h2 className="text-sm font-semibold text-foreground">선생님 관리</h2>
         <button
           type="button"
           onClick={() => {
             setFormError(null);
             setRegisterOpen(true);
           }}
-          className="shrink-0 rounded-full bg-[#222] px-3.5 py-2 text-xs font-medium text-white shadow-sm hover:bg-[#333]"
+          className="shrink-0 rounded-full bg-[#222] dark:bg-neutral-100 px-3.5 py-2 text-xs font-medium text-white dark:text-neutral-950 shadow-sm hover:bg-[#333] dark:hover:bg-white"
         >
           + 선생님 등록
         </button>
@@ -623,7 +622,7 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
         />
         <button
           type="button"
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#222] text-white shadow-sm hover:bg-[#333]"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#222] dark:bg-neutral-100 text-white shadow-sm hover:bg-[#333] dark:hover:bg-white"
           aria-label="검색"
         >
           <SearchIcon />
@@ -674,7 +673,7 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
                       checked={isOn}
                       onChange={() => toggle(t.id)}
                       aria-label={`${t.name} 선택`}
-                      className="h-5 w-5 cursor-pointer rounded-md border-2 border-neutral-400 text-[#222] accent-[#222]"
+                      className="h-5 w-5 cursor-pointer rounded-md border-2 border-neutral-400 text-foreground accent-[#222]"
                     />
                   </label>
                   <button
@@ -688,7 +687,7 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
                     }
                   >
                     <span className="min-w-0 flex-1">
-                      <span className="block font-medium text-[#111]">{t.name}</span>
+                      <span className="block font-medium text-foreground">{t.name}</span>
                       <span className="mt-0.5 block truncate text-xs text-neutral-500">
                         {t.email}
                       </span>
@@ -735,7 +734,7 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
               type="button"
               disabled={bulkBusy}
               onClick={() => void onBulkInvite()}
-              className="pointer-events-auto w-full rounded-full bg-[#222] py-3.5 text-center text-sm font-semibold text-white shadow-[0_12px_32px_-8px_rgba(0,0,0,0.45)] hover:bg-[#333] disabled:opacity-60"
+              className="pointer-events-auto w-full rounded-full bg-[#222] dark:bg-neutral-100 py-3.5 text-center text-sm font-semibold text-white dark:text-neutral-950 shadow-[0_12px_32px_-8px_rgba(0,0,0,0.45)] hover:bg-[#333] dark:hover:bg-white disabled:opacity-60"
             >
               {bulkBusy ? "발송 중…" : `초청 메일 발송 (${inviteSelectedCount})`}
             </button>
@@ -751,7 +750,7 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
           aria-labelledby="reg-teacher-title"
         >
           <div className={`w-full max-w-md p-6 ${glassCard}`}>
-            <h3 id="reg-teacher-title" className="text-lg font-semibold text-[#111]">
+            <h3 id="reg-teacher-title" className="text-lg font-semibold text-foreground">
               선생님 등록
             </h3>
             <p className="mt-1 text-xs text-neutral-500">
@@ -815,7 +814,7 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
               <button
                 type="button"
                 onClick={() => setRegisterOpen(false)}
-                className="flex-1 rounded-2xl border border-neutral-300/70 py-3 text-sm font-medium text-[#222]"
+                className="flex-1 rounded-2xl border border-neutral-300/70 py-3 text-sm font-medium text-foreground"
               >
                 취소
               </button>
@@ -823,7 +822,7 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
                 type="button"
                 disabled={formBusy}
                 onClick={() => void onRegister()}
-                className="flex-1 rounded-2xl bg-[#222] py-3 text-sm font-medium text-white disabled:opacity-60"
+                className="flex-1 rounded-2xl bg-[#222] dark:bg-neutral-100 py-3 text-sm font-medium text-white dark:text-neutral-950 disabled:opacity-60"
               >
                 {formBusy ? "등록 중…" : "등록"}
               </button>
