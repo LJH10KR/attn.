@@ -17,7 +17,10 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
-import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import {
+  getFirebaseAuth,
+  getFirebaseFunctions,
+} from "@/lib/firebase/client-app";
 import { upsertOwnerProfile } from "@/lib/firebase/owner-profile";
 
 export type LoginRole = "owner" | "academy" | "teacher" | "parent";
@@ -112,8 +115,8 @@ export function LoginForm() {
     }
   }, [searchParams]);
 
-  const checkTeacherActivationOrRedirect = useCallback(
-    async (): Promise<boolean> => {
+  const checkTeacherActivationOrRedirect =
+    useCallback(async (): Promise<boolean> => {
       const functions = getFirebaseFunctions();
       const fn = httpsCallable(functions, "getTeacherActivationState");
       const res = await fn({});
@@ -145,12 +148,10 @@ export function LoginForm() {
       if (academyId) q.set("academyId", academyId);
       router.replace(`/teacher/session?${q.toString()}`);
       return false;
-    },
-    [router],
-  );
+    }, [router]);
 
-  const checkParentActivationOrRedirect = useCallback(
-    async (): Promise<boolean> => {
+  const checkParentActivationOrRedirect =
+    useCallback(async (): Promise<boolean> => {
       const functions = getFirebaseFunctions();
       const fn = httpsCallable(functions, "getParentActivationState");
       const res = await fn({});
@@ -178,10 +179,9 @@ export function LoginForm() {
       if (aid) q.set("academyId", aid);
       router.replace(`/parent/session?${q.toString()}`);
       return false;
-    },
-    [router],
-  );
-  const showEmailAuth = role === "owner" || role === "teacher" || role === "parent";
+    }, [router]);
+  const showEmailAuth =
+    role === "owner" || role === "teacher" || role === "parent";
   const showGoogle = showEmailAuth;
   const showAcademyFields = role === "academy";
   const hasSession = Boolean(sessionUser);
@@ -205,7 +205,9 @@ export function LoginForm() {
       await signOut(getFirebaseAuth());
     } catch (err) {
       const code = err instanceof FirebaseError ? err.code : "";
-      setError(code ? authErrorMessage(code, role) : "로그아웃에 실패했습니다.");
+      setError(
+        code ? authErrorMessage(code, role) : "로그아웃에 실패했습니다.",
+      );
     } finally {
       setLogoutBusy(false);
     }
@@ -274,13 +276,19 @@ export function LoginForm() {
         return;
       }
       if (getFirebaseAuth().currentUser) {
-        setError("이미 로그인된 세션이 있습니다. 아래에서 이동하거나 로그아웃한 뒤 다시 시도해 주세요.");
+        setError(
+          "이미 로그인된 세션이 있습니다. 아래에서 이동하거나 로그아웃한 뒤 다시 시도해 주세요.",
+        );
         return;
       }
       setBusy(true);
       try {
         const auth = getFirebaseAuth();
-        const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+        const cred = await signInWithEmailAndPassword(
+          auth,
+          email.trim(),
+          password,
+        );
         if (showEmailAuth && !cred.user.emailVerified) {
           router.replace("/verify-email");
           return;
@@ -332,7 +340,9 @@ export function LoginForm() {
       return;
     }
     if (getFirebaseAuth().currentUser) {
-      setError("이미 로그인된 세션이 있습니다. 아래에서 이동하거나 로그아웃한 뒤 다시 시도해 주세요.");
+      setError(
+        "이미 로그인된 세션이 있습니다. 아래에서 이동하거나 로그아웃한 뒤 다시 시도해 주세요.",
+      );
       return;
     }
     setBusy(true);
@@ -370,7 +380,13 @@ export function LoginForm() {
     } finally {
       setBusy(false);
     }
-  }, [checkParentActivationOrRedirect, checkTeacherActivationOrRedirect, configured, role, router]);
+  }, [
+    checkParentActivationOrRedirect,
+    checkTeacherActivationOrRedirect,
+    configured,
+    role,
+    router,
+  ]);
 
   const onAcademyLogin = useCallback(
     async (e: React.FormEvent) => {
@@ -491,7 +507,9 @@ export function LoginForm() {
           <div className="mt-5 rounded-2xl border border-amber-200/70 bg-amber-50/80 px-3.5 py-3 text-sm text-amber-950 ring-1 ring-amber-500/15 backdrop-blur-sm">
             <p className="font-medium">이미 로그인된 상태입니다</p>
             <p className="mt-1 text-xs text-amber-900/90">
-              <span className="break-all font-mono text-[11px]">{sessionLabel}</span>
+              <span className="break-all font-mono text-[11px]">
+                {sessionLabel}
+              </span>
             </p>
             <p className="mt-2 text-xs leading-relaxed text-amber-900/85">
               {role === "academy"
@@ -687,11 +705,11 @@ export function LoginForm() {
         </div>
       </div>
 
-      <p className="mt-8 text-center text-xs text-neutral-500">
+      {/* <p className="mt-8 text-center text-xs text-neutral-500">
         <Link href="/" className="underline-offset-2 hover:underline">
           홈으로
         </Link>
-      </p>
+      </p> */}
     </div>
   );
 }

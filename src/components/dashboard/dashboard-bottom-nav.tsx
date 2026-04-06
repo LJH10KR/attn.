@@ -41,6 +41,11 @@ export type DashboardBottomNavProps = {
   showBellInBottomBar?: boolean;
   bottomTabs?: DashboardBottomNavTab[];
   menuActions: DashboardBottomNavMenuAction[];
+  /**
+   * false이면 `title`을 스크린 리더 전용 문단으로 반복하지 않습니다.
+   * 상단 헤더에 같은 제목이 있을 때 중복 안내를 줄이기 위해 사용합니다.
+   */
+  includeSrOnlyScreenTitle?: boolean;
   profile: {
     displayName?: string | null;
     email?: string | null;
@@ -162,6 +167,7 @@ export function DashboardBottomNav({
   showBellInBottomBar = true,
   bottomTabs,
   menuActions,
+  includeSrOnlyScreenTitle = true,
   profile,
   className = "",
 }: DashboardBottomNavProps) {
@@ -192,11 +198,11 @@ export function DashboardBottomNav({
       className={`fixed inset-x-0 bottom-[25px] z-30 mx-auto max-w-lg px-4 ${className}`}
       aria-label="대시보드 하단 메뉴"
     >
-      <p className="sr-only">{title}</p>
+      {includeSrOnlyScreenTitle ? <p className="sr-only">{title}</p> : null}
       <div className="flex items-center gap-2">
         {/* 메인 하단 캡슐 */}
         <div
-          className="flex h-[60px] min-w-0 flex-1 items-stretch overflow-hidden rounded-full bg-white/38 p-[2px] backdrop-blur-xs shadow-[0_12px_30px_-14px_rgba(0,0,0,0.10),0_-12px_30px_-14px_rgba(0,0,0,0.10),12px_0_30px_-14px_rgba(0,0,0,0.10),-12px_0_30px_-14px_rgba(0,0,0,0.10),inset_0_1px_0_rgba(255,255,255,0.78)] dark:bg-white/10 dark:shadow-[0_14px_34px_-16px_rgba(0,0,0,0.36),0_-14px_34px_-16px_rgba(0,0,0,0.36),14px_0_34px_-16px_rgba(0,0,0,0.36),-14px_0_34px_-16px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.18)]"
+          className="flex h-[60px] min-w-0 flex-1 items-stretch overflow-hidden rounded-full bg-white/38 p-[2px] shadow-[0_12px_30px_-14px_rgba(0,0,0,0.10),0_-12px_30px_-14px_rgba(0,0,0,0.10),12px_0_30px_-14px_rgba(0,0,0,0.10),-12px_0_30px_-14px_rgba(0,0,0,0.10),inset_0_1px_0_rgba(255,255,255,0.78)] dark:bg-white/10 dark:shadow-[0_14px_34px_-16px_rgba(0,0,0,0.36),0_-14px_34px_-16px_rgba(0,0,0,0.36),14px_0_34px_-16px_rgba(0,0,0,0.36),-14px_0_34px_-16px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.18)]"
           style={{ WebkitBackdropFilter: "blur(20px) saturate(1.15)" }}
         >
           {bottomTabs && bottomTabs.length > 0 ? (
@@ -276,7 +282,7 @@ export function DashboardBottomNav({
           className={
             hasProfilePhoto
               ? "relative flex h-[60px] w-[60px] shrink-0 items-center justify-center overflow-hidden rounded-full shadow-[0_10px_28px_-10px_rgba(0,0,0,0.10),0_-10px_28px_-10px_rgba(0,0,0,0.10),10px_0_28px_-10px_rgba(0,0,0,0.10),-10px_0_28px_-10px_rgba(0,0,0,0.10)] transition hover:brightness-105 dark:shadow-[0_12px_28px_-10px_rgba(0,0,0,0.32),0_-12px_28px_-10px_rgba(0,0,0,0.32),12px_0_28px_-10px_rgba(0,0,0,0.32),-12px_0_28px_-10px_rgba(0,0,0,0.32)]"
-              : "relative flex h-[60px] w-[60px] shrink-0 items-center justify-center rounded-full border border-white/65 bg-white/38 p-0.5 shadow-[0_10px_28px_-10px_rgba(0,0,0,0.10),0_-10px_28px_-10px_rgba(0,0,0,0.10),10px_0_28px_-10px_rgba(0,0,0,0.10),-10px_0_28px_-10px_rgba(0,0,0,0.10),inset_0_1px_0_rgba(255,255,255,0.8)] backdrop-blur-xl transition hover:bg-white/52 dark:border-white/20 dark:bg-white/12 dark:shadow-[0_12px_30px_-12px_rgba(0,0,0,0.36),0_-12px_30px_-12px_rgba(0,0,0,0.36),12px_0_30px_-12px_rgba(0,0,0,0.36),-12px_0_30px_-12px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.2)] dark:hover:bg-white/18"
+              : "relative flex h-[60px] w-[60px] shrink-0 items-center justify-center rounded-full border border-white/65 bg-white/38 p-0.5 shadow-[0_10px_28px_-10px_rgba(0,0,0,0.10),0_-10px_28px_-10px_rgba(0,0,0,0.10),10px_0_28px_-10px_rgba(0,0,0,0.10),-10px_0_28px_-10px_rgba(0,0,0,0.10),inset_0_1px_0_rgba(255,255,255,0.8)] transition hover:bg-white/52 dark:border-white/20 dark:bg-white/12 dark:shadow-[0_12px_30px_-12px_rgba(0,0,0,0.36),0_-12px_30px_-12px_rgba(0,0,0,0.36),12px_0_30px_-12px_rgba(0,0,0,0.36),-12px_0_30px_-12px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.2)] dark:hover:bg-white/18"
           }
           style={
             hasProfilePhoto

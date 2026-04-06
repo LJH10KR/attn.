@@ -6,11 +6,18 @@ import { doc, onSnapshot, Timestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { docToStudentRow, type StudentRowVM } from "@/components/academy/academy-student-panel";
+import {
+  docToStudentRow,
+  type StudentRowVM,
+} from "@/components/academy/academy-student-panel";
 import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
-import { getFirebaseAuth, getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import {
+  getFirebaseAuth,
+  getFirebaseDb,
+  getFirebaseFunctions,
+} from "@/lib/firebase/client-app";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 
@@ -32,9 +39,13 @@ type CallableStudentPayload = {
   createdAtMillis?: number | null;
 };
 
-function studentRowFromCallablePayload(s: CallableStudentPayload): StudentRowVM {
+function studentRowFromCallablePayload(
+  s: CallableStudentPayload,
+): StudentRowVM {
   const createdAt =
-    typeof s.createdAtMillis === "number" ? Timestamp.fromMillis(s.createdAtMillis) : undefined;
+    typeof s.createdAtMillis === "number"
+      ? Timestamp.fromMillis(s.createdAtMillis)
+      : undefined;
   return docToStudentRow(s.id, {
     parentUserId: s.parentUserId ?? "",
     name: s.name ?? "",
@@ -42,7 +53,9 @@ function studentRowFromCallablePayload(s: CallableStudentPayload): StudentRowVM 
     phone: s.phone ?? "",
     emergencyContact: s.emergencyContact ?? "",
     assignedTeacherUids: s.assignedTeacherUids ?? [],
-    ...(s.assignedTeacherUid ? { assignedTeacherUid: s.assignedTeacherUid } : {}),
+    ...(s.assignedTeacherUid
+      ? { assignedTeacherUid: s.assignedTeacherUid }
+      : {}),
     ...(createdAt ? { createdAt } : {}),
   });
 }
@@ -98,18 +111,33 @@ export default function TeacherDashboardPage() {
       let revealUi = false;
       try {
         await auth.authStateReady();
-        if (cancelled || gen !== teacherInitGenerationRef.current || auth.currentUser?.uid !== uid) {
+        if (
+          cancelled ||
+          gen !== teacherInitGenerationRef.current ||
+          auth.currentUser?.uid !== uid
+        ) {
           return;
         }
 
         await user.getIdToken();
-        if (cancelled || gen !== teacherInitGenerationRef.current || auth.currentUser?.uid !== uid) {
+        if (
+          cancelled ||
+          gen !== teacherInitGenerationRef.current ||
+          auth.currentUser?.uid !== uid
+        ) {
           return;
         }
 
-        const fn = httpsCallable(getFirebaseFunctions(), "getTeacherActivationState");
+        const fn = httpsCallable(
+          getFirebaseFunctions(),
+          "getTeacherActivationState",
+        );
         const res = await fn({});
-        if (cancelled || gen !== teacherInitGenerationRef.current || auth.currentUser?.uid !== uid) {
+        if (
+          cancelled ||
+          gen !== teacherInitGenerationRef.current ||
+          auth.currentUser?.uid !== uid
+        ) {
           return;
         }
 
@@ -132,19 +160,34 @@ export default function TeacherDashboardPage() {
         revealUi = true;
 
         await user.getIdToken(true);
-        if (cancelled || gen !== teacherInitGenerationRef.current || auth.currentUser?.uid !== uid) {
+        if (
+          cancelled ||
+          gen !== teacherInitGenerationRef.current ||
+          auth.currentUser?.uid !== uid
+        ) {
           return;
         }
 
         try {
-          const listFn = httpsCallable(getFirebaseFunctions(), "listTeacherAssignedStudents");
+          const listFn = httpsCallable(
+            getFirebaseFunctions(),
+            "listTeacherAssignedStudents",
+          );
           const listRes = await listFn({ academyId: aid });
-          if (cancelled || gen !== teacherInitGenerationRef.current || auth.currentUser?.uid !== uid) {
+          if (
+            cancelled ||
+            gen !== teacherInitGenerationRef.current ||
+            auth.currentUser?.uid !== uid
+          ) {
             return;
           }
 
-          const payload = listRes.data as { students?: CallableStudentPayload[] };
-          const rawList = Array.isArray(payload?.students) ? payload.students : [];
+          const payload = listRes.data as {
+            students?: CallableStudentPayload[];
+          };
+          const rawList = Array.isArray(payload?.students)
+            ? payload.students
+            : [];
           const list = rawList.map((s) => studentRowFromCallablePayload(s));
           list.sort(sortByName);
           setStudents(list);
@@ -153,7 +196,9 @@ export default function TeacherDashboardPage() {
         } catch {
           if (!cancelled && gen === teacherInitGenerationRef.current) {
             setStudents([]);
-            setListError("전담 학생 목록을 불러오지 못했습니다. 잠시 후 새로고침해 주세요.");
+            setListError(
+              "전담 학생 목록을 불러오지 못했습니다. 잠시 후 새로고침해 주세요.",
+            );
           }
         }
       } catch {
@@ -185,7 +230,10 @@ export default function TeacherDashboardPage() {
     setListError(null);
     try {
       await user.getIdToken(true);
-      const listFn = httpsCallable(getFirebaseFunctions(), "listTeacherAssignedStudents");
+      const listFn = httpsCallable(
+        getFirebaseFunctions(),
+        "listTeacherAssignedStudents",
+      );
       const listRes = await listFn({ academyId: aid });
       const payload = listRes.data as { students?: CallableStudentPayload[] };
       const rawList = Array.isArray(payload?.students) ? payload.students : [];
@@ -194,7 +242,9 @@ export default function TeacherDashboardPage() {
       setStudents(list);
       setListError(null);
     } catch {
-      setListError("전담 학생 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      setListError(
+        "전담 학생 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
+      );
     } finally {
       setListRefreshBusy(false);
     }
@@ -208,17 +258,28 @@ export default function TeacherDashboardPage() {
       setNotifyBusyKey(key);
       setNotifyMessage(null);
       try {
-        const fn = httpsCallable(getFirebaseFunctions(), "sendStudentAttendanceNotification");
+        const fn = httpsCallable(
+          getFirebaseFunctions(),
+          "sendStudentAttendanceNotification",
+        );
         await fn({ academyId: aid, studentId, kind });
-        setNotifyMessage(kind === "present" ? "출석 알림을 보냈습니다." : "결석 알림을 보냈습니다.");
+        setNotifyMessage(
+          kind === "present"
+            ? "출석 알림을 보냈습니다."
+            : "결석 알림을 보냈습니다.",
+        );
       } catch (e) {
         if (e instanceof FirebaseError) {
           if (e.code === "functions/resource-exhausted") {
-            setNotifyMessage("같은 학생에게 너무 자주 보낼 수 없습니다. 잠시 후 다시 시도해 주세요.");
+            setNotifyMessage(
+              "같은 학생에게 너무 자주 보낼 수 없습니다. 잠시 후 다시 시도해 주세요.",
+            );
             return;
           }
         }
-        setNotifyMessage("알림을 보내지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        setNotifyMessage(
+          "알림을 보내지 못했습니다. 잠시 후 다시 시도해 주세요.",
+        );
       } finally {
         setNotifyBusyKey(null);
       }
@@ -300,12 +361,12 @@ export default function TeacherDashboardPage() {
           logoutBusy={logoutBusy}
           profile={authProfile}
         />
-        <p className="mb-6 mt-1 text-[11px] leading-relaxed text-neutral-500 dark:text-neutral-400">
+        {/* <p className="mb-6 mt-1 text-[11px] leading-relaxed text-neutral-500 dark:text-neutral-400">
           전담 학생 정보는 <span className="font-medium text-neutral-700 dark:text-neutral-300">조회만</span> 가능합니다.
           수정·삭제는 학원 대시보드에서 진행됩니다.
-        </p>
+        </p> */}
 
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="mt-5 mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-foreground">전담 학생</h2>
           <button
             type="button"
@@ -331,21 +392,30 @@ export default function TeacherDashboardPage() {
 
         <div className="space-y-2">
           {students.length === 0 ? (
-            <p className={`py-12 text-center text-sm text-neutral-500 ${glassCard}`}>
-              전담으로 연결된 학생이 없습니다. 학원에서 배정이 되면 여기에 표시됩니다.
+            <p
+              className={`py-12 text-center text-sm text-neutral-500 ${glassCard}`}
+            >
+              전담으로 연결된 학생이 없습니다. 학원에서 배정이 되면 여기에
+              표시됩니다.
             </p>
           ) : (
             students.map((s) => (
               <div key={s.id} className={`p-4 ${glassCard}`}>
                 <p className="font-medium text-foreground">
                   {s.name}
-                  <span className="font-normal text-neutral-500"> · 만 {s.age}세</span>
+                  <span className="font-normal text-neutral-500">
+                    {" "}
+                    · 만 {s.age}세
+                  </span>
                 </p>
                 <p className="mt-2 text-[11px] text-neutral-600">
                   연락 <span className="text-foreground">{s.phone || "—"}</span>
                 </p>
                 <p className="mt-0.5 text-[11px] text-neutral-600">
-                  비상 연락 <span className="text-foreground">{s.emergencyContact || "—"}</span>
+                  비상 연락{" "}
+                  <span className="text-foreground">
+                    {s.emergencyContact || "—"}
+                  </span>
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
@@ -354,7 +424,9 @@ export default function TeacherDashboardPage() {
                     onClick={() => void sendAttendanceNotify(s.id, "present")}
                     className="rounded-xl border border-emerald-400/60 bg-emerald-500/15 px-3 py-2 text-[11px] font-medium text-emerald-950 hover:bg-emerald-500/25 disabled:opacity-50"
                   >
-                    {notifyBusyKey === `${s.id}-present` ? "전송 중…" : "출석 알림"}
+                    {notifyBusyKey === `${s.id}-present`
+                      ? "전송 중…"
+                      : "출석 알림"}
                   </button>
                   <button
                     type="button"
@@ -362,7 +434,9 @@ export default function TeacherDashboardPage() {
                     onClick={() => void sendAttendanceNotify(s.id, "absent")}
                     className="rounded-xl border border-amber-400/60 bg-amber-500/12 px-3 py-2 text-[11px] font-medium text-amber-950 hover:bg-amber-500/22 disabled:opacity-50"
                   >
-                    {notifyBusyKey === `${s.id}-absent` ? "전송 중…" : "결석 알림"}
+                    {notifyBusyKey === `${s.id}-absent`
+                      ? "전송 중…"
+                      : "결석 알림"}
                   </button>
                 </div>
               </div>

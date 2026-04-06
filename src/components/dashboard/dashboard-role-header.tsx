@@ -6,6 +6,11 @@ import {
   type DashboardBottomNavMenuAction,
   type DashboardBottomNavTab,
 } from "@/components/dashboard/dashboard-bottom-nav";
+import {
+  DashboardTopHeader,
+  DashboardTopHeaderSpacer,
+} from "@/components/dashboard/dashboard-top-header";
+import { DashboardTopScrim } from "@/components/dashboard/dashboard-top-scrim";
 import type { AuthProfilePayload } from "@/lib/firebase/use-auth-profile";
 
 type DashboardRoleHeaderProps = {
@@ -54,24 +59,6 @@ export function DashboardRoleHeader({
   extraMenuActions = [],
 }: DashboardRoleHeaderProps) {
   const menuActions: DashboardBottomNavMenuAction[] = [];
-  const TitleBellButton = showBellOnTitle ? (
-    <button
-      type="button"
-      onClick={() => onBellClick?.()}
-      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/45 text-neutral-700 shadow-sm backdrop-blur-md transition hover:bg-white/75"
-      aria-label="알림"
-    >
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
-        <path
-          d="M12 3a6 6 0 00-6 6v2.4L4 14v1h16v-1l-2-2.6V9a6 6 0 00-6-6z"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinejoin="round"
-        />
-        <path d="M9 19a3 3 0 006 0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      </svg>
-    </button>
-  ) : null;
 
   if (includeSettingsAction && onSettings) {
     menuActions.push({ label: settingsLabel, onSelect: onSettings });
@@ -87,35 +74,19 @@ export function DashboardRoleHeader({
 
   return (
     <>
-      <section className="mx-auto max-w-lg px-4 pb-1 pt-[max(0.85rem,env(safe-area-inset-top))]">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2">
-            {showBack ? (
-              <button
-                type="button"
-                onClick={onBack}
-                aria-label={backAriaLabel ?? "뒤로 가기"}
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-transparent text-foreground transition hover:bg-black/[0.05]"
-              >
-                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path
-                    d="M15 6l-6 6 6 6"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
-            ) : null}
-            <h1 className="truncate text-[23px] font-bold tracking-tight text-foreground">{title}</h1>
-          </div>
-          {TitleBellButton}
-        </div>
-        {showBack && backHint ? (
-          <p className="mt-1 pl-11 text-xs text-neutral-500">{backHint}</p>
-        ) : null}
-      </section>
+      <DashboardTopScrim />
+      <DashboardTopHeader
+        title={title}
+        showBack={showBack}
+        onBack={onBack}
+        backAriaLabel={backAriaLabel}
+        backHint={backHint}
+        onBellClick={onBellClick}
+        showBell={showBellOnTitle}
+      />
+      <DashboardTopHeaderSpacer
+        showSubline={Boolean(showBack && backHint)}
+      />
 
       <DashboardBottomNav
         title={title}
@@ -127,6 +98,7 @@ export function DashboardRoleHeader({
         bottomTabs={bottomTabs}
         menuIntro={menuIntro}
         menuActions={menuActions}
+        includeSrOnlyScreenTitle={false}
         profile={profile}
       />
     </>

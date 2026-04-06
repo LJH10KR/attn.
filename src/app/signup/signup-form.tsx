@@ -71,7 +71,10 @@ export function SignupForm() {
           typeof window !== "undefined"
             ? `${window.location.origin}/verify-email`
             : undefined;
-        await sendEmailVerification(cred.user, continueUrl ? { url: continueUrl } : undefined);
+        await sendEmailVerification(
+          cred.user,
+          continueUrl ? { url: continueUrl } : undefined,
+        );
         router.replace("/verify-email");
       } catch (err) {
         const code = err instanceof FirebaseError ? err.code : "";
@@ -113,7 +116,8 @@ export function SignupForm() {
       {!configured ? (
         <p className="mb-4 max-w-md rounded-2xl border border-amber-200/80 bg-amber-50/90 px-4 py-3 text-center text-sm text-amber-950 backdrop-blur-sm">
           <code className="font-mono text-xs">.env.local</code>에{" "}
-          <code className="font-mono text-xs">NEXT_PUBLIC_FIREBASE_*</code> 값을 넣어 주세요.
+          <code className="font-mono text-xs">NEXT_PUBLIC_FIREBASE_*</code> 값을
+          넣어 주세요.
         </p>
       ) : null}
 
@@ -124,7 +128,9 @@ export function SignupForm() {
         <h1 className="text-center text-2xl font-semibold tracking-tight text-foreground">
           회원가입
         </h1>
-        <p className="mt-2 text-center text-xs text-neutral-500">attn. · 학원 오너</p>
+        <p className="mt-2 text-center text-xs text-neutral-500">
+          attn. · 학원 오너
+        </p>
 
         <div className="mt-4 flex justify-center">
           <span className="rounded-full bg-white/60 px-3 py-1 text-xs font-medium text-neutral-700 ring-1 ring-black/5">
@@ -235,11 +241,11 @@ export function SignupForm() {
         </p>
       </div>
 
-      <p className="mt-8 text-center text-xs text-neutral-500">
+      {/* <p className="mt-8 text-center text-xs text-neutral-500">
         <Link href="/" className="underline-offset-2 hover:underline">
           홈으로
         </Link>
-      </p>
+      </p> */}
     </div>
   );
 }

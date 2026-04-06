@@ -5,13 +5,20 @@ import { doc, onSnapshot, setDoc, Timestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { docToStudentRow, type StudentRowVM } from "@/components/academy/academy-student-panel";
+import {
+  docToStudentRow,
+  type StudentRowVM,
+} from "@/components/academy/academy-student-panel";
 import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
 import { ParentPushNotificationsCard } from "@/components/parent/parent-push-notifications-card";
-import { getFirebaseAuth, getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import {
+  getFirebaseAuth,
+  getFirebaseDb,
+  getFirebaseFunctions,
+} from "@/lib/firebase/client-app";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
@@ -34,9 +41,13 @@ type CallableStudentPayload = {
   createdAtMillis?: number | null;
 };
 
-function studentRowFromCallablePayload(s: CallableStudentPayload): StudentRowVM {
+function studentRowFromCallablePayload(
+  s: CallableStudentPayload,
+): StudentRowVM {
   const createdAt =
-    typeof s.createdAtMillis === "number" ? Timestamp.fromMillis(s.createdAtMillis) : undefined;
+    typeof s.createdAtMillis === "number"
+      ? Timestamp.fromMillis(s.createdAtMillis)
+      : undefined;
   return docToStudentRow(s.id, {
     parentUserId: s.parentUserId ?? "",
     name: s.name ?? "",
@@ -44,7 +55,9 @@ function studentRowFromCallablePayload(s: CallableStudentPayload): StudentRowVM 
     phone: s.phone ?? "",
     emergencyContact: s.emergencyContact ?? "",
     assignedTeacherUids: s.assignedTeacherUids ?? [],
-    ...(s.assignedTeacherUid ? { assignedTeacherUid: s.assignedTeacherUid } : {}),
+    ...(s.assignedTeacherUid
+      ? { assignedTeacherUid: s.assignedTeacherUid }
+      : {}),
     ...(createdAt ? { createdAt } : {}),
   });
 }
@@ -104,18 +117,33 @@ export default function ParentDashboardPage() {
       let revealUi = false;
       try {
         await auth.authStateReady();
-        if (cancelled || gen !== parentInitGenerationRef.current || auth.currentUser?.uid !== uid) {
+        if (
+          cancelled ||
+          gen !== parentInitGenerationRef.current ||
+          auth.currentUser?.uid !== uid
+        ) {
           return;
         }
 
         await user.getIdToken();
-        if (cancelled || gen !== parentInitGenerationRef.current || auth.currentUser?.uid !== uid) {
+        if (
+          cancelled ||
+          gen !== parentInitGenerationRef.current ||
+          auth.currentUser?.uid !== uid
+        ) {
           return;
         }
 
-        const fn = httpsCallable(getFirebaseFunctions(), "getParentActivationState");
+        const fn = httpsCallable(
+          getFirebaseFunctions(),
+          "getParentActivationState",
+        );
         const res = await fn({});
-        if (cancelled || gen !== parentInitGenerationRef.current || auth.currentUser?.uid !== uid) {
+        if (
+          cancelled ||
+          gen !== parentInitGenerationRef.current ||
+          auth.currentUser?.uid !== uid
+        ) {
           return;
         }
 
@@ -138,19 +166,34 @@ export default function ParentDashboardPage() {
         revealUi = true;
 
         await user.getIdToken(true);
-        if (cancelled || gen !== parentInitGenerationRef.current || auth.currentUser?.uid !== uid) {
+        if (
+          cancelled ||
+          gen !== parentInitGenerationRef.current ||
+          auth.currentUser?.uid !== uid
+        ) {
           return;
         }
 
         try {
-          const listFn = httpsCallable(getFirebaseFunctions(), "listParentChildrenStudents");
+          const listFn = httpsCallable(
+            getFirebaseFunctions(),
+            "listParentChildrenStudents",
+          );
           const listRes = await listFn({ academyId: aid });
-          if (cancelled || gen !== parentInitGenerationRef.current || auth.currentUser?.uid !== uid) {
+          if (
+            cancelled ||
+            gen !== parentInitGenerationRef.current ||
+            auth.currentUser?.uid !== uid
+          ) {
             return;
           }
 
-          const payload = listRes.data as { students?: CallableStudentPayload[] };
-          const rawList = Array.isArray(payload?.students) ? payload.students : [];
+          const payload = listRes.data as {
+            students?: CallableStudentPayload[];
+          };
+          const rawList = Array.isArray(payload?.students)
+            ? payload.students
+            : [];
           const list = rawList.map((s) => studentRowFromCallablePayload(s));
           list.sort(sortByName);
           setStudents(list);
@@ -159,7 +202,9 @@ export default function ParentDashboardPage() {
         } catch {
           if (!cancelled && gen === parentInitGenerationRef.current) {
             setStudents([]);
-            setListError("자녀 학생 목록을 불러오지 못했습니다. 잠시 후 새로고침해 주세요.");
+            setListError(
+              "자녀 학생 목록을 불러오지 못했습니다. 잠시 후 새로고침해 주세요.",
+            );
           }
         }
       } catch {
@@ -236,7 +281,10 @@ export default function ParentDashboardPage() {
     setListError(null);
     try {
       await user.getIdToken(true);
-      const listFn = httpsCallable(getFirebaseFunctions(), "listParentChildrenStudents");
+      const listFn = httpsCallable(
+        getFirebaseFunctions(),
+        "listParentChildrenStudents",
+      );
       const listRes = await listFn({ academyId: aid });
       const payload = listRes.data as { students?: CallableStudentPayload[] };
       const rawList = Array.isArray(payload?.students) ? payload.students : [];
@@ -245,7 +293,9 @@ export default function ParentDashboardPage() {
       setStudents(list);
       setListError(null);
     } catch {
-      setListError("자녀 학생 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      setListError(
+        "자녀 학생 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
+      );
     } finally {
       setListRefreshBusy(false);
     }
@@ -327,11 +377,11 @@ export default function ParentDashboardPage() {
           logoutBusy={logoutBusy}
           profile={authProfile}
         />
-        <p className="mb-4 mt-1 text-[11px] leading-relaxed text-neutral-500 dark:text-neutral-400">
+        {/* <p className="mb-4 mt-1 text-[11px] leading-relaxed text-neutral-500 dark:text-neutral-400">
           연결된 자녀 학생 정보를 확인할 수 있습니다.
-        </p>
+        </p> */}
 
-        <div className="mb-4">
+        <div className="mt-5 mb-4">
           <ParentPushNotificationsCard />
         </div>
 
@@ -355,21 +405,30 @@ export default function ParentDashboardPage() {
 
         <div className="space-y-2">
           {students.length === 0 ? (
-            <p className={`py-12 text-center text-sm text-neutral-500 ${glassCard}`}>
-              등록된 자녀 학생이 없습니다. 학원에서 자녀를 연결하면 여기에 표시됩니다.
+            <p
+              className={`py-12 text-center text-sm text-neutral-500 ${glassCard}`}
+            >
+              등록된 자녀 학생이 없습니다. 학원에서 자녀를 연결하면 여기에
+              표시됩니다.
             </p>
           ) : (
             students.map((s) => (
               <div key={s.id} className={`p-4 ${glassCard}`}>
                 <p className="font-medium text-foreground">
                   {s.name}
-                  <span className="font-normal text-neutral-500"> · 만 {s.age}세</span>
+                  <span className="font-normal text-neutral-500">
+                    {" "}
+                    · 만 {s.age}세
+                  </span>
                 </p>
                 <p className="mt-2 text-[11px] text-neutral-600">
                   연락 <span className="text-foreground">{s.phone || "—"}</span>
                 </p>
                 <p className="mt-0.5 text-[11px] text-neutral-600">
-                  비상 연락 <span className="text-foreground">{s.emergencyContact || "—"}</span>
+                  비상 연락{" "}
+                  <span className="text-foreground">
+                    {s.emergencyContact || "—"}
+                  </span>
                 </p>
               </div>
             ))

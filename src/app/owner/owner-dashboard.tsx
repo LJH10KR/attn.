@@ -420,7 +420,7 @@ export function OwnerDashboard() {
         profile={authProfile}
       />
 
-      <main className="mx-auto max-w-lg px-4 pt-4">
+      <main className="mx-auto max-w-lg px-4 pt-5">
         <div className="mb-5 flex items-center justify-between gap-3">
           <h2 className="text-base font-semibold text-foreground">내 학원</h2>
           <button
