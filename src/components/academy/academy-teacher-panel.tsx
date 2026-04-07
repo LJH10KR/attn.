@@ -744,12 +744,14 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
 
       {registerOpen ? (
         <div
-          className="fixed inset-0 z-30 flex items-end justify-center bg-black/30 p-4 sm:items-center"
+          className="fixed inset-0 z-30 flex items-center justify-center bg-black/30 p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="reg-teacher-title"
         >
-          <div className={`w-full max-w-md p-6 ${glassCard}`}>
+          <div
+            className={`w-full max-w-md max-h-[min(32rem,calc(100dvh-2rem))] min-h-0 overflow-y-auto p-6 ${glassCard}`}
+          >
             <h3 id="reg-teacher-title" className="text-lg font-semibold text-foreground">
               선생님 등록
             </h3>
