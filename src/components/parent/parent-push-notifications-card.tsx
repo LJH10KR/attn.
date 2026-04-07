@@ -9,6 +9,8 @@ import {
 } from "@/lib/firebase/config";
 import {
   callSyncParentPushSubscription,
+  clearLastSyncedFcmTokenStorage,
+  FCM_LAST_SYNCED_TOKEN_STORAGE_KEY,
   fetchFcmToken,
   prepareWebPushMessaging,
   removeFcmTokenLocal,
@@ -64,6 +66,7 @@ export function ParentPushNotificationsCard() {
         if (!wantOn) {
           await removeFcmTokenLocal();
           await callSyncParentPushSubscription(false);
+          clearLastSyncedFcmTokenStorage();
           return;
         }
         if (
@@ -91,6 +94,11 @@ export function ParentPushNotificationsCard() {
           return;
         }
         await callSyncParentPushSubscription(true, token);
+        try {
+          sessionStorage.setItem(FCM_LAST_SYNCED_TOKEN_STORAGE_KEY, token);
+        } catch {
+          /* ignore */
+        }
         setError(null);
       } catch {
         setError("설정 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");

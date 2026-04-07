@@ -13,6 +13,18 @@ import {
 import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { getFirebaseWebVapidKey, isFirebaseEmulatorEnabled, isWebPushConfigured } from "@/lib/firebase/config";
 
+/** 마지막으로 서버에 동기화한 FCM 토큰 — 변경 시에만 `syncParentPushSubscription` 호출 */
+export const FCM_LAST_SYNCED_TOKEN_STORAGE_KEY = "attn_fcm_last_synced_token";
+
+export function clearLastSyncedFcmTokenStorage(): void {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.removeItem(FCM_LAST_SYNCED_TOKEN_STORAGE_KEY);
+  } catch {
+    /* 사생활 보호 모드 등 */
+  }
+}
+
 export type WebPushPrepareResult =
   | { ok: true; messaging: Messaging }
   | { ok: false; reason: "emulator" | "unsupported" | "no_vapid" | "no_sw" | "no_token" | "unknown"; message?: string };
@@ -96,6 +108,39 @@ export async function callSyncParentPushSubscription(enabled: boolean, fcmToken?
   );
 }
 
+/**
+ * 푸시가 켜진 상태에서만: 최신 FCM 토큰을 받아 세션에 저장된 값과 다를 때만 서버에 다시 올립니다.
+ * (포그라운드 복귀·SW 교체·bfcache 복원 후 토큰 불일치로 알림이 끊기는 경우 완화)
+ */
+export async function resyncParentPushTokenAfterResume(
+  isPushEnabled: () => boolean,
+): Promise<void> {
+  if (typeof window === "undefined") return;
+  if (!isPushEnabled()) return;
+
+  const { token, error } = await fetchFcmToken();
+  if (!token || error) return;
+
+  let prev: string | null = null;
+  try {
+    prev = sessionStorage.getItem(FCM_LAST_SYNCED_TOKEN_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+  if (prev === token) return;
+
+  try {
+    await callSyncParentPushSubscription(true, token);
+    try {
+      sessionStorage.setItem(FCM_LAST_SYNCED_TOKEN_STORAGE_KEY, token);
+    } catch {
+      /* ignore */
+    }
+  } catch {
+    /* 다음 복귀 시 재시도 */
+  }
+}
+
 export function subscribeForegroundMessages(
   onPayload: (body: string) => void,
 ): () => void {
@@ -104,6 +149,8 @@ export function subscribeForegroundMessages(
   void (async () => {
     const prep = await prepareWebPushMessaging();
     if (!prep.ok || cancelled) return;
+    const reg = await registerMessagingServiceWorker();
+    if (!reg || cancelled) return;
     unsub = onMessage(prep.messaging, (payload) => {
       const d = payload.data;
       if (!d || d.type !== "attendance") return;

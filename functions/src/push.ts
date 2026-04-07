@@ -1,10 +1,26 @@
 import * as crypto from "node:crypto";
 import * as admin from "firebase-admin";
-import { FieldValue, Timestamp } from "firebase-admin/firestore";
+import { FieldValue, Timestamp, type DocumentReference } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 
 const ATTENDANCE_COOLDOWN_MS = 60_000;
+
+/**
+ * 푸시 QA용(일시): 선생님당 UTC 일 기준으로, 같은 학생에 대한 60초 쿨다운을 추가로 무시하고
+ * 보낼 수 있는 횟수. 운영 안정화 후 `0`으로 두면 쿨다운만 적용됩니다.
+ */
+const TEMP_TEACHER_ATTENDANCE_COOLDOWN_BYPASS_PER_UTC_DAY = 10;
+
+function utcDayKey(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** FCM이 해당 토큰을 더 이상 유효하지 않다고 판단할 때 — Firestore 구독 문서 정리 */
+const FCM_TOKEN_INVALID_CODES = new Set([
+  "messaging/registration-token-not-registered",
+  "messaging/invalid-registration-token",
+]);
 
 function studentAssignedToTeacher(data: Record<string, unknown>, teacherUid: string): boolean {
   const raw = data.assignedTeacherUids;
@@ -124,14 +140,66 @@ export const sendStudentAttendanceNotification = onCall(async (request) => {
   }
 
   const rateRef = db.doc(`_pushRateLimits/attendance_${academyId}_${studentId}`);
+  const dayKey = utcDayKey();
+  const cooldownBypassRef =
+    TEMP_TEACHER_ATTENDANCE_COOLDOWN_BYPASS_PER_UTC_DAY > 0
+      ? db.doc(
+        `_pushRateLimits/attendance_cooldown_bypass_${academyId}_${teacherUid}_${dayKey}`,
+      )
+      : null;
+
   await db.runTransaction(async (tx) => {
     const rateSnap = await tx.get(rateRef);
-    const lastMillis = rateSnap.exists ? (rateSnap.get("lastSentAt") as Timestamp | undefined)?.toMillis() ?? 0 : 0;
+    const lastMillis = rateSnap.exists
+      ? (rateSnap.get("lastSentAt") as Timestamp | undefined)?.toMillis() ?? 0
+      : 0;
     const now = Date.now();
-    if (now - lastMillis < ATTENDANCE_COOLDOWN_MS) {
-      throw new HttpsError("resource-exhausted", "같은 학생에게 알림을 너무 자주 보낼 수 없습니다. 잠시 후 다시 시도해 주세요.");
+    const tooSoon = now - lastMillis < ATTENDANCE_COOLDOWN_MS;
+
+    if (tooSoon) {
+      if (
+        !cooldownBypassRef ||
+        TEMP_TEACHER_ATTENDANCE_COOLDOWN_BYPASS_PER_UTC_DAY <= 0
+      ) {
+        throw new HttpsError(
+          "resource-exhausted",
+          "같은 학생에게 알림을 너무 자주 보낼 수 없습니다. 잠시 후 다시 시도해 주세요.",
+        );
+      }
+      const bypassSnap = await tx.get(cooldownBypassRef);
+      const used =
+        bypassSnap.exists && typeof bypassSnap.get("used") === "number"
+          ? (bypassSnap.get("used") as number)
+          : 0;
+      if (used >= TEMP_TEACHER_ATTENDANCE_COOLDOWN_BYPASS_PER_UTC_DAY) {
+        throw new HttpsError(
+          "resource-exhausted",
+          "같은 학생에게 알림을 너무 자주 보낼 수 없습니다. 잠시 후 다시 시도해 주세요.",
+        );
+      }
+      tx.set(
+        cooldownBypassRef,
+        {
+          used: FieldValue.increment(1),
+          teacherUid,
+          academyId,
+          dayKey,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
     }
-    tx.set(rateRef, { lastSentAt: FieldValue.serverTimestamp(), teacherUid, studentId, academyId }, { merge: true });
+
+    tx.set(
+      rateRef,
+      {
+        lastSentAt: FieldValue.serverTimestamp(),
+        teacherUid,
+        studentId,
+        academyId,
+      },
+      { merge: true },
+    );
   });
 
   const studentName = typeof studentData.name === "string" && studentData.name ? studentData.name : "학생";
@@ -159,6 +227,42 @@ export const sendStudentAttendanceNotification = onCall(async (request) => {
         failure: resp.failureCount,
       });
     }
+
+    const deadRefs: DocumentReference[] = [];
+    for (let i = 0; i < resp.responses.length; i++) {
+      const r = resp.responses[i];
+      if (r.success) continue;
+      const code = r.error?.code ?? "";
+      if (!FCM_TOKEN_INVALID_CODES.has(code)) continue;
+      const bad = tokens[i];
+      const docMatch = subsSnap.docs.find((d) => d.get("token") === bad);
+      if (docMatch) deadRefs.push(docMatch.ref);
+    }
+    if (deadRefs.length > 0) {
+      let batch = db.batch();
+      let n = 0;
+      for (const ref of deadRefs) {
+        batch.delete(ref);
+        n++;
+        if (n >= 450) {
+          await batch.commit();
+          batch = db.batch();
+          n = 0;
+        }
+      }
+      if (n > 0) await batch.commit();
+      const anyLeft = await userRef.collection("pushSubscriptions").limit(1).get();
+      if (anyLeft.empty) {
+        await userRef.set(
+          {
+            pushNotificationsEnabled: false,
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+      }
+    }
+
     return { ok: true as const, sent: resp.successCount, failureCount: resp.failureCount };
   } catch (e) {
     logger.error("sendStudentAttendanceNotification", e);

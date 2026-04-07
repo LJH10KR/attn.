@@ -38,7 +38,8 @@ messaging.onBackgroundMessage((payload) => {
     status: 200,
     headers: {
       "Content-Type": "application/javascript; charset=utf-8",
-      "Cache-Control": "public, max-age=0, must-revalidate",
+      // SW 스크립트가 오래 캐시되면 설정·Firebase 버전 변경 후에도 구버전이 남을 수 있음
+      "Cache-Control": "no-store",
       "Service-Worker-Allowed": "/",
     },
   });

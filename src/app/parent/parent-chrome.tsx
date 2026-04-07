@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useParentPushLifecycleResync } from "@/lib/firebase/use-parent-push-lifecycle-resync";
 import { subscribeForegroundMessages } from "@/lib/firebase/web-push";
 
 const glassOverlay =
@@ -12,8 +13,11 @@ export function ParentChrome({ children }: { children: React.ReactNode }) {
   const [attnOpen, setAttnOpen] = useState(false);
   const [attnBody, setAttnBody] = useState("");
 
+  useParentPushLifecycleResync();
+
   useEffect(() => {
-    const listen = pathname === "/parent" || pathname === "/parent/settings";
+    const listen =
+      pathname.startsWith("/parent") && !pathname.startsWith("/parent/session");
     if (!listen) return;
     return subscribeForegroundMessages((body) => {
       setAttnBody(body);
