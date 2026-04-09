@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useParentPushLifecycleResync } from "@/lib/firebase/use-parent-push-lifecycle-resync";
 import { subscribeForegroundMessages } from "@/lib/firebase/web-push";
+import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 
 const glassOverlay =
   "rounded-[1.75rem] border border-white/70 bg-[rgba(252,251,248,0.98)] p-6 shadow-[0_24px_80px_-20px_rgba(0,0,0,0.2)]";
@@ -13,6 +14,7 @@ export function ParentChrome({ children }: { children: React.ReactNode }) {
   const [attnOpen, setAttnOpen] = useState(false);
   const [attnBody, setAttnBody] = useState("");
 
+  useBodyScrollLock(attnOpen);
   useParentPushLifecycleResync();
 
   useEffect(() => {

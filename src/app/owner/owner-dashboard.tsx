@@ -28,6 +28,7 @@ import {
 } from "@/lib/firebase/client-app";
 import { fetchIsOwner } from "@/lib/firebase/owner-profile";
 import { COLLECTIONS, type Academy } from "@/lib/firebase/attn-schema";
+import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 
 type AcademyRow = Academy & { id: string };
 
@@ -87,6 +88,8 @@ export function OwnerDashboard() {
   const [editPortalPassword, setEditPortalPassword] = useState("");
   const [editPortalPassword2, setEditPortalPassword2] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<AcademyRow | null>(null);
+
+  useBodyScrollLock(modal !== null);
 
   const configured = isFirebaseConfigured();
 

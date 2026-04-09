@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { formatDashboardBellBadge } from "@/components/dashboard/dashboard-notifications-modal";
 import { greetingDisplayNameFromProfile } from "@/lib/ui/dashboard-greetings";
+import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 
 /** 계정 메뉴(프로필 버튼) 항목 */
 export type DashboardBottomNavMenuAction = {
@@ -175,6 +176,7 @@ export function DashboardBottomNav({
   className = "",
 }: DashboardBottomNavProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  useBodyScrollLock(menuOpen);
 
   const closeMenu = useCallback(() => setMenuOpen(false), []);
 

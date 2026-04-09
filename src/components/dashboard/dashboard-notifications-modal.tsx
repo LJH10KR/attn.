@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 
 const glassCard = "glass-card";
 
@@ -163,6 +164,7 @@ export function DashboardNotificationsModal({
   onDeleteItem,
   onDeleteAll,
 }: DashboardNotificationsModalProps) {
+  useBodyScrollLock(open);
   const [confirmAllOpen, setConfirmAllOpen] = useState(false);
   const [openSwipeId, setOpenSwipeId] = useState<string | null>(null);
   const deleteEnabled = Boolean(onDeleteItem && onDeleteAll);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 
 type Props = {
   open: boolean;
@@ -13,6 +14,8 @@ type Props = {
 export function IosPwaHintModal({ open, onCloseAction, onConfirmAction }: Props) {
   const [dontShowAgain, setDontShowAgain] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  useBodyScrollLock(open);
 
   if (!open) return null;
 

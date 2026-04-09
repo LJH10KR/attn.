@@ -17,6 +17,7 @@ import {
   type TeacherRegistrationStatus,
 } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 
 const glassCard = "glass-card";
 
@@ -135,6 +136,7 @@ function DeleteTeacherConfirmModal({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  useBodyScrollLock(true);
   const cancelRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -453,6 +455,7 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
   const [rows, setRows] = useState<TeacherRowVM[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [registerOpen, setRegisterOpen] = useState(false);
+  useBodyScrollLock(registerOpen);
   const [formEmail, setFormEmail] = useState("");
   const [formName, setFormName] = useState("");
   const [formSubject, setFormSubject] = useState("");

@@ -21,6 +21,7 @@ import {
   type TeacherRegistrationStatus,
 } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
+import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 
 const glassCard = "glass-card";
 
@@ -63,6 +64,7 @@ function AssignStudentsModal({
   onClose: () => void;
   onConfirm: () => void;
 }) {
+  useBodyScrollLock(open);
   const ref = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (open) ref.current?.focus();

@@ -22,6 +22,7 @@ import {
 } from "@/lib/firebase/attn-schema";
 import { AcademyParentStudentList } from "@/components/academy/academy-student-panel";
 import { getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 
 const glassCard = "glass-card";
 
@@ -165,6 +166,7 @@ function RegisterChildModal({
   onClose: () => void;
   onSubmit: () => void;
 }) {
+  useBodyScrollLock(open);
   const cancelRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -322,6 +324,7 @@ function DeleteParentConfirmModal({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  useBodyScrollLock(true);
   const cancelRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -772,6 +775,7 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
   const [rows, setRows] = useState<ParentRowVM[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [registerOpen, setRegisterOpen] = useState(false);
+  useBodyScrollLock(registerOpen);
   const [formEmail, setFormEmail] = useState("");
   const [formName, setFormName] = useState("");
   const [formEmergencyContact, setFormEmergencyContact] = useState("");
