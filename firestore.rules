@@ -137,10 +137,11 @@ service cloud.firestore {
         allow read, write: if isSignedIn() && request.auth.uid == userId;
       }
 
-      /** 대시보드 알림벨(출석·결석 등) — Cloud Functions만 쓰기 */
+      /** 대시보드 알림벨 — 생성은 Functions만, 본인 삭제만 허용 */
       match /dashboardBellItems/{itemId} {
         allow read: if isSignedIn() && request.auth.uid == userId;
-        allow write: if false;
+        allow create, update: if false;
+        allow delete: if isSignedIn() && request.auth.uid == userId;
       }
     }
 

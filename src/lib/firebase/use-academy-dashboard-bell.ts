@@ -7,7 +7,7 @@ import {
   Timestamp,
   where,
 } from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DashboardNotificationRow } from "@/components/dashboard/dashboard-notifications-modal";
 import {
   COLLECTIONS,
@@ -102,8 +102,35 @@ function mapParentDoc(
   return rows;
 }
 
+function dismissedStorageKey(academyId: string): string {
+  return `attn_academy_bell_dismissed_v1_${academyId}`;
+}
+
+function loadDismissed(academyId: string): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = localStorage.getItem(dismissedStorageKey(academyId));
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr)) return new Set();
+    return new Set(arr.filter((x): x is string => typeof x === "string"));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveDismissed(academyId: string, set: Set<string>): void {
+  try {
+    const arr = [...set].slice(0, 400);
+    localStorage.setItem(dismissedStorageKey(academyId), JSON.stringify(arr));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
 /**
  * 학원 대시보드 알림벨 — 초청 만료·최종 등록 대기(선생님/학부모).
+ * 삭제는 Firestore 문서가 아니라 로컬 가림(dismiss)입니다.
  */
 export function useAcademyDashboardBell(academyId: string | null) {
   const [teacherDocs, setTeacherDocs] = useState<
@@ -114,11 +141,22 @@ export function useAcademyDashboardBell(academyId: string | null) {
   >([]);
   const [error, setError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
+
+  const rawItemsRef = useRef<DashboardNotificationRow[]>([]);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 60_000);
     return () => window.clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    if (!academyId) {
+      setDismissed(new Set());
+      return;
+    }
+    setDismissed(loadDismissed(academyId));
+  }, [academyId]);
 
   useEffect(() => {
     if (!academyId) {
@@ -166,7 +204,7 @@ export function useAcademyDashboardBell(academyId: string | null) {
     };
   }, [academyId]);
 
-  const items = useMemo(() => {
+  const rawItems = useMemo(() => {
     const now = nowMs;
     const out: DashboardNotificationRow[] = [];
     for (const d of teacherDocs) {
@@ -179,5 +217,57 @@ export function useAcademyDashboardBell(academyId: string | null) {
     return out;
   }, [teacherDocs, parentDocs, nowMs]);
 
-  return { items, error, count: items.length };
+  rawItemsRef.current = rawItems;
+
+  const rawIdsKey = useMemo(
+    () =>
+      rawItems
+        .map((i) => i.id)
+        .sort()
+        .join("\u0001"),
+    [rawItems],
+  );
+
+  useEffect(() => {
+    if (!academyId) return;
+    const raw = rawItemsRef.current;
+    const rawIds = new Set(raw.map((i) => i.id));
+    if (rawIds.size === 0) return;
+    setDismissed((prev) => {
+      const next = new Set([...prev].filter((id) => rawIds.has(id)));
+      if (next.size === prev.size && [...prev].every((id) => next.has(id))) return prev;
+      saveDismissed(academyId, next);
+      return next;
+    });
+  }, [academyId, rawIdsKey]);
+
+  const items = useMemo(
+    () => rawItems.filter((i) => !dismissed.has(i.id)),
+    [rawItems, dismissed],
+  );
+
+  const dismissOne = useCallback(
+    (id: string) => {
+      if (!academyId) return;
+      setDismissed((prev) => {
+        const next = new Set(prev);
+        next.add(id);
+        saveDismissed(academyId, next);
+        return next;
+      });
+    },
+    [academyId],
+  );
+
+  const dismissAllVisible = useCallback(() => {
+    if (!academyId) return;
+    setDismissed((prev) => {
+      const next = new Set(prev);
+      rawItemsRef.current.forEach((i) => next.add(i.id));
+      saveDismissed(academyId, next);
+      return next;
+    });
+  }, [academyId]);
+
+  return { items, error, count: items.length, dismissOne, dismissAllVisible };
 }

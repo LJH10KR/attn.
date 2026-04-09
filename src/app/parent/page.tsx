@@ -83,6 +83,8 @@ export default function ParentDashboardPage() {
     items: parentBellItems,
     count: parentBellCount,
     error: parentBellError,
+    deleteItem: deleteParentBellItem,
+    deleteAllItems: deleteAllParentBellItems,
   } = useParentDashboardBell(authUid);
 
   const parentListLoadedUidRef = useRef<string | null>(null);
@@ -467,6 +469,8 @@ export default function ParentDashboardPage() {
           heading="알림"
           items={parentBellItems}
           emptyLabel={parentBellError ?? "표시할 알림이 없습니다."}
+          onDeleteItem={(id) => void deleteParentBellItem(id)}
+          onDeleteAll={() => void deleteAllParentBellItems()}
         />
       </div>
 

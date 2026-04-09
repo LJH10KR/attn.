@@ -2,13 +2,17 @@
 
 import {
   collection,
+  deleteDoc,
+  doc,
+  getDocs,
   limit,
   onSnapshot,
   orderBy,
   query,
   Timestamp,
+  writeBatch,
 } from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { DashboardNotificationRow } from "@/components/dashboard/dashboard-notifications-modal";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
 
@@ -77,5 +81,31 @@ export function useParentDashboardBell(parentUid: string | null) {
     }));
   }, [rows]);
 
-  return { items, error, count: items.length };
+  const deleteItem = useCallback(
+    async (id: string) => {
+      if (!parentUid) return;
+      const db = getFirebaseDb();
+      await deleteDoc(
+        doc(db, "users", parentUid, PARENT_USER_DASHBOARD_BELL_COLLECTION, id),
+      );
+    },
+    [parentUid],
+  );
+
+  const deleteAllItems = useCallback(async () => {
+    if (!parentUid) return;
+    const db = getFirebaseDb();
+    const qy = query(
+      collection(db, "users", parentUid, PARENT_USER_DASHBOARD_BELL_COLLECTION),
+      orderBy("createdAt", "desc"),
+      limit(50),
+    );
+    const snap = await getDocs(qy);
+    if (snap.empty) return;
+    const batch = writeBatch(db);
+    snap.docs.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+  }, [parentUid]);
+
+  return { items, error, count: items.length, deleteItem, deleteAllItems };
 }

@@ -252,6 +252,8 @@ export function AcademyDashboard() {
     items: academyBellItems,
     count: academyBellCount,
     error: academyBellError,
+    dismissOne: dismissAcademyBellOne,
+    dismissAllVisible: dismissAcademyBellAll,
   } = useAcademyDashboardBell(academyId);
 
   const fromOwner = searchParams.get("from") === "owner";
@@ -715,6 +717,8 @@ export function AcademyDashboard() {
         heading="알림"
         items={academyBellItems}
         emptyLabel={academyBellError ?? "표시할 알림이 없습니다."}
+        onDeleteItem={dismissAcademyBellOne}
+        onDeleteAll={dismissAcademyBellAll}
       />
 
       <DashboardBottomScrim />
