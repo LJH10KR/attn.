@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDashboardBellBadge } from "@/components/dashboard/dashboard-notifications-modal";
+
 const TOP_OUTER_PT = "pt-[max(0.85rem,env(safe-area-inset-top))]";
 const TOP_OUTER_PB = "pb-1";
 /** 헤더 한 줄·스페이서 공통 높이(뒤로/제목/벨 정렬) */
@@ -34,6 +36,8 @@ export type DashboardTopHeaderProps = {
   onBellClick?: () => void;
   /** false이면 알림 버튼을 숨깁니다. */
   showBell?: boolean;
+  /** 0보다 크면 벨 아이콘에 배지로 표시 */
+  bellBadgeCount?: number;
 };
 
 /**
@@ -48,6 +52,7 @@ export function DashboardTopHeader({
   backHint,
   onBellClick,
   showBell = true,
+  bellBadgeCount = 0,
 }: DashboardTopHeaderProps) {
   return (
     <header
@@ -83,10 +88,17 @@ export function DashboardTopHeader({
             <button
               type="button"
               onClick={() => onBellClick?.()}
-              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-foreground transition hover:bg-black/[0.05] dark:hover:bg-white/10"
-              aria-label="알림"
+              className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-foreground transition hover:bg-black/[0.05] dark:hover:bg-white/10"
+              aria-label={
+                bellBadgeCount > 0 ? `알림 ${bellBadgeCount}건` : "알림"
+              }
             >
               <BellIcon />
+              {bellBadgeCount > 0 ? (
+                <span className="absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white shadow-sm">
+                  {formatDashboardBellBadge(bellBadgeCount)}
+                </span>
+              ) : null}
             </button>
           ) : null}
         </div>

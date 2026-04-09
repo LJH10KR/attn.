@@ -23,11 +23,13 @@ import {
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { DashboardNotificationsModal } from "@/components/dashboard/dashboard-notifications-modal";
 import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
+import { useAcademyDashboardBell } from "@/lib/firebase/use-academy-dashboard-bell";
 
 const glassCard = "glass-card";
 
@@ -244,6 +246,13 @@ export function AcademyDashboard() {
     null,
   );
   const [heatmapError, setHeatmapError] = useState<string | null>(null);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+
+  const {
+    items: academyBellItems,
+    count: academyBellCount,
+    error: academyBellError,
+  } = useAcademyDashboardBell(academyId);
 
   const fromOwner = searchParams.get("from") === "owner";
   const queryAcademyId = searchParams.get("id")?.trim() ?? "";
@@ -558,6 +567,8 @@ export function AcademyDashboard() {
         onHome={() => router.push("/")}
         showBellOnTitle
         showBellInBottomBar={false}
+        onBellClick={() => setNotificationsOpen(true)}
+        bellBadgeCount={academyBellCount}
         bottomTabs={[
           {
             id: "home",
@@ -697,6 +708,14 @@ export function AcademyDashboard() {
           </section>
         ) : null}
       </main>
+
+      <DashboardNotificationsModal
+        open={notificationsOpen}
+        onClose={() => setNotificationsOpen(false)}
+        heading="알림"
+        items={academyBellItems}
+        emptyLabel={academyBellError ?? "표시할 알림이 없습니다."}
+      />
 
       <DashboardBottomScrim />
     </div>

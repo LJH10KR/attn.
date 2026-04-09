@@ -11,6 +11,7 @@ import {
 } from "@/components/academy/academy-student-panel";
 import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
+import { DashboardNotificationsModal } from "@/components/dashboard/dashboard-notifications-modal";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
 import {
@@ -19,6 +20,7 @@ import {
   getFirebaseFunctions,
 } from "@/lib/firebase/client-app";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
+import { useParentDashboardBell } from "@/lib/firebase/use-parent-dashboard-bell";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
 
@@ -75,6 +77,13 @@ export default function ParentDashboardPage() {
   const [authUid, setAuthUid] = useState<string | null>(null);
   const [hideIosPwaHint, setHideIosPwaHint] = useState<boolean | null>(null);
   const [iosAutoModalOpen, setIosAutoModalOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+
+  const {
+    items: parentBellItems,
+    count: parentBellCount,
+    error: parentBellError,
+  } = useParentDashboardBell(authUid);
 
   const parentListLoadedUidRef = useRef<string | null>(null);
   const parentInitGenerationRef = useRef(0);
@@ -362,6 +371,8 @@ export default function ParentDashboardPage() {
           onHome={() => router.push("/")}
           showBellOnTitle
           showBellInBottomBar={false}
+          onBellClick={() => setNotificationsOpen(true)}
+          bellBadgeCount={parentBellCount}
           bottomTabs={[
             {
               id: "home",
@@ -448,6 +459,14 @@ export default function ParentDashboardPage() {
               { merge: true },
             );
           }}
+        />
+
+        <DashboardNotificationsModal
+          open={notificationsOpen}
+          onClose={() => setNotificationsOpen(false)}
+          heading="알림"
+          items={parentBellItems}
+          emptyLabel={parentBellError ?? "표시할 알림이 없습니다."}
         />
       </div>
 

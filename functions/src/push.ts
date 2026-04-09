@@ -125,19 +125,7 @@ export const sendStudentAttendanceNotification = onCall(async (request) => {
     return { ok: true as const, sent: 0, reason: "no_parent" as const };
   }
 
-  const userRef = db.doc(`users/${parentUserId}`);
-  const userSnap = await userRef.get();
-  if (!userSnap.exists || userSnap.get("pushNotificationsEnabled") !== true) {
-    return { ok: true as const, sent: 0, reason: "parent_opt_out" as const };
-  }
-
-  const subsSnap = await userRef.collection("pushSubscriptions").get();
-  const tokens = subsSnap.docs
-    .map((d) => d.get("token"))
-    .filter((t): t is string => typeof t === "string" && t.length > 20);
-  if (tokens.length === 0) {
-    return { ok: true as const, sent: 0, reason: "no_token" as const };
-  }
+  const parentUserRef = db.doc(`users/${parentUserId}`);
 
   const rateRef = db.doc(`_pushRateLimits/attendance_${academyId}_${studentId}`);
   const dayKey = utcDayKey();
@@ -206,6 +194,28 @@ export const sendStudentAttendanceNotification = onCall(async (request) => {
   const body =
     kind === "present" ? `${studentName} 학생이 출석했습니다.` : `${studentName} 학생이 결석 처리되었습니다.`;
 
+  await parentUserRef.collection("dashboardBellItems").add({
+    kind: kind === "present" ? "attendance_present" : "attendance_absent",
+    academyId,
+    studentId,
+    studentName,
+    body,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+
+  const userSnap = await parentUserRef.get();
+  if (!userSnap.exists || userSnap.get("pushNotificationsEnabled") !== true) {
+    return { ok: true as const, sent: 0, reason: "parent_opt_out" as const };
+  }
+
+  const subsSnap = await parentUserRef.collection("pushSubscriptions").get();
+  const tokens = subsSnap.docs
+    .map((d) => d.get("token"))
+    .filter((t): t is string => typeof t === "string" && t.length > 20);
+  if (tokens.length === 0) {
+    return { ok: true as const, sent: 0, reason: "no_token" as const };
+  }
+
   const dataPayload: Record<string, string> = {
     title: "attn.",
     body,
@@ -251,17 +261,14 @@ export const sendStudentAttendanceNotification = onCall(async (request) => {
         }
       }
       if (n > 0) await batch.commit();
-      const anyLeft = await userRef.collection("pushSubscriptions").limit(1).get();
-      if (anyLeft.empty) {
-        await userRef.set(
-          {
-            pushNotificationsEnabled: false,
-            updatedAt: FieldValue.serverTimestamp(),
-          },
-          { merge: true },
-        );
-      }
     }
+
+    /**
+     * 무효 토큰만 정리하고 `pushNotificationsEnabled`는 건드리지 않습니다.
+     * PWA 재실행·SW 교체 직후에는 Firestore에 예전 토큰만 남은 채로 푸시가 먼저 도착할 수 있어,
+     * 전부 무효 처리되면 사용자가 설정에서 켜 둔 상태가 서버에서 꺼짐으로 바뀌는 문제가 생깁니다.
+     * 새 토큰은 클라이언트(`resyncParentPushTokenAfterResume` 등)가 다시 올립니다.
+     */
 
     return { ok: true as const, sent: resp.successCount, failureCount: resp.failureCount };
   } catch (e) {

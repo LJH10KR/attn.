@@ -109,8 +109,11 @@ export async function callSyncParentPushSubscription(enabled: boolean, fcmToken?
 }
 
 /**
- * 푸시가 켜진 상태에서만: 최신 FCM 토큰을 받아 세션에 저장된 값과 다를 때만 서버에 다시 올립니다.
- * (포그라운드 복귀·SW 교체·bfcache 복원 후 토큰 불일치로 알림이 끊기는 경우 완화)
+ * 푸시가 켜진 상태에서만: FCM 토큰을 받아 서버(`pushSubscriptions`)에 맞춥니다.
+ *
+ * 예전에는 sessionStorage의 마지막 토큰과 같으면 Callable을 건너뛰었는데, 서버가 무효 토큰 문서만
+ * 삭제한 뒤에는 클라이언트 토큰 문자열이 그대로여도 Firestore 구독이 비어 있을 수 있습니다.
+ * 그때 재업로드를 생략하면 “설정은 켜짐인데 푸시가 안 옴”이 됩니다. 문자열이 같아도 동기화합니다.
  */
 export async function resyncParentPushTokenAfterResume(
   isPushEnabled: () => boolean,
@@ -120,14 +123,6 @@ export async function resyncParentPushTokenAfterResume(
 
   const { token, error } = await fetchFcmToken();
   if (!token || error) return;
-
-  let prev: string | null = null;
-  try {
-    prev = sessionStorage.getItem(FCM_LAST_SYNCED_TOKEN_STORAGE_KEY);
-  } catch {
-    /* ignore */
-  }
-  if (prev === token) return;
 
   try {
     await callSyncParentPushSubscription(true, token);

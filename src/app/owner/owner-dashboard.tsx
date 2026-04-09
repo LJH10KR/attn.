@@ -404,7 +404,7 @@ export function OwnerDashboard() {
               : `${academies[0].name} 외 ${academies.length - 1}곳`
         }
         onHome={() => router.push("/")}
-        showBellOnTitle
+        showBellOnTitle={false}
         showBellInBottomBar={false}
         bottomTabs={[
           {

@@ -136,6 +136,12 @@ service cloud.firestore {
       match /pushSubscriptions/{subId} {
         allow read, write: if isSignedIn() && request.auth.uid == userId;
       }
+
+      /** 대시보드 알림벨(출석·결석 등) — Cloud Functions만 쓰기 */
+      match /dashboardBellItems/{itemId} {
+        allow read: if isSignedIn() && request.auth.uid == userId;
+        allow write: if false;
+      }
     }
 
     match /academies/{academyId} {

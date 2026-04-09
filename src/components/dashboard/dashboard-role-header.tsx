@@ -28,6 +28,7 @@ type DashboardRoleHeaderProps = {
   onBellClick?: () => void;
   showBellOnTitle?: boolean;
   showBellInBottomBar?: boolean;
+  bellBadgeCount?: number;
   bottomTabs?: DashboardBottomNavTab[];
   includeSettingsAction?: boolean;
   onSettings?: () => void;
@@ -51,6 +52,7 @@ export function DashboardRoleHeader({
   onBellClick,
   showBellOnTitle = false,
   showBellInBottomBar = true,
+  bellBadgeCount = 0,
   bottomTabs,
   includeSettingsAction = false,
   onSettings,
@@ -83,6 +85,7 @@ export function DashboardRoleHeader({
         backHint={backHint}
         onBellClick={onBellClick}
         showBell={showBellOnTitle}
+        bellBadgeCount={bellBadgeCount}
       />
       <DashboardTopHeaderSpacer
         showSubline={Boolean(showBack && backHint)}
@@ -95,6 +98,7 @@ export function DashboardRoleHeader({
         onHomeClick={onHome}
         onBellClick={onBellClick}
         showBellInBottomBar={showBellInBottomBar}
+        bellBadgeCount={bellBadgeCount}
         bottomTabs={bottomTabs}
         menuIntro={menuIntro}
         menuActions={menuActions}

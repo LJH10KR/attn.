@@ -345,7 +345,7 @@ export default function TeacherDashboardPage() {
           title="선생님 대시보드"
           affiliationLabel={academyLabelForGreeting(academyName, academyId)}
           onHome={() => router.push("/")}
-          showBellOnTitle
+          showBellOnTitle={false}
           showBellInBottomBar={false}
           bottomTabs={[
             {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { formatDashboardBellBadge } from "@/components/dashboard/dashboard-notifications-modal";
 import { greetingDisplayNameFromProfile } from "@/lib/ui/dashboard-greetings";
 
 /** 계정 메뉴(프로필 버튼) 항목 */
@@ -39,6 +40,7 @@ export type DashboardBottomNavProps = {
   onBellClick?: () => void;
   /** 탭 미사용 모드에서 캡슐 안에 알림 벨 표시 */
   showBellInBottomBar?: boolean;
+  bellBadgeCount?: number;
   bottomTabs?: DashboardBottomNavTab[];
   menuActions: DashboardBottomNavMenuAction[];
   /**
@@ -165,6 +167,7 @@ export function DashboardBottomNav({
   onHomeClick,
   onBellClick,
   showBellInBottomBar = true,
+  bellBadgeCount = 0,
   bottomTabs,
   menuActions,
   includeSrOnlyScreenTitle = true,
@@ -265,10 +268,17 @@ export function DashboardBottomNav({
                 <button
                   type="button"
                   onClick={() => onBellClick?.()}
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-neutral-300/50 bg-white/45 text-neutral-700 shadow-sm backdrop-blur-md transition hover:bg-white/75 dark:border-white/12 dark:bg-white/10 dark:text-neutral-200 dark:hover:bg-white/15"
-                  aria-label="알림"
+                  className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-neutral-300/50 bg-white/45 text-neutral-700 shadow-sm backdrop-blur-md transition hover:bg-white/75 dark:border-white/12 dark:bg-white/10 dark:text-neutral-200 dark:hover:bg-white/15"
+                  aria-label={
+                    bellBadgeCount > 0 ? `알림 ${bellBadgeCount}건` : "알림"
+                  }
                 >
                   <BellIcon className="text-current" />
+                  {bellBadgeCount > 0 ? (
+                    <span className="absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white shadow-sm">
+                      {formatDashboardBellBadge(bellBadgeCount)}
+                    </span>
+                  ) : null}
                 </button>
               ) : null}
             </>

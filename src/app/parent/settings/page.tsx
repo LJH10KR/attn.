@@ -129,7 +129,7 @@ export default function ParentSettingsPage() {
           onBack={() => router.push("/parent")}
           backAriaLabel="학부모 대시보드로 돌아가기"
           onHome={() => router.push("/")}
-          showBellOnTitle
+          showBellOnTitle={false}
           showBellInBottomBar={false}
           bottomTabs={[
             {
