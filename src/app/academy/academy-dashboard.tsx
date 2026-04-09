@@ -351,7 +351,7 @@ export function AcademyDashboard() {
       await signOut(getFirebaseAuth());
     } finally {
       setLogoutBusy(false);
-      router.replace("/login?role=academy");
+      router.replace("/login/academy");
     }
   }, [router]);
 

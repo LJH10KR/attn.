@@ -93,7 +93,7 @@ export default function TeacherDashboardPage() {
         setListError(null);
         setAcademyId(null);
         setReady(false);
-        router.replace("/login?role=teacher");
+        router.replace("/login/teacher");
         return;
       }
 
@@ -308,7 +308,7 @@ export default function TeacherDashboardPage() {
       await signOut(getFirebaseAuth());
     } finally {
       setLogoutBusy(false);
-      router.replace("/login?role=teacher");
+      router.replace("/login/teacher");
     }
   }, [router]);
 

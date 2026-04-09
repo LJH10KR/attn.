@@ -34,7 +34,7 @@ export default function TeacherSessionPage() {
       await signOut(getFirebaseAuth());
     } finally {
       setBusy(false);
-      router.replace("/login?role=teacher");
+      router.replace("/login/teacher");
     }
   }, [router]);
 

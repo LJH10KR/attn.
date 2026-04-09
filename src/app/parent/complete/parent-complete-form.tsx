@@ -147,7 +147,7 @@ export function ParentCompleteForm() {
           </div>
         ) : null}
         <Link
-          href="/login?role=parent"
+          href="/login/parent"
           className="inline-flex w-full justify-center rounded-2xl border border-neutral-200 bg-white py-3 text-center text-sm font-medium text-neutral-800"
         >
           로그인 화면으로
@@ -176,7 +176,7 @@ export function ParentCompleteForm() {
           </p>
         ) : null}
         <Link
-          href="/login?role=parent"
+          href="/login/parent"
           className="inline-flex w-full justify-center rounded-2xl bg-[#222] dark:bg-neutral-100 py-3 text-center font-medium text-white dark:text-neutral-950"
         >
           학부모 로그인

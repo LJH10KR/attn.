@@ -1,7 +1,7 @@
 "use client";
 
 import { onAuthStateChanged } from "firebase/auth";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { getFirebaseAuth } from "@/lib/firebase/client-app";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
@@ -12,10 +12,11 @@ import {
 
 /**
  * PWA가 마지막 URL로 `/login`만 복원하는 경우, 세션이 있으면 역할에 맞는 화면으로 보냅니다.
- * `?stay=1` · `?role=` · `?msg=` 가 있으면 로그인 UI를 유지합니다.
+ * `/login/owner` 등 역할 경로 또는 `?stay=1` · `?role=` · `?msg=` 가 있으면 로그인 UI를 유지합니다.
  */
 export function LoginSessionAutoRedirect() {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const attemptedRef = useRef(false);
   const queryKey = searchParams.toString();
@@ -23,7 +24,13 @@ export function LoginSessionAutoRedirect() {
   useEffect(() => {
     attemptedRef.current = false;
     if (!isFirebaseConfigured()) return;
-    if (shouldSkipLoginSessionAutoRedirect(new URLSearchParams(queryKey))) return;
+    if (
+      shouldSkipLoginSessionAutoRedirect(
+        new URLSearchParams(queryKey),
+        pathname,
+      )
+    )
+      return;
 
     let cancelled = false;
     const auth = getFirebaseAuth();
@@ -49,7 +56,7 @@ export function LoginSessionAutoRedirect() {
       cancelled = true;
       unsub();
     };
-  }, [router, queryKey]);
+  }, [router, queryKey, pathname]);
 
   return null;
 }

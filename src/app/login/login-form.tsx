@@ -13,6 +13,10 @@ import {
 } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
 import { GoogleMark } from "@/components/auth/google-mark";
+import {
+  LOGIN_ROLE_OPTIONS,
+  type LoginRole,
+} from "@/lib/auth/login-routes";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -23,14 +27,9 @@ import {
 } from "@/lib/firebase/client-app";
 import { upsertOwnerProfile } from "@/lib/firebase/owner-profile";
 
-export type LoginRole = "owner" | "academy" | "teacher" | "parent";
+export type { LoginRole } from "@/lib/auth/login-routes";
 
-const ROLES: { id: LoginRole; label: string; hint: string }[] = [
-  { id: "owner", label: "오너", hint: "학원 등록·운영" },
-  { id: "academy", label: "학원", hint: "포털 로그인" },
-  { id: "teacher", label: "선생님", hint: "학원 소속" },
-  { id: "parent", label: "학부모", hint: "알림·출석" },
-];
+const ROLES = LOGIN_ROLE_OPTIONS;
 
 function authErrorMessage(code: string, role: LoginRole): string {
   switch (code) {
@@ -74,10 +73,14 @@ function functionsErrorMessage(err: FirebaseError): string {
   }
 }
 
-export function LoginForm() {
+type LoginFormProps = {
+  fixedRole?: LoginRole;
+};
+
+export function LoginForm({ fixedRole }: LoginFormProps = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [role, setRole] = useState<LoginRole>("owner");
+  const [role, setRole] = useState<LoginRole>(() => fixedRole ?? "owner");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [academyId, setAcademyId] = useState("");
@@ -101,9 +104,17 @@ export function LoginForm() {
   }, [configured]);
 
   useEffect(() => {
-    const r = searchParams.get("role");
-    if (r === "teacher" || r === "parent" || r === "owner" || r === "academy") {
-      setRole(r);
+    if (fixedRole) {
+      setRole(fixedRole);
+    }
+  }, [fixedRole]);
+
+  useEffect(() => {
+    if (!fixedRole) {
+      const r = searchParams.get("role");
+      if (r === "teacher" || r === "parent" || r === "owner" || r === "academy") {
+        setRole(r);
+      }
     }
     const msg = searchParams.get("msg");
     if (msg === "existing_account") {
@@ -113,7 +124,7 @@ export function LoginForm() {
     } else {
       setBanner(null);
     }
-  }, [searchParams]);
+  }, [searchParams, fixedRole]);
 
   const checkTeacherActivationOrRedirect =
     useCallback(async (): Promise<boolean> => {
@@ -473,35 +484,50 @@ export function LoginForm() {
         style={{ WebkitBackdropFilter: "blur(24px) saturate(1.2)" }}
       >
         <h1 className="text-center text-2xl font-semibold tracking-tight text-foreground">
-          로그인
+          {fixedRole
+            ? `${ROLES.find((x) => x.id === role)?.label ?? ""} 로그인`
+            : "로그인"}
         </h1>
 
         <p className="mt-2 text-center text-xs text-neutral-500">attn.</p>
 
-        <div className="mt-6 flex flex-wrap justify-center gap-2">
-          {ROLES.map((r) => (
-            <button
-              key={r.id}
-              type="button"
-              disabled={busy || logoutBusy}
-              onClick={() => {
-                setRole(r.id);
-                setError(null);
-                setResetSent(false);
-              }}
-              className={`rounded-full px-3.5 py-2 text-xs font-medium transition-all ${
-                role === r.id
-                  ? "bg-white/75 text-foreground shadow-[0_4px_20px_rgba(0,0,0,0.08)] ring-1 ring-black/10"
-                  : "bg-white/35 text-neutral-600 ring-1 ring-black/5 hover:bg-white/55"
-              } disabled:opacity-50`}
+        {fixedRole ? (
+          <p className="mt-3 text-center">
+            <Link
+              href="/login"
+              className="text-xs font-medium text-[#4a90e2] underline-offset-2 hover:underline"
             >
-              <span className="block leading-tight">{r.label}</span>
-              <span className="mt-0.5 block text-[10px] font-normal text-neutral-500">
-                {r.hint}
-              </span>
-            </button>
-          ))}
-        </div>
+              다른 역할로 로그인
+            </Link>
+          </p>
+        ) : null}
+
+        {!fixedRole ? (
+          <div className="mt-6 flex flex-wrap justify-center gap-2">
+            {ROLES.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                disabled={busy || logoutBusy}
+                onClick={() => {
+                  setRole(r.id);
+                  setError(null);
+                  setResetSent(false);
+                }}
+                className={`rounded-full px-3.5 py-2 text-xs font-medium transition-all ${
+                  role === r.id
+                    ? "bg-white/75 text-foreground shadow-[0_4px_20px_rgba(0,0,0,0.08)] ring-1 ring-black/10"
+                    : "bg-white/35 text-neutral-600 ring-1 ring-black/5 hover:bg-white/55"
+                } disabled:opacity-50`}
+              >
+                <span className="block leading-tight">{r.label}</span>
+                <span className="mt-0.5 block text-[10px] font-normal text-neutral-500">
+                  {r.hint}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         {hasSession ? (
           <div className="mt-5 rounded-2xl border border-amber-200/70 bg-amber-50/80 px-3.5 py-3 text-sm text-amber-950 ring-1 ring-amber-500/15 backdrop-blur-sm">

@@ -1,5 +1,6 @@
 import type { User } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
+import { isRoleLoginPath } from "@/lib/auth/login-routes";
 import { getFirebaseFunctions } from "./client-app";
 import { fetchIsOwner, upsertOwnerProfile } from "./owner-profile";
 
@@ -114,7 +115,15 @@ async function getParentActivationPath(): Promise<string | null> {
   return `/parent/session?${q.toString()}`;
 }
 
-/** 로그인 페이지에서 자동 리다이렉트를 건너뛸지 (역할 탭·안내 메시지·강제 체류) */
-export function shouldSkipLoginSessionAutoRedirect(searchParams: URLSearchParams): boolean {
-  return searchParams.has("stay") || searchParams.has("role") || searchParams.has("msg");
+/** 로그인 페이지에서 자동 리다이렉트를 건너뛸지 (역할 경로·쿼리 안내·강제 체류) */
+export function shouldSkipLoginSessionAutoRedirect(
+  searchParams: URLSearchParams,
+  pathname?: string,
+): boolean {
+  if (pathname && isRoleLoginPath(pathname)) return true;
+  return (
+    searchParams.has("stay") ||
+    searchParams.has("role") ||
+    searchParams.has("msg")
+  );
 }

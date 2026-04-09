@@ -157,7 +157,7 @@ export function OwnerDashboard() {
 
   useEffect(() => {
     if (gate === "auth" && configured) {
-      router.replace("/login?msg=owner_only");
+      router.replace("/login/owner?msg=owner_only");
     }
   }, [configured, gate, router]);
 

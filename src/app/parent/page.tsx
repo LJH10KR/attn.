@@ -108,7 +108,7 @@ export default function ParentDashboardPage() {
         setReady(false);
         setAuthUid(null);
         setHideIosPwaHint(null);
-        router.replace("/login?role=parent");
+        router.replace("/login/parent");
         return;
       }
 
@@ -332,7 +332,7 @@ export default function ParentDashboardPage() {
       await signOut(getFirebaseAuth());
     } finally {
       setLogoutBusy(false);
-      router.replace("/login?role=parent");
+      router.replace("/login/parent");
     }
   }, [router]);
 

@@ -95,7 +95,7 @@ export default function ParentSettingsPage() {
       await signOut(getFirebaseAuth());
     } finally {
       setLogoutBusy(false);
-      router.replace("/login?role=parent");
+      router.replace("/login/parent");
     }
   }, [router]);
 
