@@ -157,7 +157,7 @@ export function OwnerDashboard() {
 
   useEffect(() => {
     if (gate === "auth" && configured) {
-      router.replace("/login/owner?msg=owner_only");
+      router.replace("/login/owner");
     }
   }, [configured, gate, router]);
 
@@ -406,6 +406,8 @@ export function OwnerDashboard() {
               ? academies[0].name
               : `${academies[0].name} 외 ${academies.length - 1}곳`
         }
+        includeSettingsAction
+        onSettings={() => router.push("/owner/settings")}
         onHome={() => router.push("/")}
         showBellOnTitle={false}
         showBellInBottomBar={false}

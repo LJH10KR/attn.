@@ -119,8 +119,6 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
     const msg = searchParams.get("msg");
     if (msg === "existing_account") {
       setBanner("이미 가입된 Google 계정입니다. 로그인해 주세요.");
-    } else if (msg === "owner_only") {
-      setBanner("오너 대시보드는 로그인 후 이용할 수 있습니다.");
     } else {
       setBanner(null);
     }
@@ -193,7 +191,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
     }, [router]);
   const showEmailAuth =
     role === "owner" || role === "teacher" || role === "parent";
-  const showGoogle = showEmailAuth;
+  const showGoogle = role === "owner";
   const showAcademyFields = role === "academy";
   const hasSession = Boolean(sessionUser);
   const sessionBlocked = hasSession;
