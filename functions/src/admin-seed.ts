@@ -37,13 +37,13 @@ function validateNewAcademySlug(academyId: string): void {
 }
 
 function randomPassword(): string {
-  // Firebase Auth 패스워드 정책을 만족시키기 위한 형태(문자/숫자 혼합 포함)
-  return crypto.randomBytes(24).toString("base64url") + "Aa1!";
+  // 테스트 시드 계정 전용 고정 8자리 비밀번호(로그인 테스트 편의)
+  return "Atn1234!";
 }
 
-function randomEmail(kind: SeedUserKind, academyId: string, idx: number, batchId: string): string {
-  // 이메일 유니크 보장(배치/인덱스 포함)
-  return `${kind}_${batchId}_${academyId}_${idx}@attn.test`;
+function randomEmail(kind: SeedUserKind, seqNo: number): string {
+  // 가독성 우선: owner1@example.com, teacher12@example.com, parent5@example.com
+  return `${kind}${seqNo}@example.com`;
 }
 
 function randomDisplayName(kind: SeedUserKind, idx: number): string {
@@ -72,24 +72,67 @@ function chunkArray<T>(arr: T[], chunkSize: number): T[][] {
 }
 
 async function createAuthUser(params: {
+  db: FirebaseFirestore.Firestore;
   kind: SeedUserKind;
-  academyId: string;
-  idx: number;
-  batchId: string;
+  seqNo: number;
+  displayIdx: number;
 }): Promise<{ uid: string; email: string; password: string; displayName: string }> {
   const password = randomPassword();
-  const email = randomEmail(params.kind, params.academyId, params.idx, params.batchId);
-  const displayName = randomDisplayName(params.kind, params.idx);
+  const displayName = randomDisplayName(params.kind, params.displayIdx);
+  let seqNo = params.seqNo;
 
-  const user = await admin.auth().createUser({
-    email,
-    password,
-    displayName,
-    emailVerified: true,
-    disabled: false,
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const email = randomEmail(params.kind, seqNo);
+    try {
+      const user = await admin.auth().createUser({
+        email,
+        password,
+        displayName,
+        emailVerified: true,
+        disabled: false,
+      });
+      return { uid: user.uid, email, password, displayName };
+    } catch (e) {
+      const code = (e as { code?: string }).code;
+      if (code !== "auth/email-already-exists") {
+        throw e;
+      }
+      // 드물게 기존 수동 계정과 충돌 시 다음 번호를 즉시 예약해 재시도
+      seqNo = await reserveNextSeedNumber(params.db, params.kind);
+    }
+  }
+  throw new HttpsError("resource-exhausted", "테스트 계정 번호 할당에 반복 충돌이 발생했습니다.");
+}
+
+async function reserveSeedNumberRange(
+  db: FirebaseFirestore.Firestore,
+  kind: SeedUserKind,
+  count: number,
+): Promise<number[]> {
+  return db.runTransaction(async (tx) => {
+    const ref = db.doc(`seedCounters/${kind}`);
+    const snap = await tx.get(ref);
+    const current = snap.get("nextNumber");
+    const nextNumber =
+      typeof current === "number" && Number.isInteger(current) && current > 0 ? current : 1;
+    tx.set(
+      ref,
+      {
+        nextNumber: nextNumber + count,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    return Array.from({ length: count }, (_, i) => nextNumber + i);
   });
+}
 
-  return { uid: user.uid, email, password, displayName };
+async function reserveNextSeedNumber(
+  db: FirebaseFirestore.Firestore,
+  kind: SeedUserKind,
+): Promise<number> {
+  const [n] = await reserveSeedNumberRange(db, kind, 1);
+  return n!;
 }
 
 /**
@@ -183,21 +226,26 @@ export const createSeedBatch = onCall(async (request) => {
   }
 
   // 1) Auth 유저 생성(UID 확보가 필요)
+  // 번호는 seedCounters 트랜잭션으로 예약하므로 전체 스캔 없이 저비용으로 유니크 보장
+  const [ownerNo] = await reserveSeedNumberRange(db, "owner", 1);
+  const teacherNos = await reserveSeedNumberRange(db, "teacher", teachersCount);
+  const parentNos = await reserveSeedNumberRange(db, "parent", parentsCount);
+
   const ownerAuth = await createAuthUser({
+    db,
     kind: "owner",
-    academyId,
-    idx: 0,
-    batchId,
+    seqNo: ownerNo!,
+    displayIdx: 0,
   });
 
   const teacherAuths: Array<{ uid: string; email: string; password: string; displayName: string }> = [];
   for (let i = 0; i < teachersCount; i++) {
     teacherAuths.push(
       await createAuthUser({
+        db,
         kind: "teacher",
-        academyId,
-        idx: i,
-        batchId,
+        seqNo: teacherNos[i]!,
+        displayIdx: i,
       }),
     );
   }
@@ -206,10 +254,10 @@ export const createSeedBatch = onCall(async (request) => {
   for (let i = 0; i < parentsCount; i++) {
     parentAuths.push(
       await createAuthUser({
+        db,
         kind: "parent",
-        academyId,
-        idx: i,
-        batchId,
+        seqNo: parentNos[i]!,
+        displayIdx: i,
       }),
     );
   }
