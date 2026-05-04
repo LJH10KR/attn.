@@ -344,7 +344,7 @@ export default function TeacherDashboardPage() {
         <DashboardRoleHeader
           title="선생님 대시보드"
           affiliationLabel={academyLabelForGreeting(academyName, academyId)}
-          onHome={() => router.push("/")}
+          onHomeAction={() => router.push("/")}
           showBellOnTitle={false}
           showBellInBottomBar={false}
           bottomTabs={[
@@ -357,7 +357,7 @@ export default function TeacherDashboardPage() {
               onSelect: () => router.push("/"),
             },
           ]}
-          onLogout={() => void onLogout()}
+          onLogoutAction={() => void onLogout()}
           logoutBusy={logoutBusy}
           profile={authProfile}
         />

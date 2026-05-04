@@ -121,9 +121,9 @@ export default function OwnerSettingsPage() {
             </span>
           }
           showBack
-          onBack={() => router.push("/owner")}
+          onBackAction={() => router.push("/owner")}
           backAriaLabel="오너 대시보드로 돌아가기"
-          onHome={() => router.push("/")}
+          onHomeAction={() => router.push("/")}
           showBellOnTitle={false}
           showBellInBottomBar={false}
           bottomTabs={[
@@ -136,7 +136,7 @@ export default function OwnerSettingsPage() {
               onSelect: () => router.push("/"),
             },
           ]}
-          onLogout={() => void onLogout()}
+          onLogoutAction={() => void onLogout()}
           logoutBusy={logoutBusy}
           profile={authProfile}
         />

@@ -1,6 +1,10 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { onAuthStateChanged } from "firebase/auth";
+import { getFirebaseAuth } from "@/lib/firebase/client-app";
+import { isFirebaseConfigured } from "@/lib/firebase/config";
+import { useRouter } from "next/navigation";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   DashboardBottomNav,
   type DashboardBottomNavMenuAction,
@@ -17,21 +21,21 @@ type DashboardRoleHeaderProps = {
   title: string;
   affiliationLabel: string;
   profile: AuthProfilePayload | null;
-  onLogout: () => void;
+  onLogoutAction: () => void;
   logoutBusy?: boolean;
   showBack?: boolean;
-  onBack?: () => void;
+  onBackAction?: () => void;
   backAriaLabel?: string;
   backHint?: string;
   menuIntro?: ReactNode;
-  onHome?: () => void;
-  onBellClick?: () => void;
+  onHomeAction?: () => void;
+  onBellClickAction?: () => void;
   showBellOnTitle?: boolean;
   showBellInBottomBar?: boolean;
   bellBadgeCount?: number;
   bottomTabs?: DashboardBottomNavTab[];
   includeSettingsAction?: boolean;
-  onSettings?: () => void;
+  onSettingsAction?: () => void;
   settingsLabel?: string;
   logoutLabel?: string;
   extraMenuActions?: DashboardBottomNavMenuAction[];
@@ -41,36 +45,63 @@ export function DashboardRoleHeader({
   title,
   affiliationLabel,
   profile,
-  onLogout,
+  onLogoutAction,
   logoutBusy = false,
   showBack = false,
-  onBack,
+  onBackAction,
   backAriaLabel,
   backHint,
   menuIntro,
-  onHome,
-  onBellClick,
+  onHomeAction,
+  onBellClickAction,
   showBellOnTitle = false,
   showBellInBottomBar = true,
   bellBadgeCount = 0,
   bottomTabs,
   includeSettingsAction = false,
-  onSettings,
+  onSettingsAction,
   settingsLabel = "사용자 설정",
   logoutLabel = "로그아웃",
   extraMenuActions = [],
 }: DashboardRoleHeaderProps) {
   const menuActions: DashboardBottomNavMenuAction[] = [];
+  const router = useRouter();
+  const configured = isFirebaseConfigured();
+  const [isAdmin, setIsAdmin] = useState(false);
 
-  if (includeSettingsAction && onSettings) {
-    menuActions.push({ label: settingsLabel, onSelect: onSettings });
+  useEffect(() => {
+    if (!configured) return;
+    const auth = getFirebaseAuth();
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      if (!u) {
+        setIsAdmin(false);
+        return;
+      }
+      try {
+        const tokenResult = await u.getIdTokenResult();
+        setIsAdmin(tokenResult.claims.admin === true);
+      } catch {
+        setIsAdmin(false);
+      }
+    });
+    return () => unsub();
+  }, [configured]);
+
+  if (includeSettingsAction && onSettingsAction) {
+    menuActions.push({ label: settingsLabel, onSelect: onSettingsAction });
   }
   if (extraMenuActions.length > 0) {
     menuActions.push(...extraMenuActions);
   }
+  if (isAdmin) {
+    menuActions.push({
+      label: "관리자 페이지로",
+      onSelect: () => router.push("/admin"),
+    });
+  }
   menuActions.push({
     label: logoutBusy ? "처리 중…" : logoutLabel,
-    onSelect: onLogout,
+    onSelect: onLogoutAction,
     disabled: logoutBusy,
   });
 
@@ -80,10 +111,10 @@ export function DashboardRoleHeader({
       <DashboardTopHeader
         title={title}
         showBack={showBack}
-        onBack={onBack}
+        onBack={onBackAction}
         backAriaLabel={backAriaLabel}
         backHint={backHint}
-        onBellClick={onBellClick}
+        onBellClick={onBellClickAction}
         showBell={showBellOnTitle}
         bellBadgeCount={bellBadgeCount}
       />
@@ -95,8 +126,8 @@ export function DashboardRoleHeader({
         title={title}
         affiliationLabel={affiliationLabel}
         showBack={false}
-        onHomeClick={onHome}
-        onBellClick={onBellClick}
+        onHomeClick={onHomeAction}
+        onBellClick={onBellClickAction}
         showBellInBottomBar={showBellInBottomBar}
         bellBadgeCount={bellBadgeCount}
         bottomTabs={bottomTabs}

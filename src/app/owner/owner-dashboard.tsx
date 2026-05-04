@@ -407,8 +407,8 @@ export function OwnerDashboard() {
               : `${academies[0].name} 외 ${academies.length - 1}곳`
         }
         includeSettingsAction
-        onSettings={() => router.push("/owner/settings")}
-        onHome={() => router.push("/")}
+        onSettingsAction={() => router.push("/owner/settings")}
+        onHomeAction={() => router.push("/")}
         showBellOnTitle={false}
         showBellInBottomBar={false}
         bottomTabs={[
@@ -421,7 +421,7 @@ export function OwnerDashboard() {
             onSelect: () => router.push("/"),
           },
         ]}
-        onLogout={() => void onLogout()}
+        onLogoutAction={() => void onLogout()}
         profile={authProfile}
       />
 

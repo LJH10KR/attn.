@@ -159,3 +159,7 @@ $RECYCLE.BIN/
 ### Markdown ###
 docs/
 PWA_PUSH_FLOW.md
+
+
+### Service Account ###
+attndot-firebase-adminsdk-fbsvc-6a7cd592a7.json

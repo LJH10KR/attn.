@@ -37,6 +37,14 @@ function getOrInitApp(): FirebaseApp {
 export function getFirebaseAuth(): Auth {
   const app = getOrInitApp();
   const auth = getAuth(app);
+  if (typeof window !== "undefined") {
+    // Firebase useDeviceLanguage는 React 훅이 아니지만 ESLint가 오탐함 → navigator 사용.
+    const primary =
+      typeof navigator !== "undefined" && navigator.language
+        ? navigator.language.split("-")[0]
+        : "ko";
+    auth.languageCode = primary || "ko";
+  }
   if (typeof window !== "undefined" && isFirebaseEmulatorEnabled() && !authEmulatorConnected) {
     connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
     authEmulatorConnected = true;

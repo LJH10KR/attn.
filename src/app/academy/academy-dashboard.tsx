@@ -564,12 +564,12 @@ export function AcademyDashboard() {
           ) : undefined
         }
         showBack={showBack}
-        onBack={() => router.push("/owner")}
+        onBackAction={() => router.push("/owner")}
         backAriaLabel="오너 대시보드로 돌아가기"
-        onHome={() => router.push("/")}
+        onHomeAction={() => router.push("/")}
         showBellOnTitle
         showBellInBottomBar={false}
-        onBellClick={() => setNotificationsOpen(true)}
+        onBellClickAction={() => setNotificationsOpen(true)}
         bellBadgeCount={academyBellCount}
         bottomTabs={[
           {
@@ -602,7 +602,7 @@ export function AcademyDashboard() {
             onSelect: () => navigateSection("students"),
           },
         ]}
-        onLogout={
+        onLogoutAction={
           isAcademyPortalSession
             ? () => void onPortalLogout()
             : () => void onHeaderLogout()

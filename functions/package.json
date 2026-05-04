@@ -2,6 +2,7 @@
   "name": "functions",
   "scripts": {
     "grant-admin-emulator": "node scripts/grantAdminEmulator.mjs",
+    "grant-admin": "node scripts/grantAdmin.mjs",
     "lint": "eslint .",
     "prepare": "npm run build",
     "build": "tsc",

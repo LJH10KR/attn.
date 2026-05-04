@@ -369,11 +369,11 @@ export default function ParentDashboardPage() {
           title="학부모 대시보드"
           affiliationLabel={academyLabelForGreeting(academyName, academyId)}
           includeSettingsAction
-          onSettings={() => router.push("/parent/settings")}
-          onHome={() => router.push("/")}
+          onSettingsAction={() => router.push("/parent/settings")}
+          onHomeAction={() => router.push("/")}
           showBellOnTitle
           showBellInBottomBar={false}
-          onBellClick={() => setNotificationsOpen(true)}
+          onBellClickAction={() => setNotificationsOpen(true)}
           bellBadgeCount={parentBellCount}
           bottomTabs={[
             {
@@ -385,7 +385,7 @@ export default function ParentDashboardPage() {
               onSelect: () => router.push("/"),
             },
           ]}
-          onLogout={() => void onLogout()}
+          onLogoutAction={() => void onLogout()}
           logoutBusy={logoutBusy}
           profile={authProfile}
         />

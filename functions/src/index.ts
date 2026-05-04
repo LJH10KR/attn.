@@ -220,3 +220,10 @@ export {
   sendTeacherInvitation,
   updateTeacherInvite,
 } from "./teachers";
+
+export {
+  createSeedBatch,
+  deleteSeedBatch,
+  listSeedBatches,
+  enforceAdminLogin,
+} from "./admin-seed";

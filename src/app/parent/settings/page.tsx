@@ -126,9 +126,9 @@ export default function ParentSettingsPage() {
             </span>
           }
           showBack
-          onBack={() => router.push("/parent")}
+          onBackAction={() => router.push("/parent")}
           backAriaLabel="학부모 대시보드로 돌아가기"
-          onHome={() => router.push("/")}
+          onHomeAction={() => router.push("/")}
           showBellOnTitle={false}
           showBellInBottomBar={false}
           bottomTabs={[
@@ -141,7 +141,7 @@ export default function ParentSettingsPage() {
               onSelect: () => router.push("/"),
             },
           ]}
-          onLogout={() => void onLogout()}
+          onLogoutAction={() => void onLogout()}
           logoutBusy={logoutBusy}
           profile={authProfile}
         />
