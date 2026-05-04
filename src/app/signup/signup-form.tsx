@@ -4,15 +4,15 @@ import { FirebaseError } from "firebase/app";
 import {
   createUserWithEmailAndPassword,
   GoogleAuthProvider,
-  sendEmailVerification,
   signInWithPopup,
 } from "firebase/auth";
+import { httpsCallable } from "firebase/functions";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 import { GoogleMark } from "@/components/auth/google-mark";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
-import { getFirebaseAuth } from "@/lib/firebase/client-app";
+import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { upsertOwnerProfile } from "@/lib/firebase/owner-profile";
 
 function signupErrorMessage(code: string): string {
@@ -66,15 +66,9 @@ export function SignupForm() {
       setBusy(true);
       try {
         const auth = getFirebaseAuth();
-        const cred = await createUserWithEmailAndPassword(auth, em, password);
-        const continueUrl =
-          typeof window !== "undefined"
-            ? `${window.location.origin}/verify-email`
-            : undefined;
-        await sendEmailVerification(
-          cred.user,
-          continueUrl ? { url: continueUrl } : undefined,
-        );
+        await createUserWithEmailAndPassword(auth, em, password);
+        const fn = httpsCallable(getFirebaseFunctions(), "sendOwnerSignupVerificationEmail");
+        await fn({});
         router.replace("/verify-email");
       } catch (err) {
         const code = err instanceof FirebaseError ? err.code : "";

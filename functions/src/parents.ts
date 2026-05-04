@@ -4,6 +4,7 @@ import { FieldValue, Timestamp, type QueryDocumentSnapshot } from "firebase-admi
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import * as nodemailer from "nodemailer";
+import { createShortAuthLink, getAppOrigin } from "./auth-short-links";
 
 type ParentStatus =
   | "invitation_needed"
@@ -16,11 +17,6 @@ const PARENT_INVITE_TTL_MS = 24 * 60 * 60 * 1000;
 
 function invitationExpiresAtFromNow(): Timestamp {
   return Timestamp.fromMillis(Date.now() + PARENT_INVITE_TTL_MS);
-}
-
-function getAppOrigin(): string {
-  const o = process.env.APP_ORIGIN?.trim();
-  return o && o.length > 0 ? o.replace(/\/$/, "") : "http://127.0.0.1:3000";
 }
 
 function isFunctionsEmulator(): boolean {
@@ -270,8 +266,8 @@ export const sendParentInvitation = onCall(async (request) => {
   const appOrigin = getAppOrigin();
   const continueAfterInvite = `${appOrigin}/parent/complete?academyId=${encodeURIComponent(academyId)}`;
 
-  const buildLinks = () =>
-    Promise.all([
+  const buildLinks = async (inviteAuthUid?: string) => {
+    const [rawResetLink, rawVerifyLink] = await Promise.all([
       admin.auth().generatePasswordResetLink(email, {
         url: continueAfterInvite,
         handleCodeInApp: false,
@@ -281,10 +277,29 @@ export const sendParentInvitation = onCall(async (request) => {
         handleCodeInApp: false,
       }),
     ]);
+    const [shortResetLink, shortVerifyLink] = await Promise.all([
+      createShortAuthLink({
+        targetUrl: rawResetLink,
+        purpose: "parent_reset",
+        academyId,
+        uid: inviteAuthUid,
+        email,
+      }),
+      createShortAuthLink({
+        targetUrl: rawVerifyLink,
+        purpose: "parent_verify",
+        academyId,
+        uid: inviteAuthUid,
+        email,
+      }),
+    ]);
+    return { shortResetLink, shortVerifyLink, rawResetLink, rawVerifyLink };
+  };
 
   if (data.status === "invitation_sent") {
-    const [resetLink, verifyLink] = await buildLinks();
-    await sendParentInviteEmail(email, displayName, resetLink, verifyLink);
+    const inviteAuthUid = typeof data.authUid === "string" ? data.authUid : parentId;
+    const links = await buildLinks(inviteAuthUid);
+    await sendParentInviteEmail(email, displayName, links.shortResetLink, links.shortVerifyLink);
     await docRef.update({
       invitationExpiresAt: invitationExpiresAtFromNow(),
       updatedAt: FieldValue.serverTimestamp(),
@@ -296,11 +311,11 @@ export const sendParentInvitation = onCall(async (request) => {
       debugLinks?: { resetLink: string; verifyLink: string };
     } = {
       ok: true,
-      authUid: typeof data.authUid === "string" ? data.authUid : parentId,
+      authUid: inviteAuthUid,
       resent: true,
     };
     if (isFunctionsEmulator()) {
-      out.debugLinks = { resetLink, verifyLink };
+      out.debugLinks = { resetLink: links.rawResetLink, verifyLink: links.rawVerifyLink };
     }
     return out;
   }
@@ -335,9 +350,9 @@ export const sendParentInvitation = onCall(async (request) => {
   }
 
   const authUid = userRecord.uid;
-  const [resetLink, verifyLink] = await buildLinks();
+  const links = await buildLinks(authUid);
 
-  await sendParentInviteEmail(email, displayName, resetLink, verifyLink);
+  await sendParentInviteEmail(email, displayName, links.shortResetLink, links.shortVerifyLink);
 
   const newRef = db.doc(`academies/${academyId}/parents/${authUid}`);
   const batch = db.batch();
@@ -359,7 +374,7 @@ export const sendParentInvitation = onCall(async (request) => {
   const out: { ok: true; authUid: string; debugLinks?: { resetLink: string; verifyLink: string } } =
     { ok: true, authUid };
   if (isFunctionsEmulator()) {
-    out.debugLinks = { resetLink, verifyLink };
+    out.debugLinks = { resetLink: links.rawResetLink, verifyLink: links.rawVerifyLink };
   }
   return out;
 });

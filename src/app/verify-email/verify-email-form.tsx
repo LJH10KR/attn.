@@ -1,12 +1,13 @@
 "use client";
 
 import { FirebaseError } from "firebase/app";
-import { onAuthStateChanged, sendEmailVerification, type User } from "firebase/auth";
+import { onAuthStateChanged, type User } from "firebase/auth";
+import { httpsCallable } from "firebase/functions";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
-import { getFirebaseAuth } from "@/lib/firebase/client-app";
+import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { upsertOwnerProfile } from "@/lib/firebase/owner-profile";
 
 const RESEND_COOLDOWN_SEC = 60;
@@ -62,11 +63,8 @@ export function VerifyEmailForm() {
     }
     setBusy(true);
     try {
-      const continueUrl =
-        typeof window !== "undefined"
-          ? `${window.location.origin}/verify-email`
-          : undefined;
-      await sendEmailVerification(user, continueUrl ? { url: continueUrl } : undefined);
+      const fn = httpsCallable(getFirebaseFunctions(), "sendOwnerSignupVerificationEmail");
+      await fn({});
       setInfo("인증 메일을 다시 보냈습니다.");
       setCooldown(RESEND_COOLDOWN_SEC);
     } catch (err) {

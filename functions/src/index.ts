@@ -232,3 +232,5 @@ export {
   adminDeleteMemberUser,
   listAdminUserDirectory,
 } from "./admin-directory";
+export { openShortAuthLink } from "./auth-short-links";
+export { sendOwnerSignupVerificationEmail } from "./owner-auth-mail";
