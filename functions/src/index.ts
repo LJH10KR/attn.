@@ -227,3 +227,8 @@ export {
   listSeedBatches,
   enforceAdminLogin,
 } from "./admin-seed";
+export {
+  adminDeleteAcademyCascade,
+  adminDeleteMemberUser,
+  listAdminUserDirectory,
+} from "./admin-directory";

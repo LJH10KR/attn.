@@ -52,6 +52,24 @@ type EnforceAdminLoginResponse = {
   deleted?: boolean;
 };
 
+type AdminDirectoryMember = {
+  docId: string;
+  authUid: string;
+  email: string;
+  displayName: string;
+  status: string;
+};
+
+type AdminDirectoryAcademy = {
+  academyId: string;
+  name: string;
+  ownerUid: string;
+  ownerEmail: string | null;
+  ownerDisplayName: string | null;
+  teachers: AdminDirectoryMember[];
+  parents: AdminDirectoryMember[];
+};
+
 function getErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return "요청에 실패했습니다.";
@@ -89,6 +107,13 @@ export default function AdminSeedPage() {
   const [deleteSeedBatchId, setDeleteSeedBatchId] = useState("");
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const [directory, setDirectory] = useState<AdminDirectoryAcademy[]>([]);
+  const [directoryBusy, setDirectoryBusy] = useState(false);
+  const [directoryError, setDirectoryError] = useState<string | null>(null);
+  const [directorySearch, setDirectorySearch] = useState("");
+  const [memberDeleteKey, setMemberDeleteKey] = useState<string | null>(null);
+  const [cascadeBusyAcademyId, setCascadeBusyAcademyId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = auth.onAuthStateChanged(async (u) => {
@@ -130,6 +155,48 @@ export default function AdminSeedPage() {
   useEffect(() => {
     void refreshBatches();
   }, [refreshBatches]);
+
+  const refreshDirectory = useCallback(async () => {
+    if (!adminOk) return;
+    setDirectoryBusy(true);
+    setDirectoryError(null);
+    try {
+      const fn = httpsCallable(functions, "listAdminUserDirectory");
+      const res = await fn({ maxAcademies: 80 });
+      const data = res.data as { ok?: boolean; academies?: unknown };
+      setDirectory(
+        Array.isArray(data.academies) ? (data.academies as AdminDirectoryAcademy[]) : [],
+      );
+    } catch (err) {
+      setDirectoryError(getErrorMessage(err));
+      setDirectory([]);
+    } finally {
+      setDirectoryBusy(false);
+    }
+  }, [adminOk, functions]);
+
+  useEffect(() => {
+    void refreshDirectory();
+  }, [refreshDirectory]);
+
+  const filteredDirectory = useMemo(() => {
+    const q = directorySearch.trim().toLowerCase();
+    if (!q) return directory;
+    return directory.filter((a) => {
+      const blob = [
+        a.academyId,
+        a.name,
+        a.ownerUid,
+        a.ownerEmail ?? "",
+        a.ownerDisplayName ?? "",
+        ...a.teachers.flatMap((t) => [t.email, t.displayName, t.docId, t.authUid, t.status]),
+        ...a.parents.flatMap((p) => [p.email, p.displayName, p.docId, p.authUid, p.status]),
+      ]
+        .join(" ")
+        .toLowerCase();
+      return blob.includes(q);
+    });
+  }, [directory, directorySearch]);
 
   const onLogin = useCallback(async () => {
     if (!configured) return;
@@ -223,6 +290,7 @@ export default function AdminSeedPage() {
       const data = res.data as CreateSeedBatchResponse;
       setLastCreated(data);
       await refreshBatches();
+      await refreshDirectory();
     } catch (err) {
       setCreateError(getErrorMessage(err));
     } finally {
@@ -234,6 +302,7 @@ export default function AdminSeedPage() {
     label,
     parentsCount,
     refreshBatches,
+    refreshDirectory,
     studentsPerParent,
     teachersCount,
     teachersPerStudent,
@@ -257,12 +326,56 @@ export default function AdminSeedPage() {
       await fn({ seedBatchId: batchId });
       setDeleteSeedBatchId("");
       await refreshBatches();
+      await refreshDirectory();
     } catch (err) {
       setDeleteError(getErrorMessage(err));
     } finally {
       setDeleteBusy(false);
     }
-  }, [deleteSeedBatchId, functions, refreshBatches]);
+  }, [deleteSeedBatchId, functions, refreshBatches, refreshDirectory]);
+
+  const onCascadeDeleteAcademy = useCallback(
+    async (academyId: string, academyName: string) => {
+      const ok = window.confirm(
+        `학원「${academyName || academyId}」(${academyId})와 소속 선생님·학부모·학생·오너 Auth 등을 모두 삭제합니다. 이 작업은 되돌릴 수 없습니다. 진행할까요?`,
+      );
+      if (!ok) return;
+      setCascadeBusyAcademyId(academyId);
+      try {
+        const fn = httpsCallable(functions, "adminDeleteAcademyCascade");
+        await fn({ academyId });
+        await refreshDirectory();
+        await refreshBatches();
+      } catch (err) {
+        window.alert(getErrorMessage(err));
+      } finally {
+        setCascadeBusyAcademyId(null);
+      }
+    },
+    [functions, refreshBatches, refreshDirectory],
+  );
+
+  const onDeleteMemberUser = useCallback(
+    async (academyId: string, memberDocId: string, role: "teacher" | "parent", label: string) => {
+      const ok = window.confirm(
+        `「${label}」(${role === "teacher" ? "선생님" : "학부모"}) 계정을 삭제합니다. 학부모인 경우 자녀 학생 문서도 함께 삭제됩니다. 진행할까요?`,
+      );
+      if (!ok) return;
+      const key = `${academyId}:${memberDocId}:${role}`;
+      setMemberDeleteKey(key);
+      try {
+        const fn = httpsCallable(functions, "adminDeleteMemberUser");
+        await fn({ academyId, memberDocId, role });
+        await refreshDirectory();
+        await refreshBatches();
+      } catch (err) {
+        window.alert(getErrorMessage(err));
+      } finally {
+        setMemberDeleteKey(null);
+      }
+    },
+    [functions, refreshBatches, refreshDirectory],
+  );
 
   if (!configured) {
     return (
@@ -386,6 +499,190 @@ export default function AdminSeedPage() {
         </div>
 
         <div className="mt-6 space-y-4">
+          <section className="glass-card-soft p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">사용자 디렉터리</h2>
+                <p className="mt-1 text-xs text-neutral-500">
+                  학원 → 오너·선생님·학부모 계층으로 표시합니다. 이메일 가입 테스트 후 같은 이메일로 다시 시도하려면
+                  멤버 또는 학원 전체를 삭제하세요. 최신 생성순 최대 80개 학원만 불러옵니다.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={directoryBusy}
+                onClick={() => void refreshDirectory()}
+                className="shrink-0 rounded-2xl border border-neutral-300/70 bg-white/50 px-4 py-2 text-xs font-medium text-foreground hover:bg-white/70 disabled:opacity-50 dark:border-white/12 dark:bg-white/[0.08]"
+              >
+                {directoryBusy ? "불러오는 중…" : "목록 새로고침"}
+              </button>
+            </div>
+
+            <label className="mt-4 block">
+              <span className="mb-1.5 block text-xs font-medium text-neutral-600">검색</span>
+              <input
+                value={directorySearch}
+                onChange={(e) => setDirectorySearch(e.target.value)}
+                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 px-4 py-3 text-foreground outline-none focus:border-[#4a90e2]/50 dark:border-white/12 dark:bg-white/[0.08]"
+                placeholder="학원 ID, 이름, 이메일, UID…"
+              />
+            </label>
+
+            {directoryError ? (
+              <p className="mt-3 rounded-xl bg-red-500/10 px-3 py-2 text-center text-xs text-red-800 ring-1 ring-red-500/15">
+                {directoryError}
+              </p>
+            ) : null}
+
+            <p className="mt-3 text-[11px] text-neutral-500">
+              표시 {filteredDirectory.length}개 / 전체 {directory.length}개 학원
+              {directorySearch.trim() ? " (검색 필터 적용 중)" : ""}
+            </p>
+
+            <div className="mt-3 max-h-[70vh] space-y-2 overflow-y-auto pr-1">
+              {directoryBusy && directory.length === 0 ? (
+                <p className="text-xs text-neutral-500">불러오는 중…</p>
+              ) : filteredDirectory.length === 0 ? (
+                <p className="text-xs text-neutral-500">조건에 맞는 학원이 없습니다.</p>
+              ) : (
+                filteredDirectory.map((a) => (
+                  <details
+                    key={a.academyId}
+                    className="group rounded-2xl border border-neutral-300/60 bg-white/40 dark:border-white/10 dark:bg-white/[0.04]"
+                  >
+                    <summary className="cursor-pointer list-none px-3 py-3 [&::-webkit-details-marker]:hidden">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <span className="text-sm font-semibold text-foreground">{a.name || "(이름 없음)"}</span>
+                          <span className="ml-2 font-mono text-[11px] text-neutral-500">{a.academyId}</span>
+                          <p className="mt-0.5 text-[11px] text-neutral-500">
+                            선생님 {a.teachers.length}명 · 학부모 {a.parents.length}명
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          className="rounded-xl bg-red-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                          disabled={cascadeBusyAcademyId === a.academyId}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            void onCascadeDeleteAcademy(a.academyId, a.name);
+                          }}
+                        >
+                          {cascadeBusyAcademyId === a.academyId ? "삭제 중…" : "학원 전체 삭제"}
+                        </button>
+                      </div>
+                    </summary>
+                    <div className="space-y-4 border-t border-neutral-200/80 px-3 py-3 dark:border-white/10">
+                      <div className="rounded-xl bg-white/60 px-3 py-2 dark:bg-white/[0.06]">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">오너</p>
+                        <p className="mt-1 break-all font-mono text-xs text-neutral-800 dark:text-neutral-200">
+                          {a.ownerEmail ?? "(Firestore users에 이메일 없음)"}
+                        </p>
+                        <p className="mt-0.5 break-all font-mono text-[11px] text-neutral-500">uid {a.ownerUid}</p>
+                        {a.ownerDisplayName ? (
+                          <p className="mt-1 text-xs text-neutral-600">{a.ownerDisplayName}</p>
+                        ) : null}
+                        <p className="mt-2 text-[10px] leading-relaxed text-neutral-500">
+                          오너 Auth 삭제는「학원 전체 삭제」로만 수행됩니다. 다른 학원을 같은 오너가 소유 중이면
+                          오너 Auth는 유지되고 users 문서만 남을 수 있습니다.
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">선생님</p>
+                        {a.teachers.length === 0 ? (
+                          <p className="mt-1 text-xs text-neutral-500">없음</p>
+                        ) : (
+                          <ul className="mt-2 space-y-2">
+                            {a.teachers.map((t) => {
+                              const busyKey = `${a.academyId}:${t.docId}:teacher`;
+                              return (
+                                <li
+                                  key={t.docId}
+                                  className="flex flex-col gap-2 rounded-xl border border-neutral-200/80 bg-white/50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between dark:border-white/10 dark:bg-white/[0.06]"
+                                >
+                                  <div className="min-w-0 text-xs">
+                                    <p className="font-medium text-neutral-800 dark:text-neutral-100">
+                                      {t.displayName || "(이름 없음)"}
+                                    </p>
+                                    <p className="break-all font-mono text-[11px] text-neutral-600">{t.email}</p>
+                                    <p className="text-[10px] text-neutral-500">
+                                      문서 {t.docId} · auth {t.authUid} · {t.status || "?"}
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    disabled={memberDeleteKey === busyKey}
+                                    onClick={() =>
+                                      void onDeleteMemberUser(
+                                        a.academyId,
+                                        t.docId,
+                                        "teacher",
+                                        t.displayName || t.email || t.docId,
+                                      )
+                                    }
+                                    className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-800 hover:bg-red-100 disabled:opacity-50 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200"
+                                  >
+                                    {memberDeleteKey === busyKey ? "삭제 중…" : "삭제"}
+                                  </button>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </div>
+
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">학부모</p>
+                        {a.parents.length === 0 ? (
+                          <p className="mt-1 text-xs text-neutral-500">없음</p>
+                        ) : (
+                          <ul className="mt-2 space-y-2">
+                            {a.parents.map((p) => {
+                              const busyKey = `${a.academyId}:${p.docId}:parent`;
+                              return (
+                                <li
+                                  key={p.docId}
+                                  className="flex flex-col gap-2 rounded-xl border border-neutral-200/80 bg-white/50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between dark:border-white/10 dark:bg-white/[0.06]"
+                                >
+                                  <div className="min-w-0 text-xs">
+                                    <p className="font-medium text-neutral-800 dark:text-neutral-100">
+                                      {p.displayName || "(이름 없음)"}
+                                    </p>
+                                    <p className="break-all font-mono text-[11px] text-neutral-600">{p.email}</p>
+                                    <p className="text-[10px] text-neutral-500">
+                                      문서 {p.docId} · auth {p.authUid} · {p.status || "?"}
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    disabled={memberDeleteKey === busyKey}
+                                    onClick={() =>
+                                      void onDeleteMemberUser(
+                                        a.academyId,
+                                        p.docId,
+                                        "parent",
+                                        p.displayName || p.email || p.docId,
+                                      )
+                                    }
+                                    className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-800 hover:bg-red-100 disabled:opacity-50 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200"
+                                  >
+                                    {memberDeleteKey === busyKey ? "삭제 중…" : "삭제"}
+                                  </button>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                  </details>
+                ))
+              )}
+            </div>
+          </section>
+
           <section className="glass-card-soft p-5">
             <h2 className="text-sm font-semibold text-foreground">일괄 생성</h2>
             <p className="mt-1 text-xs text-neutral-500">
