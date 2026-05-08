@@ -15,7 +15,7 @@ import {
 import { signOut } from "firebase/auth";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
@@ -88,6 +88,8 @@ export function OwnerDashboard() {
   const [editPortalPassword, setEditPortalPassword] = useState("");
   const [editPortalPassword2, setEditPortalPassword2] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<AcademyRow | null>(null);
+  const ownerInitGenerationRef = useRef(0);
+  const ownerListLoadedUidRef = useRef<string | null>(null);
 
   useBodyScrollLock(modal !== null);
 
@@ -103,13 +105,25 @@ export function OwnerDashboard() {
 
     const unsubAuth = auth.onAuthStateChanged(async (user) => {
       if (!user) {
+        ownerInitGenerationRef.current += 1;
+        ownerListLoadedUidRef.current = null;
         setGate("auth");
         unsubAcademies?.();
         setAcademies([]);
         return;
       }
+
+      const uid = user.uid;
+      if (ownerListLoadedUidRef.current === uid) {
+        return;
+      }
+
+      const gen = ++ownerInitGenerationRef.current;
       setGate("loading");
-      const isOwner = await fetchIsOwner(user.uid);
+      const isOwner = await fetchIsOwner(uid);
+      if (gen !== ownerInitGenerationRef.current || auth.currentUser?.uid !== uid) {
+        return;
+      }
       if (!isOwner) {
         setGate("forbidden");
         unsubAcademies?.();
@@ -120,12 +134,15 @@ export function OwnerDashboard() {
       const db = getFirebaseDb();
       const q = query(
         collection(db, COLLECTIONS.academies),
-        where("ownerUid", "==", user.uid),
+        where("ownerUid", "==", uid),
       );
       unsubAcademies?.();
       unsubAcademies = onSnapshot(
         q,
         (snap) => {
+          if (gen !== ownerInitGenerationRef.current || auth.currentUser?.uid !== uid) {
+            return;
+          }
           setListError(null);
           const rows: AcademyRow[] = [];
           snap.forEach((d) => {
@@ -137,8 +154,12 @@ export function OwnerDashboard() {
             return tb - ta;
           });
           setAcademies(rows);
+          ownerListLoadedUidRef.current = uid;
         },
         (err) => {
+          if (gen !== ownerInitGenerationRef.current || auth.currentUser?.uid !== uid) {
+            return;
+          }
           const code = err instanceof FirebaseError ? err.code : "";
           setListError(
             code === "permission-denied"
@@ -150,6 +171,8 @@ export function OwnerDashboard() {
     });
 
     return () => {
+      ownerInitGenerationRef.current += 1;
+      ownerListLoadedUidRef.current = null;
       unsubAuth();
       unsubAcademies?.();
     };

@@ -381,6 +381,15 @@ export function AcademyDashboard() {
     }
   }, [router]);
 
+  const onBackToOwner = useCallback(() => {
+    // 오너 대시보드에서 진입한 경우엔 히스토리 복귀가 가장 저부하.
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+      return;
+    }
+    router.push("/owner");
+  }, [router]);
+
   useEffect(() => {
     if (!configured) {
       return;
@@ -580,7 +589,7 @@ export function AcademyDashboard() {
           ) : undefined
         }
         showBack={showBack}
-        onBackAction={() => router.push("/owner")}
+        onBackAction={onBackToOwner}
         backAriaLabel="오너 대시보드로 돌아가기"
         onHomeAction={() => router.push("/")}
         showBellOnTitle
