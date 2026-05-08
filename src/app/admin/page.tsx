@@ -9,6 +9,7 @@ import {
 } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AcademyAttendanceLogPanel } from "@/components/academy/academy-attendance-log-panel";
 import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { GoogleMark } from "@/components/auth/google-mark";
@@ -114,6 +115,7 @@ export default function AdminSeedPage() {
   const [directorySearch, setDirectorySearch] = useState("");
   const [memberDeleteKey, setMemberDeleteKey] = useState<string | null>(null);
   const [cascadeBusyAcademyId, setCascadeBusyAcademyId] = useState<string | null>(null);
+  const [adminLogAcademyId, setAdminLogAcademyId] = useState("");
 
   useEffect(() => {
     const unsub = auth.onAuthStateChanged(async (u) => {
@@ -680,6 +682,29 @@ export default function AdminSeedPage() {
                   </details>
                 ))
               )}
+            </div>
+          </section>
+
+          <section className="glass-card-soft p-5">
+            <h2 className="text-sm font-semibold text-foreground">출석/결석 알림 전송 기록</h2>
+            <p className="mt-1 text-xs text-neutral-500">
+              관리자 권한으로 전송 이력을 조회합니다. 학원 ID를 입력하면 해당 학원만, 비워두면 전체 최근 기록을 봅니다.
+            </p>
+            <label className="mt-3 block">
+              <span className="mb-1.5 block text-xs font-medium text-neutral-600">학원 ID 필터(선택)</span>
+              <input
+                value={adminLogAcademyId}
+                onChange={(e) => setAdminLogAcademyId(e.target.value)}
+                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 px-4 py-3 text-foreground outline-none focus:border-[#4a90e2]/50 dark:border-white/12 dark:bg-white/[0.08]"
+                placeholder="비우면 전체 최근 기록"
+              />
+            </label>
+            <div className="mt-4">
+              <AcademyAttendanceLogPanel
+                academyId={adminLogAcademyId.trim() || null}
+                includeAdminAll
+                storageScopeKey={`admin_attendance_${adminLogAcademyId.trim() || "all"}`}
+              />
             </div>
           </section>
 

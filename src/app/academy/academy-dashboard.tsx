@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { AcademyParentPanel } from "@/components/academy/academy-parent-panel";
+import { AcademyAttendanceLogPanel } from "@/components/academy/academy-attendance-log-panel";
 import { AcademyStudentPanel } from "@/components/academy/academy-student-panel";
 import { AcademyTeacherPanel } from "@/components/academy/academy-teacher-panel";
 import {
@@ -33,10 +34,10 @@ import { useAcademyDashboardBell } from "@/lib/firebase/use-academy-dashboard-be
 
 const glassCard = "glass-card";
 
-type AcademySection = "home" | "teachers" | "parents" | "students";
+type AcademySection = "home" | "teachers" | "parents" | "students" | "notifications";
 
 function parseSection(raw: string | null): AcademySection {
-  if (raw === "teachers" || raw === "parents" || raw === "students") {
+  if (raw === "teachers" || raw === "parents" || raw === "students" || raw === "notifications") {
     return raw;
   }
   return "home";
@@ -218,6 +219,21 @@ function IconBackpack({ active }: { active?: boolean }) {
         strokeWidth="1.6"
         strokeLinecap="round"
       />
+    </svg>
+  );
+}
+
+function IconBellMini({ active }: { active?: boolean }) {
+  const stroke = active ? "#171717" : "#666";
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M7 10a5 5 0 0 1 10 0v4.2c0 .7.2 1.38.56 1.98L19 18H5l1.44-1.82c.36-.6.56-1.28.56-1.98V10Z"
+        stroke={stroke}
+        strokeWidth="1.6"
+        fill={active ? "rgba(0,0,0,0.06)" : "none"}
+      />
+      <path d="M10 19a2 2 0 0 0 4 0" stroke={stroke} strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   );
 }
@@ -601,6 +617,13 @@ export function AcademyDashboard() {
             active: section === "students",
             onSelect: () => navigateSection("students"),
           },
+          {
+            id: "notifications",
+            label: "알림 기록",
+            icon: (active: boolean) => <IconBellMini active={active} />,
+            active: section === "notifications",
+            onSelect: () => navigateSection("notifications"),
+          },
         ]}
         onLogoutAction={
           isAcademyPortalSession
@@ -707,6 +730,15 @@ export function AcademyDashboard() {
         {section === "students" ? (
           <section className="mt-6">
             <AcademyStudentPanel academyId={academyId} />
+          </section>
+        ) : null}
+
+        {section === "notifications" ? (
+          <section className="mt-6">
+            <AcademyAttendanceLogPanel
+              academyId={academyId}
+              storageScopeKey={`academy_${academyId}`}
+            />
           </section>
         ) : null}
       </main>

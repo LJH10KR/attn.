@@ -12,12 +12,14 @@ import {
 } from "@/components/academy/academy-student-panel";
 import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
+import { DashboardNotificationsModal } from "@/components/dashboard/dashboard-notifications-modal";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import {
   getFirebaseAuth,
   getFirebaseDb,
   getFirebaseFunctions,
 } from "@/lib/firebase/client-app";
+import { useAttendanceNotificationLog } from "@/lib/firebase/use-attendance-notification-log";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 
@@ -73,6 +75,7 @@ export default function TeacherDashboardPage() {
   const [listRefreshBusy, setListRefreshBusy] = useState(false);
   const [notifyMessage, setNotifyMessage] = useState<string | null>(null);
   const [notifyBusyKey, setNotifyBusyKey] = useState<string | null>(null);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
 
   const teacherListLoadedUidRef = useRef<string | null>(null);
   const teacherInitGenerationRef = useRef(0);
@@ -287,6 +290,20 @@ export default function TeacherDashboardPage() {
     [academyId],
   );
 
+  const {
+    modalItems: sentLogItems,
+    count: sentLogCount,
+    error: sentLogError,
+    refresh: refreshSentLog,
+    dismissOne: dismissSentLogOne,
+    dismissAll: dismissSentLogAll,
+  } = useAttendanceNotificationLog({
+    academyId,
+    limit: 60,
+    pollMs: 20_000,
+    storageScopeKey: `teacher_${academyId ?? "none"}`,
+  });
+
   useEffect(() => {
     if (!academyId) return;
     const db = getFirebaseDb();
@@ -345,8 +362,13 @@ export default function TeacherDashboardPage() {
           title="선생님 대시보드"
           affiliationLabel={academyLabelForGreeting(academyName, academyId)}
           onHomeAction={() => router.push("/")}
-          showBellOnTitle={false}
+          showBellOnTitle
           showBellInBottomBar={false}
+          onBellClickAction={() => {
+            void refreshSentLog();
+            setNotificationsOpen(true);
+          }}
+          bellBadgeCount={sentLogCount}
           bottomTabs={[
             {
               id: "home",
@@ -444,6 +466,16 @@ export default function TeacherDashboardPage() {
           )}
         </div>
       </div>
+
+      <DashboardNotificationsModal
+        open={notificationsOpen}
+        onClose={() => setNotificationsOpen(false)}
+        heading="내 알림 전송 기록"
+        items={sentLogItems}
+        emptyLabel={sentLogError ?? "표시할 기록이 없습니다."}
+        onDeleteItem={dismissSentLogOne}
+        onDeleteAll={dismissSentLogAll}
+      />
 
       <DashboardBottomScrim />
     </div>

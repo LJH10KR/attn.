@@ -1047,7 +1047,7 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
                     <AcademyParentStudentList
                       academyId={academyId}
                       parentUserId={t.id}
-                      setNotice={setNotice}
+                      setNoticeAction={setNotice}
                     />
                     <div className="mb-3 space-y-1 text-[11px] text-neutral-600">
                       {t.emergencyContact ? (

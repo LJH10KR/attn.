@@ -1,6 +1,7 @@
 "use client";
 
 import { FirebaseError } from "firebase/app";
+import { httpsCallable } from "firebase/functions";
 import {
   collection,
   deleteDoc,
@@ -19,7 +20,7 @@ import {
   MAX_ASSIGNED_TEACHERS_PER_STUDENT,
   type TeacherRegistrationStatus,
 } from "@/lib/firebase/attn-schema";
-import { getFirebaseDb } from "@/lib/firebase/client-app";
+import { getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 
 const glassCard = "glass-card";
@@ -508,11 +509,11 @@ function StudentAssignedTeachersModal({
 export function AcademyParentStudentList({
   academyId,
   parentUserId,
-  setNotice,
+  setNoticeAction,
 }: {
   academyId: string;
   parentUserId: string;
-  setNotice: (msg: string | null) => void;
+  setNoticeAction: (msg: string | null) => void;
 }) {
   const [teacherNames, setTeacherNames] = useState<Record<string, string>>({});
   const [rows, setRows] = useState<StudentRowVM[]>([]);
@@ -526,6 +527,7 @@ export function AcademyParentStudentList({
   const [formAge, setFormAge] = useState("");
   const [formPhone, setFormPhone] = useState("");
   const [formEmergency, setFormEmergency] = useState("");
+  const [notifyBusyKey, setNotifyBusyKey] = useState<string | null>(null);
 
   useEffect(() => {
     const db = getFirebaseDb();
@@ -601,14 +603,14 @@ export function AcademyParentStudentList({
         emergencyContact: emergency,
         updatedAt: serverTimestamp(),
       });
-      setNotice("학생 정보를 저장했습니다.");
+      setNoticeAction("학생 정보를 저장했습니다.");
       setEditTarget(null);
     } catch (e) {
       setEditErr(fsErr(e));
     } finally {
       setEditBusy(false);
     }
-  }, [academyId, editTarget, formAge, formEmergency, formName, formPhone, setNotice]);
+  }, [academyId, editTarget, formAge, formEmergency, formName, formPhone, setNoticeAction]);
 
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return;
@@ -616,14 +618,35 @@ export function AcademyParentStudentList({
     try {
       const db = getFirebaseDb();
       await deleteDoc(doc(db, "academies", academyId, "students", deleteTarget.id));
-      setNotice("학생을 삭제했습니다.");
+      setNoticeAction("학생을 삭제했습니다.");
       setDeleteTarget(null);
     } catch (e) {
-      setNotice(fsErr(e));
+      setNoticeAction(fsErr(e));
     } finally {
       setDelBusy(false);
     }
-  }, [academyId, deleteTarget, setNotice]);
+  }, [academyId, deleteTarget, setNoticeAction]);
+
+  const sendAttendanceNotify = useCallback(
+    async (studentId: string, kind: "present" | "absent") => {
+      const key = `${studentId}-${kind}`;
+      setNotifyBusyKey(key);
+      try {
+        const fn = httpsCallable(getFirebaseFunctions(), "sendStudentAttendanceNotification");
+        await fn({ academyId, studentId, kind });
+        setNoticeAction(kind === "present" ? "출석 알림을 보냈습니다." : "결석 알림을 보냈습니다.");
+      } catch (e) {
+        if (e instanceof FirebaseError && e.code === "functions/resource-exhausted") {
+          setNoticeAction("같은 학생에게 너무 자주 보낼 수 없습니다. 잠시 후 다시 시도해 주세요.");
+        } else {
+          setNoticeAction("알림을 보내지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        }
+      } finally {
+        setNotifyBusyKey(null);
+      }
+    },
+    [academyId, setNoticeAction],
+  );
 
   return (
     <div className="mb-4">
@@ -659,6 +682,22 @@ export function AcademyParentStudentList({
                   ) : null}
                 </div>
                 <div className="flex shrink-0 gap-1">
+                  <button
+                    type="button"
+                    className={miniBtnClass}
+                    disabled={notifyBusyKey !== null}
+                    onClick={() => void sendAttendanceNotify(s.id, "present")}
+                  >
+                    {notifyBusyKey === `${s.id}-present` ? "전송 중…" : "출석"}
+                  </button>
+                  <button
+                    type="button"
+                    className={miniBtnClass}
+                    disabled={notifyBusyKey !== null}
+                    onClick={() => void sendAttendanceNotify(s.id, "absent")}
+                  >
+                    {notifyBusyKey === `${s.id}-absent` ? "전송 중…" : "결석"}
+                  </button>
                   <button type="button" className={miniBtnClass} onClick={() => openEdit(s)}>
                     수정
                   </button>
