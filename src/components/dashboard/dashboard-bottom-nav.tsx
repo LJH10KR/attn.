@@ -212,7 +212,10 @@ export function DashboardBottomNav({
         >
           {bottomTabs && bottomTabs.length > 0 ? (
             <div
-              className="grid h-full w-full grid-cols-4 items-stretch gap-px"
+              className="grid h-full w-full items-stretch gap-px"
+              style={{
+                gridTemplateColumns: `repeat(${Math.max(4, bottomTabs.length)}, minmax(0, 1fr))`,
+              }}
               role="tablist"
               aria-label="대시보드 메뉴"
             >
@@ -246,7 +249,9 @@ export function DashboardBottomNav({
                 );
               })}
               {Array.from(
-                { length: Math.max(0, 4 - bottomTabs.length) },
+                {
+                  length: Math.max(0, Math.max(4, bottomTabs.length) - bottomTabs.length),
+                },
                 (_, i) => (
                   <div
                     key={`bottom-nav-slot-pad-${i}`}
