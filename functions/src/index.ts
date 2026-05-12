@@ -4,8 +4,32 @@ import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 
+/**
+ * `createCustomToken`용 IAM 서명 주체.
+ * Gen2에서는 메타데이터 기본 SA가 compute 기본 계정이라, 미지정 시 signBlob 대상이
+ * firebase-adminsdk가 아닌 compute로 잡혀 권한 오류가 나기 쉽습니다.
+ * `FIREBASE_SIGNING_SERVICE_ACCOUNT_EMAIL`로 덮어쓸 수 있습니다.
+ */
+function adminCustomTokenSignerServiceAccountId(): string | undefined {
+  const explicit = process.env.FIREBASE_SIGNING_SERVICE_ACCOUNT_EMAIL?.trim();
+  if (explicit) return explicit;
+  const projectId =
+    process.env.GCLOUD_PROJECT?.trim() ||
+    process.env.GOOGLE_CLOUD_PROJECT?.trim();
+  if (!projectId) return undefined;
+  return `${projectId}@appspot.gserviceaccount.com`;
+}
+
 if (!admin.apps.length) {
-  admin.initializeApp();
+  const serviceAccountId = adminCustomTokenSignerServiceAccountId();
+  if (serviceAccountId) {
+    admin.initializeApp({
+      credential: admin.credential.applicationDefault(),
+      serviceAccountId,
+    });
+  } else {
+    admin.initializeApp();
+  }
 }
 
 setGlobalOptions({maxInstances: 10, region: "asia-northeast3"});
