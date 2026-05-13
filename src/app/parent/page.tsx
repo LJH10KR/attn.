@@ -13,6 +13,8 @@ import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardNotificationsModal } from "@/components/dashboard/dashboard-notifications-modal";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
+import { RoleDashboardBootShell } from "@/components/dashboard/role-dashboard-boot-shell";
+import { StudentListSectionSkeleton } from "@/components/dashboard/student-list-section-skeleton";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
 import {
   getFirebaseAuth,
@@ -23,11 +25,20 @@ import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { useParentDashboardBell } from "@/lib/firebase/use-parent-dashboard-bell";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
+import { FirebaseError } from "firebase/app";
 
 const glassCard = "glass-card";
 
 function sortByName(a: StudentRowVM, b: StudentRowVM): number {
   return a.name.localeCompare(b.name, "ko");
+}
+
+function isRetryableCallableAuthError(err: unknown): boolean {
+  if (!(err instanceof FirebaseError)) return false;
+  return (
+    err.code === "functions/unauthenticated" ||
+    err.code === "functions/permission-denied"
+  );
 }
 
 type CallableStudentPayload = {
@@ -78,6 +89,7 @@ export default function ParentDashboardPage() {
   const [hideIosPwaHint, setHideIosPwaHint] = useState<boolean | null>(null);
   const [iosAutoModalOpen, setIosAutoModalOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [listInitialLoading, setListInitialLoading] = useState(false);
 
   const {
     items: parentBellItems,
@@ -108,6 +120,7 @@ export default function ParentDashboardPage() {
         setReady(false);
         setAuthUid(null);
         setHideIosPwaHint(null);
+        setListInitialLoading(false);
         router.replace("/login/parent");
         return;
       }
@@ -123,8 +136,8 @@ export default function ParentDashboardPage() {
       resetParentListSession();
       setStudents([]);
       setListError(null);
+      setListInitialLoading(false);
 
-      let revealUi = false;
       try {
         await auth.authStateReady();
         if (
@@ -173,23 +186,22 @@ export default function ParentDashboardPage() {
         const aid = data.primaryAcademyId;
         setAcademyId(aid);
         setInitError(null);
-        revealUi = true;
-
-        await user.getIdToken(true);
-        if (
-          cancelled ||
-          gen !== parentInitGenerationRef.current ||
-          auth.currentUser?.uid !== uid
-        ) {
-          return;
-        }
+        setReady(true);
+        setListInitialLoading(true);
 
         try {
           const listFn = httpsCallable(
             getFirebaseFunctions(),
             "listParentChildrenStudents",
           );
-          const listRes = await listFn({ academyId: aid });
+          let listRes;
+          try {
+            listRes = await listFn({ academyId: aid });
+          } catch (err) {
+            if (!isRetryableCallableAuthError(err)) throw err;
+            await user.getIdToken(true);
+            listRes = await listFn({ academyId: aid });
+          }
           if (
             cancelled ||
             gen !== parentInitGenerationRef.current ||
@@ -216,15 +228,16 @@ export default function ParentDashboardPage() {
               "자녀 학생 목록을 불러오지 못했습니다. 잠시 후 새로고침해 주세요.",
             );
           }
+        } finally {
+          if (!cancelled && gen === parentInitGenerationRef.current) {
+            setListInitialLoading(false);
+          }
         }
       } catch {
         if (!cancelled && gen === parentInitGenerationRef.current) {
           setInitError("학부모 정보를 불러오지 못했습니다.");
-          revealUi = true;
+          setReady(true);
         }
-      }
-      if (revealUi && !cancelled && gen === parentInitGenerationRef.current) {
-        setReady(true);
       }
     });
 
@@ -290,12 +303,18 @@ export default function ParentDashboardPage() {
     setListRefreshBusy(true);
     setListError(null);
     try {
-      await user.getIdToken(true);
       const listFn = httpsCallable(
         getFirebaseFunctions(),
         "listParentChildrenStudents",
       );
-      const listRes = await listFn({ academyId: aid });
+      let listRes;
+      try {
+        listRes = await listFn({ academyId: aid });
+      } catch (err) {
+        if (!isRetryableCallableAuthError(err)) throw err;
+        await user.getIdToken(true);
+        listRes = await listFn({ academyId: aid });
+      }
       const payload = listRes.data as { students?: CallableStudentPayload[] };
       const rawList = Array.isArray(payload?.students) ? payload.students : [];
       const list = rawList.map((s) => studentRowFromCallablePayload(s));
@@ -338,9 +357,10 @@ export default function ParentDashboardPage() {
 
   if (!ready) {
     return (
-      <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
-        <p className="text-sm text-neutral-600">불러오는 중…</p>
-      </div>
+      <RoleDashboardBootShell
+        loadingLabel="학부모 대시보드 확인 중"
+        footerHint="학부모 계정과 연결 정보를 확인하는 중입니다."
+      />
     );
   }
 
@@ -412,7 +432,12 @@ export default function ParentDashboardPage() {
         ) : null}
 
         <div className="space-y-2">
-          {students.length === 0 ? (
+          {listInitialLoading ? (
+            <StudentListSectionSkeleton
+              rows={3}
+              label="자녀 학생 목록 불러오는 중"
+            />
+          ) : students.length === 0 ? (
             <p
               className={`py-12 text-center text-sm text-neutral-500 ${glassCard}`}
             >
