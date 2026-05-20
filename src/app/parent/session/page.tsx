@@ -4,6 +4,7 @@ import { signOut } from "firebase/auth";
 import { useCallback, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getFirebaseAuth } from "@/lib/firebase/client-app";
+import { tearDownParentWebPushForLogout } from "@/lib/firebase/web-push";
 
 export default function ParentSessionPage() {
   const router = useRouter();
@@ -31,6 +32,7 @@ export default function ParentSessionPage() {
   const onLogout = useCallback(async () => {
     setBusy(true);
     try {
+      await tearDownParentWebPushForLogout();
       await signOut(getFirebaseAuth());
     } finally {
       setBusy(false);

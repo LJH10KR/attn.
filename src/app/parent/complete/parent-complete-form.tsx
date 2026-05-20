@@ -8,6 +8,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { tearDownParentWebPushForLogout } from "@/lib/firebase/web-push";
 
 function finalizeErrorMessage(err: FirebaseError): string {
   switch (err.code) {
@@ -72,6 +73,7 @@ export function ParentCompleteForm() {
       }
       router.replace(`/parent/complete?${next.toString()}`);
 
+      await tearDownParentWebPushForLogout();
       await signOut(getFirebaseAuth());
     } catch (e) {
       if (e instanceof FirebaseError) {
@@ -87,6 +89,7 @@ export function ParentCompleteForm() {
   const onSignOutOtherParent = useCallback(async () => {
     setError(null);
     try {
+      await tearDownParentWebPushForLogout();
       await signOut(getFirebaseAuth());
       setDone(false);
       setAlready(false);

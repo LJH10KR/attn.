@@ -18,6 +18,7 @@ import {
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
+import { tearDownParentWebPushForLogout } from "@/lib/firebase/web-push";
 
 const glassCard = "glass-card";
 
@@ -92,6 +93,7 @@ export default function ParentSettingsPage() {
   const onLogout = useCallback(async () => {
     setLogoutBusy(true);
     try {
+      await tearDownParentWebPushForLogout();
       await signOut(getFirebaseAuth());
     } finally {
       setLogoutBusy(false);

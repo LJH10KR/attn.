@@ -24,6 +24,9 @@ import {
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { useParentDashboardBell } from "@/lib/firebase/use-parent-dashboard-bell";
 import { resolveParentActivationState } from "@/lib/firebase/resolve-session-dashboard";
+import {
+  tearDownParentWebPushForLogout,
+} from "@/lib/firebase/web-push";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
 import { FirebaseError } from "firebase/app";
@@ -339,6 +342,7 @@ export default function ParentDashboardPage() {
     setLogoutBusy(true);
     try {
       parentListLoadedUidRef.current = null;
+      await tearDownParentWebPushForLogout();
       await signOut(getFirebaseAuth());
     } finally {
       setLogoutBusy(false);

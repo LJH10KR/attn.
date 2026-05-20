@@ -16,6 +16,10 @@ import { getFirebaseWebVapidKey, isFirebaseEmulatorEnabled, isWebPushConfigured 
 /** 마지막으로 서버에 동기화한 FCM 토큰 — 변경 시에만 `syncParentPushSubscription` 호출 */
 export const FCM_LAST_SYNCED_TOKEN_STORAGE_KEY = "attn_fcm_last_synced_token";
 
+const RESYNC_MIN_INTERVAL_MS = 45_000;
+let resyncInFlight: Promise<void> | null = null;
+let lastResyncFinishedAt = 0;
+
 export function clearLastSyncedFcmTokenStorage(): void {
   if (typeof sessionStorage === "undefined") return;
   try {
@@ -109,17 +113,52 @@ export async function callSyncParentPushSubscription(enabled: boolean, fcmToken?
 }
 
 /**
+ * 학부모 로그아웃 직전에 호출합니다 (`signOut` 전에, 인증이 유효할 때).
+ * - 서버: `syncParentPushSubscription(false)` → `users/{uid}/pushSubscriptions` 정리 및 `pushNotificationsEnabled: false`
+ * - 클라: FCM `deleteToken`(가능할 때), 마지막 동기화용 sessionStorage 제거
+ *
+ * 동일 브라우저에서 다른 학부모 계정으로 바꿀 때 이전 사용자 토큰이 섞이지 않도록 합니다.
+ */
+export async function tearDownParentWebPushForLogout(): Promise<void> {
+  if (isFirebaseEmulatorEnabled()) {
+    clearLastSyncedFcmTokenStorage();
+    return;
+  }
+
+  try {
+    await callSyncParentPushSubscription(false);
+  } catch {
+    /* 오프라인 등 — 로컬 정리는 계속 */
+  }
+
+  if (isWebPushConfigured()) {
+    try {
+      await removeFcmTokenLocal();
+    } catch {
+      /* ignore */
+    }
+  }
+  clearLastSyncedFcmTokenStorage();
+}
+
+/**
  * 푸시가 켜진 상태에서만: FCM 토큰을 받아 서버(`pushSubscriptions`)에 맞춥니다.
  *
  * 예전에는 sessionStorage의 마지막 토큰과 같으면 Callable을 건너뛰었는데, 서버가 무효 토큰 문서만
  * 삭제한 뒤에는 클라이언트 토큰 문자열이 그대로여도 Firestore 구독이 비어 있을 수 있습니다.
  * 그때 재업로드를 생략하면 “설정은 켜짐인데 푸시가 안 옴”이 됩니다. 문자열이 같아도 동기화합니다.
  */
-export async function resyncParentPushTokenAfterResume(
+async function resyncParentPushTokenAfterResumeInner(
   isPushEnabled: () => boolean,
+  force: boolean,
 ): Promise<void> {
   if (typeof window === "undefined") return;
   if (!isPushEnabled()) return;
+
+  const now = Date.now();
+  if (!force && now - lastResyncFinishedAt < RESYNC_MIN_INTERVAL_MS) {
+    return;
+  }
 
   const { token, error } = await fetchFcmToken();
   if (!token || error) return;
@@ -131,9 +170,29 @@ export async function resyncParentPushTokenAfterResume(
     } catch {
       /* ignore */
     }
+    lastResyncFinishedAt = Date.now();
   } catch {
     /* 다음 복귀 시 재시도 */
   }
+}
+
+/**
+ * 앱 재실행·탭 복귀 시 FCM 토큰을 서버와 맞춥니다.
+ * visibility/focus/onSnapshot이 동시에 호출돼 문서가 여러 개 쌓이지 않도록 in-flight·최소 간격을 둡니다.
+ */
+export async function resyncParentPushTokenAfterResume(
+  isPushEnabled: () => boolean,
+  opts?: { force?: boolean },
+): Promise<void> {
+  const force = opts?.force === true;
+  if (resyncInFlight) {
+    await resyncInFlight;
+    return;
+  }
+  resyncInFlight = resyncParentPushTokenAfterResumeInner(isPushEnabled, force).finally(() => {
+    resyncInFlight = null;
+  });
+  await resyncInFlight;
 }
 
 export function subscribeForegroundMessages(

@@ -22,6 +22,28 @@ const FCM_TOKEN_INVALID_CODES = new Set([
   "messaging/invalid-registration-token",
 ]);
 
+/**
+ * 일시적·쿼터·페이로드 문제 등 — 구독 문서를 지우면 안 됨(오탐으로 전체 구독이 사라질 수 있음).
+ * @see https://firebase.google.com/docs/reference/fcm/rest/v1/ErrorCode
+ */
+const FCM_NEVER_DELETE_SUBSCRIPTION_CODES = new Set([
+  "messaging/unavailable",
+  "messaging/internal-error",
+  "messaging/internal",
+  "messaging/server-unavailable",
+  "messaging/timeout",
+  "messaging/quota-exceeded",
+  "messaging/message-rate-exceeded",
+  "messaging/device-message-rate-exceeded",
+  "messaging/too-many-topics",
+  "messaging/payload-size-limit-exceeded",
+  "messaging/invalid-payload",
+  "messaging/invalid-package-name",
+  "messaging/mismatched-credential",
+  "messaging/sender-id-mismatch",
+  "messaging/third-party-auth-error",
+]);
+
 function studentAssignedToTeacher(data: Record<string, unknown>, teacherUid: string): boolean {
   const raw = data.assignedTeacherUids;
   const fromList =
@@ -124,18 +146,28 @@ export const syncParentPushSubscription = onCall(async (request) => {
 
   const subId = crypto.createHash("sha256").update(fcmToken).digest("hex").slice(0, 48);
   const subRef = userRef.collection("pushSubscriptions").doc(subId);
-  await subRef.set({
+
+  const existingSubs = await userRef.collection("pushSubscriptions").get();
+  const batch = db.batch();
+  for (const d of existingSubs.docs) {
+    if (d.id !== subId) {
+      batch.delete(d.ref);
+    }
+  }
+  batch.set(subRef, {
     token: fcmToken,
     platform: "web",
     updatedAt: FieldValue.serverTimestamp(),
   });
-  await userRef.set(
+  batch.set(
+    userRef,
     {
       pushNotificationsEnabled: true,
       updatedAt: FieldValue.serverTimestamp(),
     },
     { merge: true },
   );
+  await batch.commit();
 
   return { ok: true as const, pushNotificationsEnabled: true };
 });
@@ -280,9 +312,24 @@ export const sendStudentAttendanceNotification = onCall(async (request) => {
   }
 
   const subsSnap = await parentUserRef.collection("pushSubscriptions").get();
-  const tokens = subsSnap.docs
-    .map((d) => d.get("token"))
-    .filter((t): t is string => typeof t === "string" && t.length > 20);
+
+  /** 동일 토큰이 여러 문서에 있으면 `sendEachForMulticast` 인덱스와 ref 매칭이 틀어질 수 있어 한 덩어리로 묶음 */
+  type TokenBucket = { token: string; refs: DocumentReference[] };
+  const buckets: TokenBucket[] = [];
+  const indexByToken = new Map<string, number>();
+  for (const d of subsSnap.docs) {
+    const t = d.get("token");
+    if (typeof t !== "string" || t.length <= 20) continue;
+    const existing = indexByToken.get(t);
+    if (existing !== undefined) {
+      buckets[existing]!.refs.push(d.ref);
+    } else {
+      indexByToken.set(t, buckets.length);
+      buckets.push({ token: t, refs: [d.ref] });
+    }
+  }
+  const tokens = buckets.map((b) => b.token);
+
   if (tokens.length === 0) {
     return { ok: true as const, sent: 0, reason: "no_token" as const };
   }
@@ -314,10 +361,29 @@ export const sendStudentAttendanceNotification = onCall(async (request) => {
       const r = resp.responses[i];
       if (r.success) continue;
       const code = r.error?.code ?? "";
-      if (!FCM_TOKEN_INVALID_CODES.has(code)) continue;
-      const bad = tokens[i];
-      const docMatch = subsSnap.docs.find((d) => d.get("token") === bad);
-      if (docMatch) deadRefs.push(docMatch.ref);
+      if (FCM_NEVER_DELETE_SUBSCRIPTION_CODES.has(code)) {
+        logger.warn("sendStudentAttendanceNotification: keep subscriptions (transient/non-token FCM error)", {
+          code,
+          tokenIndex: i,
+        });
+        continue;
+      }
+      if (!FCM_TOKEN_INVALID_CODES.has(code)) {
+        logger.warn("sendStudentAttendanceNotification: keep subscriptions (unexpected FCM error)", {
+          code,
+          message: r.error?.message,
+          tokenIndex: i,
+        });
+        continue;
+      }
+      const bucket = buckets[i];
+      if (!bucket) {
+        logger.error("sendStudentAttendanceNotification: missing token bucket (skip delete)", { i });
+        continue;
+      }
+      for (const ref of bucket.refs) {
+        deadRefs.push(ref);
+      }
     }
     if (deadRefs.length > 0) {
       let batch = db.batch();
@@ -335,11 +401,25 @@ export const sendStudentAttendanceNotification = onCall(async (request) => {
     }
 
     /**
-     * 무효 토큰만 정리하고 `pushNotificationsEnabled`는 건드리지 않습니다.
-     * PWA 재실행·SW 교체 직후에는 Firestore에 예전 토큰만 남은 채로 푸시가 먼저 도착할 수 있어,
-     * 전부 무효 처리되면 사용자가 설정에서 켜 둔 상태가 서버에서 꺼짐으로 바뀌는 문제가 생깁니다.
-     * 새 토큰은 클라이언트(`resyncParentPushTokenAfterResume` 등)가 다시 올립니다.
+     * 무효 토큰 문서만 삭제합니다. `syncParentPushSubscription(false)`는 호출하지 않습니다.
+     * 예전 토큰이 여러 개 쌓인 뒤 전부 무효로 지워져도, 사용자가 켜 둔 설정은 유지합니다.
      */
+    if (deadRefs.length > 0) {
+      const afterSubs = await parentUserRef.collection("pushSubscriptions").limit(1).get();
+      if (afterSubs.empty) {
+        await parentUserRef.set(
+          {
+            pushNotificationsEnabled: true,
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+        logger.warn("sendStudentAttendanceNotification: all stale tokens removed; kept pushNotificationsEnabled", {
+          parentUserId,
+          removedCount: deadRefs.length,
+        });
+      }
+    }
 
     return { ok: true as const, sent: resp.successCount, failureCount: resp.failureCount };
   } catch (e) {

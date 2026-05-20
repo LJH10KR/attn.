@@ -36,7 +36,7 @@ export function useParentPushLifecycleResync() {
           pushEnabledRef.current = en;
           // 푸시가 꺼짐→켜짐으로 바뀔 때, 또는 첫 로드에서 이미 켜져 있을 때 한 번만 동기화
           if (en && prev !== true) {
-            void resyncParentPushTokenAfterResume(() => pushEnabledRef.current);
+            void resyncParentPushTokenAfterResume(() => pushEnabledRef.current, { force: true });
           }
         },
         () => {
@@ -81,8 +81,6 @@ export function useParentPushLifecycleResync() {
       removeControllerListener = () =>
         navigator.serviceWorker.removeEventListener("controllerchange", handler);
     }
-
-    if (document.visibilityState === "visible") run();
 
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
