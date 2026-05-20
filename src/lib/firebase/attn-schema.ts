@@ -37,6 +37,41 @@ export function academySecretsLoginPath(academyId: string) {
   return `${academyPath(academyId)}/secrets/login`;
 }
 
+/** `users/{uid}/serverMirror/{USER_ACTIVATION_MIRROR_DOC_ID}` — Functions만 쓰기 */
+export const USER_SERVER_MIRROR_COLLECTION = "serverMirror" as const;
+export const USER_ACTIVATION_MIRROR_DOC_ID = "activation" as const;
+
+/** `UserActivationMirrorDoc` 필드 `schemaVersion` — 규칙·클라 검증과 동기화 */
+export const USER_ACTIVATION_MIRROR_SCHEMA_VERSION = 1 as const;
+
+/**
+ * Callable `getTeacherActivationState` / `getParentActivationState`와 동일한 의미의 스냅샷.
+ * `primaryStatus` / `primaryAcademyId`는 서버가 멤버십에서 계산한 값(클라이언트가 수정 불가).
+ */
+export type UserRoleActivationMirrorSlice = {
+  anyActive: boolean;
+  primaryStatus: string | null;
+  primaryAcademyId: string | null;
+};
+
+/**
+ * 로그인 사용자별 선생님·학부모 활성 판별 요약(읽기 전용 미러).
+ * - 경로: `users/{uid}/serverMirror/activation`
+ * - 쓰기: Admin SDK(Functions)만 — `firestore.rules` 참고.
+ */
+export type UserActivationMirrorDoc = {
+  schemaVersion: typeof USER_ACTIVATION_MIRROR_SCHEMA_VERSION;
+  teacher: UserRoleActivationMirrorSlice;
+  parent: UserRoleActivationMirrorSlice;
+  updatedAt: Timestamp;
+  /** 갱신 출처(운영·디버깅용) */
+  source?: "trigger" | "reconcile" | "bootstrap";
+};
+
+export function userActivationMirrorPath(userId: string): string {
+  return `${COLLECTIONS.users}/${userId}/${USER_SERVER_MIRROR_COLLECTION}/${USER_ACTIVATION_MIRROR_DOC_ID}`;
+}
+
 /** 모든 로그인 사용자 공통 프로필 (선택) */
 export type UserProfile = {
   displayName?: string | null;

@@ -1,8 +1,9 @@
 import * as admin from "firebase-admin";
 import type { DocumentReference } from "firebase-admin/firestore";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldPath, FieldValue } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
+import { reconcileUserActivationMirror } from "./user-activation-mirror";
 
 function assertAdmin(request: {
   auth?: { uid: string; token?: Record<string, unknown> } | null;
@@ -363,4 +364,61 @@ export const adminDeleteMemberUser = onCall(async (request) => {
 
   logger.info("adminDeleteMemberUser done", { academyId, memberDocId, role, authUid });
   return { ok: true as const };
+});
+
+/**
+ * 관리자용 — `users/{uid}/serverMirror/activation` 일괄·단건 백필(기존 계정 미러가 비어 있을 때).
+ * - `userId`가 있으면 해당 UID만 재계산합니다.
+ * - 없으면 `users` 컬렉션 문서 ID 기준 페이지네이션으로 최대 `limit`(기본 25, 최대 50)건 처리합니다.
+ *   다음 배치는 응답의 `lastUserId`를 `startAfterUserId`로 넘겨 반복 호출하세요.
+ */
+export const adminReconcileActivationMirrors = onCall(async (request) => {
+  assertAdmin(request as unknown as { auth?: { uid: string; token?: Record<string, unknown> } | null });
+
+  const db = admin.firestore();
+  const userId = typeof request.data?.userId === "string" ? request.data.userId.trim() : "";
+  if (userId) {
+    if (userId.includes("/")) {
+      throw new HttpsError("invalid-argument", "userId가 올바르지 않습니다.");
+    }
+    await reconcileUserActivationMirror(db, userId, "bootstrap");
+    logger.info("adminReconcileActivationMirrors single", { userId });
+    return {
+      ok: true as const,
+      mode: "single" as const,
+      processed: 1,
+      lastUserId: userId,
+      hasMore: false as const,
+    };
+  }
+
+  const limit = clampInt(request.data?.limit, 25, 1, 50);
+  const startAfterUserId =
+    typeof request.data?.startAfterUserId === "string" ? request.data.startAfterUserId.trim() : "";
+  if (startAfterUserId.includes("/")) {
+    throw new HttpsError("invalid-argument", "startAfterUserId가 올바르지 않습니다.");
+  }
+
+  let q = db.collection("users").orderBy(FieldPath.documentId()).limit(limit);
+  if (startAfterUserId) {
+    q = q.startAfter(startAfterUserId);
+  }
+  const snap = await q.get();
+  let last: string | undefined;
+  for (const d of snap.docs) {
+    await reconcileUserActivationMirror(db, d.id, "bootstrap");
+    last = d.id;
+  }
+  logger.info("adminReconcileActivationMirrors batch", {
+    limit,
+    startAfterUserId: startAfterUserId || null,
+    processed: snap.size,
+  });
+  return {
+    ok: true as const,
+    mode: "batch" as const,
+    processed: snap.size,
+    lastUserId: last ?? null,
+    hasMore: snap.size === limit,
+  };
 });

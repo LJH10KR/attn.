@@ -258,7 +258,12 @@ export {
 export {
   adminDeleteAcademyCascade,
   adminDeleteMemberUser,
+  adminReconcileActivationMirrors,
   listAdminUserDirectory,
 } from "./admin-directory";
 export { openShortAuthLink } from "./auth-short-links";
 export { sendOwnerSignupVerificationEmail } from "./owner-auth-mail";
+export {
+  onTeacherMembershipWritten,
+  onParentMembershipWritten,
+} from "./user-activation-mirror";

@@ -12,6 +12,8 @@ import { resyncParentPushTokenAfterResume } from "@/lib/firebase/web-push";
  */
 export function useParentPushLifecycleResync() {
   const pushEnabledRef = useRef(false);
+  /** `onSnapshot`은 `updatedAt` 등 어떤 필드 변경에도 호출됨 — 매번 resync하면 Callable이 user 루트를 갱신해 무한 루프가 됨 */
+  const prevPushNotificationsEnabledRef = useRef<boolean | undefined>(undefined);
 
   useEffect(() => {
     if (isFirebaseEmulatorEnabled() || !isWebPushConfigured()) return;
@@ -22,19 +24,24 @@ export function useParentPushLifecycleResync() {
     const unsubAuth = auth.onAuthStateChanged((user) => {
       unsubDoc?.();
       pushEnabledRef.current = false;
+      prevPushNotificationsEnabledRef.current = undefined;
       if (!user) return;
       const db = getFirebaseDb();
       unsubDoc = onSnapshot(
         doc(db, "users", user.uid),
         (snap) => {
           const en = snap.data()?.pushNotificationsEnabled === true;
+          const prev = prevPushNotificationsEnabledRef.current;
+          prevPushNotificationsEnabledRef.current = en;
           pushEnabledRef.current = en;
-          if (en) {
+          // 푸시가 꺼짐→켜짐으로 바뀔 때, 또는 첫 로드에서 이미 켜져 있을 때 한 번만 동기화
+          if (en && prev !== true) {
             void resyncParentPushTokenAfterResume(() => pushEnabledRef.current);
           }
         },
         () => {
           pushEnabledRef.current = false;
+          prevPushNotificationsEnabledRef.current = undefined;
         },
       );
     });

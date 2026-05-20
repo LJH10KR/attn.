@@ -143,6 +143,17 @@ service cloud.firestore {
         allow create, update: if false;
         allow delete: if isSignedIn() && request.auth.uid == userId;
       }
+
+      /**
+       * 서버(Cloud Functions Admin SDK)만 쓰는 역할 활성 요약 — 클라이언트는 읽기만.
+       * 2-2: 멤버십 변경 시 Functions가 갱신. 위조 방지를 위해 클라이언트 write는 항상 거부.
+       * 문서 ID는 `activation` 단일 고정(`attn-schema.ts`와 동일).
+       */
+      match /serverMirror/{docId} {
+        allow read: if isAdmin()
+          || (isSignedIn() && request.auth.uid == userId && docId == "activation");
+        allow create, update, delete: if false;
+      }
     }
 
     match /academies/{academyId} {

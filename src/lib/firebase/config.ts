@@ -22,6 +22,14 @@ export function isFirebaseEmulatorEnabled(): boolean {
   return process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === "1";
 }
 
+/**
+ * 활성 미러(`users/{uid}/serverMirror/activation`)를 Callable보다 먼저 읽을지.
+ * 기본값은 `false`(Callable만 사용) — Functions·규칙·백필을 확인한 뒤 `NEXT_PUBLIC_USE_ACTIVATION_MIRROR_READ=1`로 켭니다.
+ */
+export function isActivationMirrorClientReadEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_USE_ACTIVATION_MIRROR_READ === "1";
+}
+
 /** FCM 웹용 VAPID 공개 키 — Firebase 콘솔 > 프로젝트 설정 > 클라우드 메시징 > 웹 푸시 인증서 */
 export function getFirebaseWebVapidKey(): string {
   return process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY?.trim() ?? "";

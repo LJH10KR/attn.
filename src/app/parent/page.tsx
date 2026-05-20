@@ -23,6 +23,7 @@ import {
 } from "@/lib/firebase/client-app";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { useParentDashboardBell } from "@/lib/firebase/use-parent-dashboard-bell";
+import { resolveParentActivationState } from "@/lib/firebase/resolve-session-dashboard";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
 import { FirebaseError } from "firebase/app";
@@ -157,11 +158,7 @@ export default function ParentDashboardPage() {
           return;
         }
 
-        const fn = httpsCallable(
-          getFirebaseFunctions(),
-          "getParentActivationState",
-        );
-        const res = await fn({});
+        const data = await resolveParentActivationState(user);
         if (
           cancelled ||
           gen !== parentInitGenerationRef.current ||
@@ -169,12 +166,6 @@ export default function ParentDashboardPage() {
         ) {
           return;
         }
-
-        const data = res.data as {
-          anyActive?: boolean;
-          primaryStatus?: string | null;
-          primaryAcademyId?: string | null;
-        };
         if (!data?.anyActive || !data.primaryAcademyId) {
           const q = new URLSearchParams();
           q.set("state", data?.primaryStatus ?? "unknown");

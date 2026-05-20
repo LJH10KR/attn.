@@ -23,6 +23,7 @@ import {
 } from "@/lib/firebase/client-app";
 import { useAttendanceNotificationLog } from "@/lib/firebase/use-attendance-notification-log";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
+import { resolveTeacherActivationState } from "@/lib/firebase/resolve-session-dashboard";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 
 const glassCard = "glass-card";
@@ -143,11 +144,7 @@ export default function TeacherDashboardPage() {
           return;
         }
 
-        const fn = httpsCallable(
-          getFirebaseFunctions(),
-          "getTeacherActivationState",
-        );
-        const res = await fn({});
+        const data = await resolveTeacherActivationState(user);
         if (
           cancelled ||
           gen !== teacherInitGenerationRef.current ||
@@ -155,12 +152,6 @@ export default function TeacherDashboardPage() {
         ) {
           return;
         }
-
-        const data = res.data as {
-          anyActive?: boolean;
-          primaryStatus?: string | null;
-          primaryAcademyId?: string | null;
-        };
         if (!data?.anyActive || !data.primaryAcademyId) {
           const q = new URLSearchParams();
           q.set("state", data?.primaryStatus ?? "unknown");

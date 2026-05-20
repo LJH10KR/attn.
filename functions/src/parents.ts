@@ -5,6 +5,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import * as nodemailer from "nodemailer";
 import { createShortAuthLink, getAppOrigin } from "./auth-short-links";
+import { reconcileUserActivationMirror } from "./user-activation-mirror";
 
 type ParentStatus =
   | "invitation_needed"
@@ -496,51 +497,13 @@ export const getParentActivationState = onCall(
     const { uid } = request.auth;
 
     const db = admin.firestore();
-
-    const activeSnap = await db
-      .collectionGroup("parents")
-      .where("authUid", "==", uid)
-      .where("status", "==", "active")
-      .limit(1)
-      .get();
-
-    if (!activeSnap.empty) {
-      const d = activeSnap.docs[0]!;
-      return {
-        ok: true,
-        anyActive: true,
-        primaryStatus: "active" as ParentStatus,
-        primaryAcademyId: parentDocAcademyId(d.ref),
-      };
-    }
-
-    const snaps = await db.collectionGroup("parents").where("authUid", "==", uid).limit(25).get();
-
-    if (snaps.empty) {
-      return {
-        ok: true,
-        anyActive: false,
-        primaryStatus: null as ParentStatus | null,
-        primaryAcademyId: null as string | null,
-      };
-    }
-
-    const memberships = snaps.docs.map((d) => {
-      const status = d.data().status as ParentStatus;
-      const academyId = parentDocAcademyId(d.ref);
-      return { status, academyId };
-    });
-
-    const order: ParentStatus[] = ["pending_registration", "invitation_sent", "inactive", "invitation_needed"];
-    const primary = memberships.find((m) => order.includes(m.status));
-    const primaryStatus = primary?.status ?? null;
-    const primaryAcademyId = primary?.academyId ?? null;
+    const { parent } = await reconcileUserActivationMirror(db, uid, "reconcile");
 
     return {
       ok: true,
-      anyActive: false,
-      primaryStatus,
-      primaryAcademyId,
+      anyActive: parent.anyActive,
+      primaryStatus: parent.primaryStatus as ParentStatus | null,
+      primaryAcademyId: parent.primaryAcademyId,
     };
   },
 );
