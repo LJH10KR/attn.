@@ -198,6 +198,21 @@ service cloud.firestore {
         allow create, update, delete: if false;
       }
 
+      /** 학원 대시보드 집계·알림 inbox — Functions(Admin SDK)만 쓰기 */
+      match /meta/dashboardStats {
+        allow read: if isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyPortalSession(academyId);
+        allow write: if false;
+      }
+
+      match /adminInbox/{inboxId} {
+        allow read: if isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyPortalSession(academyId);
+        allow write: if false;
+      }
+
       match /students/{studentId} {
         /**
          * list 쿼리 검증 시 OR 전체가 분석되므로, parentUserId 등 필드가 없을 때 직접 접근하면

@@ -7,7 +7,7 @@ import {
   deleteDoc,
   deleteField,
   doc,
-  onSnapshot,
+  getDocs,
   query,
   serverTimestamp,
   Timestamp,
@@ -21,6 +21,8 @@ import {
   type TeacherRegistrationStatus,
 } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
+import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 
 const glassCard = "glass-card";
@@ -529,37 +531,40 @@ export function AcademyParentStudentList({
   const [formEmergency, setFormEmergency] = useState("");
   const [notifyBusyKey, setNotifyBusyKey] = useState<string | null>(null);
 
-  useEffect(() => {
-    const db = getFirebaseDb();
-    const unsubT = onSnapshot(collection(db, "academies", academyId, "teachers"), (snap) => {
+  const loadParentChildren = useCallback(async () => {
+    try {
+      const db = getFirebaseDb();
+      const [teachersSnap, studentsSnap] = await Promise.all([
+        getDocs(collection(db, "academies", academyId, "teachers")),
+        getDocs(
+          query(
+            collection(db, "academies", academyId, "students"),
+            where("parentUserId", "==", parentUserId),
+          ),
+        ),
+      ]);
       const m: Record<string, string> = {};
-      for (const d of snap.docs) {
+      for (const d of teachersSnap.docs) {
         const data = d.data() as { displayName?: string };
         m[d.id] = typeof data.displayName === "string" && data.displayName ? data.displayName : d.id;
       }
       setTeacherNames(m);
-    });
-    return () => unsubT();
-  }, [academyId]);
-
-  useEffect(() => {
-    const db = getFirebaseDb();
-    const qy = query(
-      collection(db, "academies", academyId, "students"),
-      where("parentUserId", "==", parentUserId),
-    );
-    const unsub = onSnapshot(
-      qy,
-      (snap) => {
-        const list = snap.docs.map((d) => docToStudentRow(d.id, d.data() as Record<string, unknown>));
-        list.sort(sortStudentsByCreated);
-        setRows(list);
-        setListError(null);
-      },
-      (err) => setListError(err.message || "목록을 불러오지 못했습니다."),
-    );
-    return () => unsub();
+      const list = studentsSnap.docs.map((d) =>
+        docToStudentRow(d.id, d.data() as Record<string, unknown>),
+      );
+      list.sort(sortStudentsByCreated);
+      setRows(list);
+      setListError(null);
+    } catch (err) {
+      setListError(err instanceof Error ? err.message : "목록을 불러오지 못했습니다.");
+      setRows([]);
+    }
   }, [academyId, parentUserId]);
+
+  const { refresh: refreshParentChildren } = useAcademyListPoll(loadParentChildren, [
+    academyId,
+    parentUserId,
+  ]);
 
   const openEdit = (s: StudentRowVM) => {
     setEditErr(null);
@@ -605,12 +610,22 @@ export function AcademyParentStudentList({
       });
       setNoticeAction("학생 정보를 저장했습니다.");
       setEditTarget(null);
+      refreshParentChildren();
     } catch (e) {
       setEditErr(fsErr(e));
     } finally {
       setEditBusy(false);
     }
-  }, [academyId, editTarget, formAge, formEmergency, formName, formPhone, setNoticeAction]);
+  }, [
+    academyId,
+    editTarget,
+    formAge,
+    formEmergency,
+    formName,
+    formPhone,
+    setNoticeAction,
+    refreshParentChildren,
+  ]);
 
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return;
@@ -620,12 +635,13 @@ export function AcademyParentStudentList({
       await deleteDoc(doc(db, "academies", academyId, "students", deleteTarget.id));
       setNoticeAction("학생을 삭제했습니다.");
       setDeleteTarget(null);
+      refreshParentChildren();
     } catch (e) {
       setNoticeAction(fsErr(e));
     } finally {
       setDelBusy(false);
     }
-  }, [academyId, deleteTarget, setNoticeAction]);
+  }, [academyId, deleteTarget, refreshParentChildren, setNoticeAction]);
 
   const sendAttendanceNotify = useCallback(
     async (studentId: string, kind: "present" | "absent") => {
@@ -763,64 +779,46 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
   const [formPhone, setFormPhone] = useState("");
   const [formEmergency, setFormEmergency] = useState("");
 
-  useEffect(() => {
-    const db = getFirebaseDb();
-    const qy = query(collection(db, "academies", academyId, "students"));
-    const unsub = onSnapshot(
-      qy,
-      (snap) => {
-        const list = snap.docs.map((d) => docToStudentRow(d.id, d.data() as Record<string, unknown>));
-        list.sort(sortStudentsByCreated);
-        setStudents(list);
-        setListError(null);
-      },
-      (err) => setListError(err.message || "목록을 불러오지 못했습니다."),
-    );
-    return () => unsub();
+  const loadStudentPanelData = useCallback(async () => {
+    try {
+      const db = getFirebaseDb();
+      const [studentsSnap, teachersSnap, parentsSnap] = await Promise.all([
+        getDocs(query(collection(db, "academies", academyId, "students"))),
+        getDocs(collection(db, "academies", academyId, "teachers")),
+        getDocs(query(collection(db, "academies", academyId, "parents"))),
+      ]);
+      const list = studentsSnap.docs.map((d) =>
+        docToStudentRow(d.id, d.data() as Record<string, unknown>),
+      );
+      list.sort(sortStudentsByCreated);
+      setStudents(list);
+      setTeachers(
+        teachersSnap.docs.map((d) => {
+          const data = d.data() as Record<string, unknown>;
+          return {
+            id: d.id,
+            name: typeof data.displayName === "string" ? data.displayName : "",
+            status: (data.status as TeacherRegistrationStatus) ?? "invitation_needed",
+          };
+        }),
+      );
+      const map: Record<string, string> = {};
+      for (const d of parentsSnap.docs) {
+        const data = d.data() as { displayName?: string };
+        map[d.id] = typeof data.displayName === "string" ? data.displayName : d.id;
+      }
+      setParentsById(map);
+      setListError(null);
+    } catch (err) {
+      setListError(err instanceof Error ? err.message : "목록을 불러오지 못했습니다.");
+      setStudents([]);
+    }
   }, [academyId]);
 
-  useEffect(() => {
-    const db = getFirebaseDb();
-    const unsub = onSnapshot(
-      collection(db, "academies", academyId, "teachers"),
-      (snap) => {
-        setTeachers(
-          snap.docs.map((d) => {
-            const data = d.data() as Record<string, unknown>;
-            return {
-              id: d.id,
-              name: typeof data.displayName === "string" ? data.displayName : "",
-              status: (data.status as TeacherRegistrationStatus) ?? "invitation_needed",
-            };
-          }),
-        );
-      },
-      () => {
-        /* 선생님 목록 실패 시 전담 UI는 활성 목록 없이만 동작 */
-      },
-    );
-    return () => unsub();
-  }, [academyId]);
-
-  useEffect(() => {
-    const db = getFirebaseDb();
-    const qy = query(collection(db, "academies", academyId, "parents"));
-    const unsub = onSnapshot(
-      qy,
-      (snap) => {
-        const map: Record<string, string> = {};
-        for (const d of snap.docs) {
-          const data = d.data() as { displayName?: string };
-          map[d.id] = typeof data.displayName === "string" ? data.displayName : d.id;
-        }
-        setParentsById(map);
-      },
-      () => {
-        /* 학부모 목록 실패 시 학생만 표시 */
-      },
-    );
-    return () => unsub();
-  }, [academyId]);
+  const { refresh: refreshStudentPanel, busy: listBusy } = useAcademyListPoll(
+    loadStudentPanelData,
+    [academyId],
+  );
 
   const teacherNameById = useMemo(() => {
     const m: Record<string, string> = {};
@@ -937,12 +935,13 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
       });
       setNotice("학생 정보를 저장했습니다.");
       setEditTarget(null);
+      refreshStudentPanel();
     } catch (e) {
       setEditErr(fsErr(e));
     } finally {
       setEditBusy(false);
     }
-  }, [academyId, editTarget, formAge, formEmergency, formName, formPhone]);
+  }, [academyId, editTarget, formAge, formEmergency, formName, formPhone, refreshStudentPanel]);
 
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return;
@@ -952,12 +951,13 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
       await deleteDoc(doc(db, "academies", academyId, "students", deleteTarget.id));
       setNotice("학생을 삭제했습니다.");
       setDeleteTarget(null);
+      refreshStudentPanel();
     } catch (e) {
       setNotice(fsErr(e));
     } finally {
       setDelBusy(false);
     }
-  }, [academyId, deleteTarget]);
+  }, [academyId, deleteTarget, refreshStudentPanel]);
 
   const toggleTeacherForStudent = useCallback(
     async (student: StudentRowVM, teacherUid: string, add: boolean) => {
@@ -986,13 +986,14 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
         setNotice(
           next.length > 0 ? "전담 선생님을 저장했습니다." : "전담 선생님을 모두 해제했습니다.",
         );
+        refreshStudentPanel();
       } catch (e) {
         setNotice(fsErr(e));
       } finally {
         setTeacherAssignBusyId(null);
       }
     },
-    [academyId],
+    [academyId, refreshStudentPanel],
   );
 
   return (
@@ -1010,6 +1011,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
 
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold text-foreground">학생 관리</h2>
+        <AcademyPanelRefreshButton busy={listBusy} onRefreshAction={refreshStudentPanel} />
       </div>
 
       <div className="flex gap-2">

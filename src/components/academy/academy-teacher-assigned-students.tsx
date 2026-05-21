@@ -6,7 +6,6 @@ import {
   deleteField,
   doc,
   getDocs,
-  onSnapshot,
   query,
   serverTimestamp,
   updateDoc,
@@ -21,6 +20,7 @@ import {
   type TeacherRegistrationStatus,
 } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
+import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 
 const glassCard = "glass-card";
@@ -174,13 +174,13 @@ export function TeacherAssignedStudentsBlock({
   teacherId,
   teacherName,
   teacherStatus,
-  setNotice,
+  setNoticeAction,
 }: {
   academyId: string;
   teacherId: string;
   teacherName: string;
   teacherStatus: TeacherRegistrationStatus;
-  setNotice: (msg: string | null) => void;
+  setNoticeAction: (msg: string | null) => void;
 }) {
   const [assigned, setAssigned] = useState<StudentRowVM[]>([]);
   const [listError, setListError] = useState<string | null>(null);
@@ -194,54 +194,38 @@ export function TeacherAssignedStudentsBlock({
 
   const isActiveTeacher = teacherStatus === "active";
 
-  useEffect(() => {
+  const loadAssigned = useCallback(async () => {
     if (!isActiveTeacher) {
       setAssigned([]);
       return;
     }
-    const db = getFirebaseDb();
-    const studentsCol = collection(db, "academies", academyId, "students");
-    const qArr = query(studentsCol, where("assignedTeacherUids", "array-contains", teacherId));
-    const qLeg = query(studentsCol, where("assignedTeacherUid", "==", teacherId));
-
-    let fromArr: StudentRowVM[] = [];
-    let fromLeg: StudentRowVM[] = [];
-
-    const merge = () => {
+    try {
+      const db = getFirebaseDb();
+      const studentsCol = collection(db, "academies", academyId, "students");
+      const [arrSnap, legSnap] = await Promise.all([
+        getDocs(query(studentsCol, where("assignedTeacherUids", "array-contains", teacherId))),
+        getDocs(query(studentsCol, where("assignedTeacherUid", "==", teacherId))),
+      ]);
       const map = new Map<string, StudentRowVM>();
-      for (const s of fromArr) map.set(s.id, s);
-      for (const s of fromLeg) map.set(s.id, s);
+      for (const d of arrSnap.docs) {
+        map.set(d.id, docToStudentRow(d.id, d.data() as Record<string, unknown>));
+      }
+      for (const d of legSnap.docs) {
+        map.set(d.id, docToStudentRow(d.id, d.data() as Record<string, unknown>));
+      }
       setAssigned([...map.values()].sort(sortStudentsByName));
-    };
+      setListError(null);
+    } catch (err) {
+      setListError(err instanceof Error ? err.message : "목록을 불러오지 못했습니다.");
+      setAssigned([]);
+    }
+  }, [academyId, isActiveTeacher, teacherId]);
 
-    const unsubA = onSnapshot(
-      qArr,
-      (snap) => {
-        fromArr = snap.docs.map((d) =>
-          docToStudentRow(d.id, d.data() as Record<string, unknown>),
-        );
-        merge();
-        setListError(null);
-      },
-      (err) => setListError(err.message || "목록을 불러오지 못했습니다."),
-    );
-    const unsubL = onSnapshot(
-      qLeg,
-      (snap) => {
-        fromLeg = snap.docs.map((d) =>
-          docToStudentRow(d.id, d.data() as Record<string, unknown>),
-        );
-        merge();
-      },
-      () => {
-        /* 구 단일 필드 쿼리 실패 시 배열 쿼리 결과만 사용 */
-      },
-    );
-    return () => {
-      unsubA();
-      unsubL();
-    };
-  }, [academyId, teacherId, isActiveTeacher]);
+  const { refresh: refreshAssigned } = useAcademyListPoll(loadAssigned, [
+    academyId,
+    teacherId,
+    isActiveTeacher,
+  ]);
 
   const openAssignModal = useCallback(async () => {
     setAssignErr(null);
@@ -321,22 +305,23 @@ export function TeacherAssignedStudentsBlock({
         }
         await batch.commit();
       }
-      setNotice(`${selectedIds.size}명의 전담 선생님을 연결했습니다.`);
+      setNoticeAction(`${selectedIds.size}명의 전담 선생님을 연결했습니다.`);
       setAssignOpen(false);
       setSelectedIds(new Set());
+      refreshAssigned();
     } catch (e) {
       setAssignErr(fsErr(e));
     } finally {
       setAssignBusy(false);
     }
-  }, [academyId, allStudents, selectedIds, setNotice, teacherId]);
+  }, [academyId, allStudents, refreshAssigned, selectedIds, setNoticeAction, teacherId]);
 
   const unlinkStudent = useCallback(
     async (studentId: string) => {
       const s = assigned.find((x) => x.id === studentId);
       const next = (s?.assignedTeacherUids ?? []).filter((t) => t !== teacherId);
       setUnlinkBusyId(studentId);
-      setNotice(null);
+      setNoticeAction(null);
       try {
         const db = getFirebaseDb();
         await updateDoc(doc(db, "academies", academyId, "students", studentId), {
@@ -344,14 +329,15 @@ export function TeacherAssignedStudentsBlock({
           assignedTeacherUid: deleteField(),
           updatedAt: serverTimestamp(),
         });
-        setNotice("이 선생님과의 전담 연결을 해제했습니다.");
+        setNoticeAction("이 선생님과의 전담 연결을 해제했습니다.");
+        refreshAssigned();
       } catch (e) {
-        setNotice(fsErr(e));
+        setNoticeAction(fsErr(e));
       } finally {
         setUnlinkBusyId(null);
       }
     },
-    [academyId, assigned, setNotice, teacherId],
+    [academyId, assigned, refreshAssigned, setNoticeAction, teacherId],
   );
 
   if (!isActiveTeacher) {

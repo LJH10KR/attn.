@@ -9,7 +9,12 @@ import {
   AcademyTreemapFooter,
   type AcademyHeatmapItem,
 } from "@/components/academy/academy-treemap";
-import { COLLECTIONS, type Academy } from "@/lib/firebase/attn-schema";
+import {
+  ACADEMY_DASHBOARD_STATS_DOC_ID,
+  ACADEMY_DASHBOARD_STATS_SCHEMA_VERSION,
+  COLLECTIONS,
+  type Academy,
+} from "@/lib/firebase/attn-schema";
 import { signOut } from "firebase/auth";
 import { getFirebaseAuth, getFirebaseDb } from "@/lib/firebase/client-app";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
@@ -270,11 +275,21 @@ export function AcademyDashboard() {
     error: academyBellError,
     dismissOne: dismissAcademyBellOne,
     dismissAllVisible: dismissAcademyBellAll,
+    refresh: refreshAcademyBell,
   } = useAcademyDashboardBell(academyId);
 
   const fromOwner = searchParams.get("from") === "owner";
   const queryAcademyId = searchParams.get("id")?.trim() ?? "";
   const section = parseSection(searchParams.get("section"));
+
+  useEffect(() => {
+    if (notificationsOpen) refreshAcademyBell();
+  }, [notificationsOpen, refreshAcademyBell]);
+
+  useEffect(() => {
+    if (!academyId || section === "notifications") return;
+    refreshAcademyBell();
+  }, [academyId, section, refreshAcademyBell]);
 
   const navigateSection = useCallback(
     (s: AcademySection) => {
@@ -405,124 +420,126 @@ export function AcademyDashboard() {
     return () => unsub();
   }, [configured, resolveSession]);
 
+  const loadDashboardStatsFallback = useCallback(async () => {
+    if (gate !== "ready" || !academyId) return;
+    const db = getFirebaseDb();
+    const sub = (name: "teachers" | "parents" | "students") =>
+      collection(db, COLLECTIONS.academies, academyId, name);
+    try {
+      const [teachersSnap, parentsSnap, studentsSnap, stu, tp, tiNeed, tiSent, pp, piNeed, piSent] =
+        await Promise.all([
+          getCountFromServer(sub("teachers")),
+          getCountFromServer(sub("parents")),
+          getCountFromServer(sub("students")),
+          getCountFromServer(sub("students")),
+          getCountFromServer(
+            query(sub("teachers"), where("status", "==", "pending_registration")),
+          ),
+          getCountFromServer(
+            query(sub("teachers"), where("status", "==", "invitation_needed")),
+          ),
+          getCountFromServer(query(sub("teachers"), where("status", "==", "invitation_sent"))),
+          getCountFromServer(
+            query(sub("parents"), where("status", "==", "pending_registration")),
+          ),
+          getCountFromServer(
+            query(sub("parents"), where("status", "==", "invitation_needed")),
+          ),
+          getCountFromServer(query(sub("parents"), where("status", "==", "invitation_sent"))),
+        ]);
+      const heatmap: AcademyHeatmapCounts = {
+        students: stu.data().count,
+        teachersPending: tp.data().count,
+        teachersInviteNeeded: tiNeed.data().count,
+        teachersInviteSent: tiSent.data().count,
+        parentsPending: pp.data().count,
+        parentsInviteNeeded: piNeed.data().count,
+        parentsInviteSent: piSent.data().count,
+      };
+      setSummaryCounts({
+        teachers: teachersSnap.data().count,
+        parents: parentsSnap.data().count,
+        students: studentsSnap.data().count,
+      });
+      setSummaryCountsError(null);
+      setHeatmapItems(buildAcademyHeatmapItems(heatmap));
+      setHeatmapError(null);
+    } catch {
+      setSummaryCounts(null);
+      setSummaryCountsError("요약 인원을 불러오지 못했습니다.");
+      setHeatmapError("히트맵 데이터를 불러오지 못했습니다.");
+      setHeatmapItems(
+        buildAcademyHeatmapItems({
+          students: 0,
+          teachersPending: 0,
+          teachersInviteNeeded: 0,
+          teachersInviteSent: 0,
+          parentsPending: 0,
+          parentsInviteNeeded: 0,
+          parentsInviteSent: 0,
+        }),
+      );
+    }
+  }, [gate, academyId]);
+
+  const loadDashboardStats = useCallback(async () => {
+    if (gate !== "ready" || !academyId) return;
+    const db = getFirebaseDb();
+    try {
+      const snap = await getDoc(
+        doc(db, COLLECTIONS.academies, academyId, "meta", ACADEMY_DASHBOARD_STATS_DOC_ID),
+      );
+      const data = snap.data() as Record<string, unknown> | undefined;
+      if (
+        data &&
+        data.schemaVersion === ACADEMY_DASHBOARD_STATS_SCHEMA_VERSION &&
+        typeof data.teachers === "number" &&
+        typeof data.parents === "number" &&
+        typeof data.students === "number"
+      ) {
+        const heatmap: AcademyHeatmapCounts = {
+          students: data.students as number,
+          teachersPending: (data.teachersPending as number) ?? 0,
+          teachersInviteNeeded: (data.teachersInviteNeeded as number) ?? 0,
+          teachersInviteSent: (data.teachersInviteSent as number) ?? 0,
+          parentsPending: (data.parentsPending as number) ?? 0,
+          parentsInviteNeeded: (data.parentsInviteNeeded as number) ?? 0,
+          parentsInviteSent: (data.parentsInviteSent as number) ?? 0,
+        };
+        setSummaryCounts({
+          teachers: data.teachers as number,
+          parents: data.parents as number,
+          students: data.students as number,
+        });
+        setSummaryCountsError(null);
+        setHeatmapItems(buildAcademyHeatmapItems(heatmap));
+        setHeatmapError(null);
+        return;
+      }
+    } catch {
+      /* meta 문서 없음·권한 — fallback */
+    }
+    await loadDashboardStatsFallback();
+  }, [gate, academyId, loadDashboardStatsFallback]);
+
   useEffect(() => {
     if (gate !== "ready" || !academyId) {
       setSummaryCounts(null);
       setSummaryCountsError(null);
       return;
     }
-    let cancelled = false;
-    setSummaryCountsError(null);
-    const db = getFirebaseDb();
-    (async () => {
-      try {
-        const [teachersSnap, parentsSnap, studentsSnap] = await Promise.all([
-          getCountFromServer(
-            collection(db, COLLECTIONS.academies, academyId, "teachers"),
-          ),
-          getCountFromServer(
-            collection(db, COLLECTIONS.academies, academyId, "parents"),
-          ),
-          getCountFromServer(
-            collection(db, COLLECTIONS.academies, academyId, "students"),
-          ),
-        ]);
-        if (!cancelled) {
-          setSummaryCounts({
-            teachers: teachersSnap.data().count,
-            parents: parentsSnap.data().count,
-            students: studentsSnap.data().count,
-          });
-        }
-      } catch {
-        if (!cancelled) {
-          setSummaryCounts(null);
-          setSummaryCountsError("요약 인원을 불러오지 못했습니다.");
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [gate, academyId, section]);
+    void loadDashboardStats();
+  }, [gate, academyId, loadDashboardStats]);
 
   useEffect(() => {
-    if (gate !== "ready" || !academyId || section !== "home") {
-      return;
-    }
-    let cancelled = false;
-    setHeatmapError(null);
-    const db = getFirebaseDb();
-    const sub = (name: "teachers" | "parents" | "students") =>
-      collection(db, COLLECTIONS.academies, academyId, name);
-    (async () => {
-      try {
-        const [stu, tp, tiNeed, tiSent, pp, piNeed, piSent] = await Promise.all(
-          [
-            getCountFromServer(sub("students")),
-            getCountFromServer(
-              query(
-                sub("teachers"),
-                where("status", "==", "pending_registration"),
-              ),
-            ),
-            getCountFromServer(
-              query(
-                sub("teachers"),
-                where("status", "==", "invitation_needed"),
-              ),
-            ),
-            getCountFromServer(
-              query(sub("teachers"), where("status", "==", "invitation_sent")),
-            ),
-            getCountFromServer(
-              query(
-                sub("parents"),
-                where("status", "==", "pending_registration"),
-              ),
-            ),
-            getCountFromServer(
-              query(sub("parents"), where("status", "==", "invitation_needed")),
-            ),
-            getCountFromServer(
-              query(sub("parents"), where("status", "==", "invitation_sent")),
-            ),
-          ],
-        );
-        if (!cancelled) {
-          setHeatmapItems(
-            buildAcademyHeatmapItems({
-              students: stu.data().count,
-              teachersPending: tp.data().count,
-              teachersInviteNeeded: tiNeed.data().count,
-              teachersInviteSent: tiSent.data().count,
-              parentsPending: pp.data().count,
-              parentsInviteNeeded: piNeed.data().count,
-              parentsInviteSent: piSent.data().count,
-            }),
-          );
-        }
-      } catch {
-        if (!cancelled) {
-          setHeatmapError("히트맵 데이터를 불러오지 못했습니다.");
-          setHeatmapItems(
-            buildAcademyHeatmapItems({
-              students: 0,
-              teachersPending: 0,
-              teachersInviteNeeded: 0,
-              teachersInviteSent: 0,
-              parentsPending: 0,
-              parentsInviteNeeded: 0,
-              parentsInviteSent: 0,
-            }),
-          );
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
+    if (gate !== "ready" || !academyId) return;
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      void loadDashboardStats();
     };
-  }, [gate, academyId, section]);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [gate, academyId, loadDashboardStats]);
 
   if (!configured) {
     return (

@@ -261,6 +261,12 @@ export {
   adminReconcileActivationMirrors,
   listAdminUserDirectory,
 } from "./admin-directory";
+export {
+  adminReconcileAcademyDashboardMeta,
+  onAcademyParentDashboardMetaWritten,
+  onAcademyStudentDashboardMetaWritten,
+  onAcademyTeacherDashboardMetaWritten,
+} from "./academy-dashboard-meta";
 export { openShortAuthLink } from "./auth-short-links";
 export { sendOwnerSignupVerificationEmail } from "./owner-auth-mail";
 export {

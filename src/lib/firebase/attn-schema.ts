@@ -32,6 +32,51 @@ export function academyStudentsPath(academyId: string) {
   return `${academyPath(academyId)}/students`;
 }
 
+/** `academies/{academyId}/meta/dashboardStats` — Functions 집계, 클라이언트 읽기 전용 */
+export const ACADEMY_DASHBOARD_STATS_DOC_ID = "dashboardStats" as const;
+
+export const ACADEMY_DASHBOARD_STATS_SCHEMA_VERSION = 1 as const;
+
+export type AcademyDashboardStatsDoc = {
+  schemaVersion: typeof ACADEMY_DASHBOARD_STATS_SCHEMA_VERSION;
+  teachers: number;
+  parents: number;
+  students: number;
+  teachersPending: number;
+  teachersInviteNeeded: number;
+  teachersInviteSent: number;
+  parentsPending: number;
+  parentsInviteNeeded: number;
+  parentsInviteSent: number;
+  updatedAt: Timestamp;
+};
+
+export function academyDashboardStatsPath(academyId: string): string {
+  return `${academyPath(academyId)}/meta/${ACADEMY_DASHBOARD_STATS_DOC_ID}`;
+}
+
+/** `academies/{academyId}/adminInbox/{inboxId}` — 운영 알림(벨) */
+export const ACADEMY_ADMIN_INBOX_SCHEMA_VERSION = 1 as const;
+
+export type AcademyAdminInboxKind = "pending_registration" | "invitation_sent";
+
+export type AcademyAdminInboxDoc = {
+  schemaVersion: typeof ACADEMY_ADMIN_INBOX_SCHEMA_VERSION;
+  kind: AcademyAdminInboxKind;
+  entityType: "teacher" | "parent";
+  entityId: string;
+  displayName: string;
+  email: string;
+  invitedAt?: Timestamp | null;
+  invitationExpiresAt?: Timestamp | null;
+  createdAt: Timestamp;
+  updatedAt?: Timestamp;
+};
+
+export function academyAdminInboxCollectionPath(academyId: string): string {
+  return `${academyPath(academyId)}/adminInbox`;
+}
+
 /** 학원 포털 비밀번호 — `secrets/login` 문서, 클라이언트 규칙으로 읽기 불가 */
 export function academySecretsLoginPath(academyId: string) {
   return `${academyPath(academyId)}/secrets/login`;

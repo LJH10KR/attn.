@@ -115,6 +115,9 @@ export default function AdminSeedPage() {
   const [directorySearch, setDirectorySearch] = useState("");
   const [memberDeleteKey, setMemberDeleteKey] = useState<string | null>(null);
   const [cascadeBusyAcademyId, setCascadeBusyAcademyId] = useState<string | null>(null);
+  const [metaReconcileBusyAcademyId, setMetaReconcileBusyAcademyId] = useState<string | null>(
+    null,
+  );
   const [adminLogAcademyId, setAdminLogAcademyId] = useState("");
 
   useEffect(() => {
@@ -335,6 +338,26 @@ export default function AdminSeedPage() {
       setDeleteBusy(false);
     }
   }, [deleteSeedBatchId, functions, refreshBatches, refreshDirectory]);
+
+  const onReconcileDashboardMeta = useCallback(
+    async (academyId: string, academyName: string) => {
+      const ok = window.confirm(
+        `학원「${academyName || academyId}」의 대시보드 집계(stats)·알림 inbox를 다시 계산합니다. 진행할까요?`,
+      );
+      if (!ok) return;
+      setMetaReconcileBusyAcademyId(academyId);
+      try {
+        const fn = httpsCallable(functions, "adminReconcileAcademyDashboardMeta");
+        await fn({ academyId });
+        window.alert("대시보드 메타를 갱신했습니다.");
+      } catch (err) {
+        window.alert(getErrorMessage(err));
+      } finally {
+        setMetaReconcileBusyAcademyId(null);
+      }
+    },
+    [functions],
+  );
 
   const onCascadeDeleteAcademy = useCallback(
     async (academyId: string, academyName: string) => {
@@ -561,18 +584,40 @@ export default function AdminSeedPage() {
                             선생님 {a.teachers.length}명 · 학부모 {a.parents.length}명
                           </p>
                         </div>
-                        <button
-                          type="button"
-                          className="rounded-xl bg-red-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-red-700 disabled:opacity-50"
-                          disabled={cascadeBusyAcademyId === a.academyId}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            void onCascadeDeleteAcademy(a.academyId, a.name);
-                          }}
-                        >
-                          {cascadeBusyAcademyId === a.academyId ? "삭제 중…" : "학원 전체 삭제"}
-                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            className="rounded-xl border border-neutral-300/80 bg-white/70 px-3 py-1.5 text-[11px] font-medium text-neutral-800 hover:bg-white disabled:opacity-50 dark:border-white/12 dark:bg-white/[0.08] dark:text-neutral-200"
+                            disabled={
+                              metaReconcileBusyAcademyId === a.academyId ||
+                              cascadeBusyAcademyId === a.academyId
+                            }
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              void onReconcileDashboardMeta(a.academyId, a.name);
+                            }}
+                          >
+                            {metaReconcileBusyAcademyId === a.academyId
+                              ? "갱신 중…"
+                              : "대시보드 메타 갱신"}
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-xl bg-red-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                            disabled={
+                              cascadeBusyAcademyId === a.academyId ||
+                              metaReconcileBusyAcademyId === a.academyId
+                            }
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              void onCascadeDeleteAcademy(a.academyId, a.name);
+                            }}
+                          >
+                            {cascadeBusyAcademyId === a.academyId ? "삭제 중…" : "학원 전체 삭제"}
+                          </button>
+                        </div>
                       </div>
                     </summary>
                     <div className="space-y-4 border-t border-neutral-200/80 px-3 py-3 dark:border-white/10">

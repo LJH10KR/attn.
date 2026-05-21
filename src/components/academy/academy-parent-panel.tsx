@@ -5,7 +5,7 @@ import {
   addDoc,
   collection,
   getCountFromServer,
-  onSnapshot,
+  getDocs,
   orderBy,
   query,
   serverTimestamp,
@@ -22,6 +22,8 @@ import {
 } from "@/lib/firebase/attn-schema";
 import { AcademyParentStudentList } from "@/components/academy/academy-student-panel";
 import { getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
+import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 
 const glassCard = "glass-card";
@@ -398,6 +400,7 @@ type RowActionsProps = {
   busyKey: string | null;
   setBusyKey: (k: string | null) => void;
   setNotice: (m: string | null) => void;
+  onListRefresh: () => void;
 };
 
 function ParentRowActions({
@@ -406,6 +409,7 @@ function ParentRowActions({
   busyKey,
   setBusyKey,
   setNotice,
+  onListRefresh,
 }: RowActionsProps) {
   const fn = getFirebaseFunctions();
   const k = (action: string) => `${row.id}:${action}`;
@@ -517,6 +521,7 @@ function ParentRowActions({
     try {
       await exec();
       setNotice(`${name} 처리되었습니다.`);
+      onListRefresh();
     } catch (e) {
       setNotice(callableErr(e));
     } finally {
@@ -533,6 +538,7 @@ function ParentRowActions({
         await del({ academyId, parentId: row.id });
         setNotice("삭제 처리되었습니다.");
         setDeleteConfirmOpen(false);
+        onListRefresh();
       } catch (e) {
         setNotice(callableErr(e));
       } finally {
@@ -787,24 +793,21 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
 
-  useEffect(() => {
+  const loadParentsList = useCallback(async () => {
     const db = getFirebaseDb();
     const qy = query(
       collection(db, "academies", academyId, "parents"),
       orderBy("createdAt", "desc"),
     );
-    const unsub = onSnapshot(
-      qy,
-      (snap) => {
-        setListError(null);
-        setRows(
-          snap.docs.map((d) => docToRow(d.id, d.data() as Record<string, unknown>)),
-        );
-      },
-      (err) => setListError(err.message || "목록을 불러오지 못했습니다."),
-    );
-    return () => unsub();
+    const snap = await getDocs(qy);
+    setListError(null);
+    setRows(snap.docs.map((d) => docToRow(d.id, d.data() as Record<string, unknown>)));
   }, [academyId]);
+
+  const { refresh: refreshParentsList, busy: listBusy } = useAcademyListPoll(
+    loadParentsList,
+    [academyId],
+  );
 
   useEffect(() => {
     setSelected((prev) => new Set([...prev].filter((id) => rows.some((r) => r.id === id))));
@@ -884,12 +887,21 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
       setFormChildrenCount("0");
       setFormPhone("");
       setNotice("학부모가 초청 필요 상태로 등록되었습니다.");
+      refreshParentsList();
     } catch (e) {
       setFormError(callableErr(e));
     } finally {
       setFormBusy(false);
     }
-  }, [academyId, formEmail, formName, formPhone, formEmergencyContact, formChildrenCount]);
+  }, [
+    academyId,
+    formEmail,
+    formName,
+    formPhone,
+    formEmergencyContact,
+    formChildrenCount,
+    refreshParentsList,
+  ]);
 
   const onBulkInvite = useCallback(async () => {
     if (inviteSelectedCount === 0) {
@@ -910,12 +922,13 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
       }
       setSelected(new Set());
       setNotice(`${ids.length}명에게 초청 메일을 발송했습니다.`);
+      refreshParentsList();
     } catch (e) {
       setNotice(callableErr(e));
     } finally {
       setBulkBusy(false);
     }
-  }, [academyId, inviteSelectedCount, rows, selected]);
+  }, [academyId, inviteSelectedCount, rows, selected, refreshParentsList]);
 
   return (
     <div className="space-y-4">
@@ -932,16 +945,19 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
 
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold text-foreground">학부모 관리</h2>
-        <button
-          type="button"
-          onClick={() => {
-            setFormError(null);
-            setRegisterOpen(true);
-          }}
-          className="shrink-0 rounded-full bg-[#222] dark:bg-neutral-100 px-3.5 py-2 text-xs font-medium text-white dark:text-neutral-950 shadow-sm hover:bg-[#333] dark:hover:bg-white"
-        >
-          + 학부모 등록
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <AcademyPanelRefreshButton busy={listBusy} onRefreshAction={refreshParentsList} />
+          <button
+            type="button"
+            onClick={() => {
+              setFormError(null);
+              setRegisterOpen(true);
+            }}
+            className="rounded-full bg-[#222] dark:bg-neutral-100 px-3.5 py-2 text-xs font-medium text-white dark:text-neutral-950 shadow-sm hover:bg-[#333] dark:hover:bg-white"
+          >
+            + 학부모 등록
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-2">
@@ -1065,6 +1081,7 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
                       busyKey={busyKey}
                       setBusyKey={setBusyKey}
                       setNotice={setNotice}
+                      onListRefresh={refreshParentsList}
                     />
                   </div>
                 ) : null}

@@ -1,35 +1,28 @@
 "use client";
 
-import {
-  collection,
-  onSnapshot,
-  query,
-  Timestamp,
-  where,
-} from "firebase/firestore";
+import { collection, getDocs, Timestamp } from "firebase/firestore";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DashboardNotificationRow } from "@/components/dashboard/dashboard-notifications-modal";
 import {
-  COLLECTIONS,
+  ACADEMY_ADMIN_INBOX_SCHEMA_VERSION,
+  academyAdminInboxCollectionPath,
   PARENT_INVITE_TTL_MS,
   TEACHER_INVITE_TTL_MS,
-  type ParentRegistrationStatus,
-  type TeacherRegistrationStatus,
+  type AcademyAdminInboxDoc,
 } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
+import { useDashboardRefetchOnFocus } from "@/lib/firebase/use-dashboard-refetch-on-focus";
 
 function readTs(v: unknown): Timestamp | undefined {
   return v instanceof Timestamp ? v : undefined;
 }
 
 function inviteExpired(
-  status: TeacherRegistrationStatus | ParentRegistrationStatus,
   invitedAt: Timestamp | undefined,
   invitationExpiresAt: Timestamp | undefined,
   ttlMs: number,
   now: number,
 ): boolean {
-  if (status !== "invitation_sent") return false;
   let exp = invitationExpiresAt;
   if (!exp && invitedAt) {
     exp = Timestamp.fromMillis(invitedAt.toMillis() + ttlMs);
@@ -38,12 +31,11 @@ function inviteExpired(
   return exp.toMillis() <= now;
 }
 
-function mapTeacherDoc(
-  id: string,
-  data: Record<string, unknown>,
-  now: number,
-): DashboardNotificationRow[] {
-  const status = (data.status as TeacherRegistrationStatus) || "invitation_needed";
+function mapInboxDoc(id: string, data: Record<string, unknown>, now: number): DashboardNotificationRow[] {
+  if (data.schemaVersion !== ACADEMY_ADMIN_INBOX_SCHEMA_VERSION) return [];
+
+  const kind = data.kind as AcademyAdminInboxDoc["kind"];
+  const entityType = data.entityType as AcademyAdminInboxDoc["entityType"];
   const name =
     typeof data.displayName === "string" && data.displayName.trim()
       ? data.displayName.trim()
@@ -51,55 +43,32 @@ function mapTeacherDoc(
   const email = typeof data.email === "string" ? data.email : "";
   const invitedAt = readTs(data.invitedAt);
   const invitationExpiresAt = readTs(data.invitationExpiresAt);
-  const rows: DashboardNotificationRow[] = [];
+  const ttlMs = entityType === "teacher" ? TEACHER_INVITE_TTL_MS : PARENT_INVITE_TTL_MS;
+  const roleLabel = entityType === "teacher" ? "선생님" : "학부모";
 
-  if (status === "pending_registration") {
-    rows.push({
-      id: `t-pending-${id}`,
-      title: `선생님 최종 등록 대기: ${name}`,
-      detail: email ? email : undefined,
-    });
+  if (kind === "pending_registration") {
+    return [
+      {
+        id,
+        title: `${roleLabel} 최종 등록 대기: ${name}`,
+        detail: email || undefined,
+      },
+    ];
   }
-  if (inviteExpired(status, invitedAt, invitationExpiresAt, TEACHER_INVITE_TTL_MS, now)) {
-    rows.push({
-      id: `t-expired-${id}`,
-      title: `선생님 초청 만료: ${name}`,
-      detail: email ? `${email} · 초청 재발송이 필요합니다` : "초청 재발송이 필요합니다",
-    });
-  }
-  return rows;
-}
 
-function mapParentDoc(
-  id: string,
-  data: Record<string, unknown>,
-  now: number,
-): DashboardNotificationRow[] {
-  const status = (data.status as ParentRegistrationStatus) || "invitation_needed";
-  const name =
-    typeof data.displayName === "string" && data.displayName.trim()
-      ? data.displayName.trim()
-      : "이름 미입력";
-  const email = typeof data.email === "string" ? data.email : "";
-  const invitedAt = readTs(data.invitedAt);
-  const invitationExpiresAt = readTs(data.invitationExpiresAt);
-  const rows: DashboardNotificationRow[] = [];
+  if (kind === "invitation_sent") {
+    if (inviteExpired(invitedAt, invitationExpiresAt, ttlMs, now)) {
+      return [
+        {
+          id,
+          title: `${roleLabel} 초청 만료: ${name}`,
+          detail: email ? `${email} · 초청 재발송이 필요합니다` : "초청 재발송이 필요합니다",
+        },
+      ];
+    }
+  }
 
-  if (status === "pending_registration") {
-    rows.push({
-      id: `p-pending-${id}`,
-      title: `학부모 최종 등록 대기: ${name}`,
-      detail: email ? email : undefined,
-    });
-  }
-  if (inviteExpired(status, invitedAt, invitationExpiresAt, PARENT_INVITE_TTL_MS, now)) {
-    rows.push({
-      id: `p-expired-${id}`,
-      title: `학부모 초청 만료: ${name}`,
-      detail: email ? `${email} · 초청 재발송이 필요합니다` : "초청 재발송이 필요합니다",
-    });
-  }
-  return rows;
+  return [];
 }
 
 function dismissedStorageKey(academyId: string): string {
@@ -128,17 +97,17 @@ function saveDismissed(academyId: string, set: Set<string>): void {
   }
 }
 
+/** 초청 만료 판정용 클라이언트 시계 — inbox `invitation_sent` 항목 표시용 */
+const BELL_EXPIRY_TICK_MS = 60_000;
+
 /**
- * 학원 대시보드 알림벨 — 초청 만료·최종 등록 대기(선생님/학부모).
- * 삭제는 Firestore 문서가 아니라 로컬 가림(dismiss)입니다.
+ * 학원 대시보드 알림벨 — `adminInbox` (Functions 유지) 기반.
+ * Firestore는 마운트·탭 복귀·`refresh()`(모달 열기 등) 시에만 조회합니다.
  */
 export function useAcademyDashboardBell(academyId: string | null) {
-  const [teacherDocs, setTeacherDocs] = useState<
-    { id: string; data: Record<string, unknown> }[]
-  >([]);
-  const [parentDocs, setParentDocs] = useState<
-    { id: string; data: Record<string, unknown> }[]
-  >([]);
+  const [inboxDocs, setInboxDocs] = useState<{ id: string; data: Record<string, unknown> }[]>(
+    [],
+  );
   const [error, setError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
@@ -146,7 +115,7 @@ export function useAcademyDashboardBell(academyId: string | null) {
   const rawItemsRef = useRef<DashboardNotificationRow[]>([]);
 
   useEffect(() => {
-    const id = window.setInterval(() => setNowMs(Date.now()), 60_000);
+    const id = window.setInterval(() => setNowMs(Date.now()), BELL_EXPIRY_TICK_MS);
     return () => window.clearInterval(id);
   }, []);
 
@@ -158,64 +127,40 @@ export function useAcademyDashboardBell(academyId: string | null) {
     setDismissed(loadDismissed(academyId));
   }, [academyId]);
 
-  useEffect(() => {
+  const loadBellInbox = useCallback(async () => {
     if (!academyId) {
-      setTeacherDocs([]);
-      setParentDocs([]);
+      setInboxDocs([]);
       setError(null);
       return;
     }
-    const db = getFirebaseDb();
-    const statuses = ["pending_registration", "invitation_sent"] as const;
-    const tq = query(
-      collection(db, COLLECTIONS.academies, academyId, "teachers"),
-      where("status", "in", [...statuses]),
-    );
-    const pq = query(
-      collection(db, COLLECTIONS.academies, academyId, "parents"),
-      where("status", "in", [...statuses]),
-    );
-
-    const unsubT = onSnapshot(
-      tq,
-      (snap) => {
-        setError(null);
-        setTeacherDocs(snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> })));
-      },
-      (err) => {
-        setError(err.message || "알림을 불러오지 못했습니다.");
-        setTeacherDocs([]);
-      },
-    );
-    const unsubP = onSnapshot(
-      pq,
-      (snap) => {
-        setError(null);
-        setParentDocs(snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> })));
-      },
-      (err) => {
-        setError(err.message || "알림을 불러오지 못했습니다.");
-        setParentDocs([]);
-      },
-    );
-    return () => {
-      unsubT();
-      unsubP();
-    };
+    try {
+      const db = getFirebaseDb();
+      const snap = await getDocs(collection(db, academyAdminInboxCollectionPath(academyId)));
+      setError(null);
+      setInboxDocs(
+        snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> })),
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "알림을 불러오지 못했습니다.";
+      setError(msg);
+      setInboxDocs([]);
+    }
   }, [academyId]);
+
+  const { refresh } = useDashboardRefetchOnFocus(loadBellInbox, [academyId], {
+    pollMs: 0,
+    loadOnMount: Boolean(academyId),
+  });
 
   const rawItems = useMemo(() => {
     const now = nowMs;
     const out: DashboardNotificationRow[] = [];
-    for (const d of teacherDocs) {
-      out.push(...mapTeacherDoc(d.id, d.data, now));
-    }
-    for (const d of parentDocs) {
-      out.push(...mapParentDoc(d.id, d.data, now));
+    for (const d of inboxDocs) {
+      out.push(...mapInboxDoc(d.id, d.data, now));
     }
     out.sort((a, b) => a.title.localeCompare(b.title, "ko"));
     return out;
-  }, [teacherDocs, parentDocs, nowMs]);
+  }, [inboxDocs, nowMs]);
 
   rawItemsRef.current = rawItems;
 
@@ -269,5 +214,12 @@ export function useAcademyDashboardBell(academyId: string | null) {
     });
   }, [academyId]);
 
-  return { items, error, count: items.length, dismissOne, dismissAllVisible };
+  return {
+    items,
+    error,
+    count: items.length,
+    dismissOne,
+    dismissAllVisible,
+    refresh,
+  };
 }
