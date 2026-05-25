@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { formatDashboardBellBadge } from "@/components/dashboard/dashboard-notifications-modal";
 
 const TOP_OUTER_PT = "pt-[max(0.85rem,env(safe-area-inset-top))]";
@@ -30,14 +31,16 @@ function BellIcon() {
 export type DashboardTopHeaderProps = {
   title: string;
   showBack?: boolean;
-  onBack?: () => void;
+  onBackAction?: () => void;
   backAriaLabel?: string;
   backHint?: string;
-  onBellClick?: () => void;
+  onBellClickAction?: () => void;
   /** false이면 알림 버튼을 숨깁니다. */
   showBell?: boolean;
   /** 0보다 크면 벨 아이콘에 배지로 표시 */
   bellBadgeCount?: number;
+  /** 알림 벨 왼쪽에 배치할 액션(예: 키오스크 토글) */
+  beforeBell?: ReactNode;
 };
 
 /**
@@ -47,12 +50,13 @@ export type DashboardTopHeaderProps = {
 export function DashboardTopHeader({
   title,
   showBack = false,
-  onBack,
+  onBackAction,
   backAriaLabel = "뒤로 가기",
   backHint,
-  onBellClick,
+  onBellClickAction,
   showBell = true,
   bellBadgeCount = 0,
+  beforeBell,
 }: DashboardTopHeaderProps) {
   return (
     <header
@@ -65,7 +69,7 @@ export function DashboardTopHeader({
             {showBack ? (
               <button
                 type="button"
-                onClick={onBack}
+                onClick={onBackAction}
                 aria-label={backAriaLabel}
                 className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-transparent text-foreground transition hover:bg-black/[0.05] dark:hover:bg-white/10"
               >
@@ -84,23 +88,26 @@ export function DashboardTopHeader({
               {title}
             </h1>
           </div>
-          {showBell ? (
-            <button
-              type="button"
-              onClick={() => onBellClick?.()}
-              className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-foreground transition hover:bg-black/[0.05] dark:hover:bg-white/10"
-              aria-label={
-                bellBadgeCount > 0 ? `알림 ${bellBadgeCount}건` : "알림"
-              }
-            >
-              <BellIcon />
-              {bellBadgeCount > 0 ? (
-                <span className="absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white shadow-sm">
-                  {formatDashboardBellBadge(bellBadgeCount)}
-                </span>
-              ) : null}
-            </button>
-          ) : null}
+          <div className="flex shrink-0 items-center gap-1">
+            {beforeBell}
+            {showBell ? (
+              <button
+                type="button"
+                onClick={() => onBellClickAction?.()}
+                className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-foreground transition hover:bg-black/[0.05] dark:hover:bg-white/10"
+                aria-label={
+                  bellBadgeCount > 0 ? `알림 ${bellBadgeCount}건` : "알림"
+                }
+              >
+                <BellIcon />
+                {bellBadgeCount > 0 ? (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white shadow-sm">
+                    {formatDashboardBellBadge(bellBadgeCount)}
+                  </span>
+                ) : null}
+              </button>
+            ) : null}
+          </div>
         </div>
         {showBack && backHint ? (
           <p className="mt-1 pl-11 text-xs text-neutral-500 dark:text-neutral-400">

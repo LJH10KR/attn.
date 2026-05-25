@@ -6,6 +6,7 @@ import * as logger from "firebase-functions/logger";
 import * as nodemailer from "nodemailer";
 import { createShortAuthLink, getAppOrigin } from "./auth-short-links";
 import { reconcileUserActivationMirror } from "./user-activation-mirror";
+import { getRequireStudentCheckInPin } from "./kiosk";
 
 type ParentStatus =
   | "invitation_needed"
@@ -385,7 +386,14 @@ function parentDocAcademyId(ref: admin.firestore.DocumentReference): string | nu
   return m ? m[1] : null;
 }
 
-function serializeStudentDocForCallable(d: QueryDocumentSnapshot): {
+function studentCheckInSecretPath(academyId: string, studentId: string): string {
+  return `academies/${academyId}/students/${studentId}/serverSecrets/checkIn`;
+}
+
+function serializeStudentDocForCallable(
+  d: QueryDocumentSnapshot,
+  opts?: { hasCheckInPin?: boolean },
+): {
   id: string;
   parentUserId: string;
   name: string;
@@ -395,6 +403,7 @@ function serializeStudentDocForCallable(d: QueryDocumentSnapshot): {
   assignedTeacherUids: string[];
   assignedTeacherUid: string | null;
   createdAtMillis: number | null;
+  hasCheckInPin?: boolean;
 } {
   const data = d.data();
   const createdAt = data.createdAt as Timestamp | undefined;
@@ -417,6 +426,7 @@ function serializeStudentDocForCallable(d: QueryDocumentSnapshot): {
     assignedTeacherUid:
       typeof legacyUid === "string" && legacyUid.length > 0 ? legacyUid : null,
     createdAtMillis,
+    ...(opts?.hasCheckInPin !== undefined ? { hasCheckInPin: opts.hasCheckInPin } : {}),
   };
 }
 
@@ -537,9 +547,23 @@ export const listParentChildrenStudents = onCall(
 
     const col = db.collection(`academies/${academyId}/students`);
     const snap = await col.where("parentUserId", "==", uid).get();
-    const students = snap.docs.map((d) => serializeStudentDocForCallable(d));
+    const requireStudentCheckInPin = await getRequireStudentCheckInPin(db, academyId);
 
-    return { ok: true as const, students };
+    const pinSnaps = await Promise.all(
+      snap.docs.map((d) => db.doc(studentCheckInSecretPath(academyId, d.id)).get()),
+    );
+    const students = snap.docs.map((d, i) => {
+      const pinSnap = pinSnaps[i];
+      const hasCheckInPin =
+        typeof pinSnap?.get("pinHash") === "string" && (pinSnap.get("pinHash") as string).length > 0;
+      return serializeStudentDocForCallable(d, { hasCheckInPin });
+    });
+
+    return {
+      ok: true as const,
+      students,
+      kiosk: { requireStudentCheckInPin },
+    };
   },
 );
 

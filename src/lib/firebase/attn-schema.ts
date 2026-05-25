@@ -55,6 +55,19 @@ export function academyDashboardStatsPath(academyId: string): string {
   return `${academyPath(academyId)}/meta/${ACADEMY_DASHBOARD_STATS_DOC_ID}`;
 }
 
+/** `academies/{academyId}/meta/kioskSettings` — 출석 키오스크(Functions 전용 쓰기) */
+export const ACADEMY_KIOSK_SETTINGS_DOC_ID = "kioskSettings" as const;
+
+export type AcademyKioskSettingsPublic = {
+  requireStudentCheckInPin: boolean;
+  exitPinConfigured: boolean;
+  exitPinLocked: boolean;
+};
+
+export function academyKioskSettingsPath(academyId: string): string {
+  return `${academyPath(academyId)}/meta/${ACADEMY_KIOSK_SETTINGS_DOC_ID}`;
+}
+
 /** `academies/{academyId}/adminInbox/{inboxId}` — 운영 알림(벨) */
 export const ACADEMY_ADMIN_INBOX_SCHEMA_VERSION = 1 as const;
 

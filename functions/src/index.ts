@@ -267,6 +267,13 @@ export {
   onAcademyStudentDashboardMetaWritten,
   onAcademyTeacherDashboardMetaWritten,
 } from "./academy-dashboard-meta";
+export {
+  getAcademyKioskSettings,
+  updateAcademyKioskSettings,
+  verifyKioskExitPin,
+  submitKioskCheckIn,
+  setStudentCheckInPin,
+} from "./kiosk";
 export { openShortAuthLink } from "./auth-short-links";
 export { sendOwnerSignupVerificationEmail } from "./owner-auth-mail";
 export {

@@ -33,6 +33,7 @@ type DashboardRoleHeaderProps = {
   showBellOnTitle?: boolean;
   showBellInBottomBar?: boolean;
   bellBadgeCount?: number;
+  beforeBell?: ReactNode;
   bottomTabs?: DashboardBottomNavTab[];
   includeSettingsAction?: boolean;
   onSettingsAction?: () => void;
@@ -57,6 +58,7 @@ export function DashboardRoleHeader({
   showBellOnTitle = false,
   showBellInBottomBar = true,
   bellBadgeCount = 0,
+  beforeBell,
   bottomTabs,
   includeSettingsAction = false,
   onSettingsAction,
@@ -111,12 +113,13 @@ export function DashboardRoleHeader({
       <DashboardTopHeader
         title={title}
         showBack={showBack}
-        onBack={onBackAction}
+        onBackAction={onBackAction}
         backAriaLabel={backAriaLabel}
         backHint={backHint}
-        onBellClick={onBellClickAction}
+        onBellClickAction={onBellClickAction}
         showBell={showBellOnTitle}
         bellBadgeCount={bellBadgeCount}
+        beforeBell={beforeBell}
       />
       <DashboardTopHeaderSpacer
         showSubline={Boolean(showBack && backHint)}

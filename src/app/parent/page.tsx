@@ -15,6 +15,7 @@ import { DashboardNotificationsModal } from "@/components/dashboard/dashboard-no
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { RoleDashboardBootShell } from "@/components/dashboard/role-dashboard-boot-shell";
 import { StudentListSectionSkeleton } from "@/components/dashboard/student-list-section-skeleton";
+import { ParentCheckInPinCard } from "@/components/parent/parent-check-in-pin-card";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
 import {
   getFirebaseAuth,
@@ -55,6 +56,12 @@ type CallableStudentPayload = {
   assignedTeacherUids?: string[];
   assignedTeacherUid?: string | null;
   createdAtMillis?: number | null;
+  hasCheckInPin?: boolean;
+};
+
+type ParentListPayload = {
+  students?: CallableStudentPayload[];
+  kiosk?: { requireStudentCheckInPin?: boolean };
 };
 
 function studentRowFromCallablePayload(
@@ -94,6 +101,10 @@ export default function ParentDashboardPage() {
   const [iosAutoModalOpen, setIosAutoModalOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [listInitialLoading, setListInitialLoading] = useState(false);
+  const [kioskRequirePin, setKioskRequirePin] = useState(false);
+  const [studentsWithPinMeta, setStudentsWithPinMeta] = useState<
+    (StudentRowVM & { hasCheckInPin?: boolean })[]
+  >([]);
 
   const {
     items: parentBellItems,
@@ -204,15 +215,18 @@ export default function ParentDashboardPage() {
             return;
           }
 
-          const payload = listRes.data as {
-            students?: CallableStudentPayload[];
-          };
+          const payload = listRes.data as ParentListPayload;
           const rawList = Array.isArray(payload?.students)
             ? payload.students
             : [];
-          const list = rawList.map((s) => studentRowFromCallablePayload(s));
+          const list = rawList.map((s) => ({
+            ...studentRowFromCallablePayload(s),
+            hasCheckInPin: s.hasCheckInPin === true,
+          }));
           list.sort(sortByName);
           setStudents(list);
+          setStudentsWithPinMeta(list);
+          setKioskRequirePin(payload?.kiosk?.requireStudentCheckInPin === true);
           setListError(null);
           parentListLoadedUidRef.current = uid;
         } catch {
@@ -309,11 +323,16 @@ export default function ParentDashboardPage() {
         await user.getIdToken(true);
         listRes = await listFn({ academyId: aid });
       }
-      const payload = listRes.data as { students?: CallableStudentPayload[] };
+      const payload = listRes.data as ParentListPayload;
       const rawList = Array.isArray(payload?.students) ? payload.students : [];
-      const list = rawList.map((s) => studentRowFromCallablePayload(s));
+      const list = rawList.map((s) => ({
+        ...studentRowFromCallablePayload(s),
+        hasCheckInPin: s.hasCheckInPin === true,
+      }));
       list.sort(sortByName);
       setStudents(list);
+      setStudentsWithPinMeta(list);
+      setKioskRequirePin(payload?.kiosk?.requireStudentCheckInPin === true);
       setListError(null);
     } catch {
       setListError(
@@ -440,7 +459,7 @@ export default function ParentDashboardPage() {
               표시됩니다.
             </p>
           ) : (
-            students.map((s) => (
+            studentsWithPinMeta.map((s) => (
               <div key={s.id} className={`p-4 ${glassCard}`}>
                 <p className="font-medium text-foreground">
                   {s.name}
@@ -458,6 +477,13 @@ export default function ParentDashboardPage() {
                     {s.emergencyContact || "—"}
                   </span>
                 </p>
+                {kioskRequirePin ? (
+                  <ParentCheckInPinCard
+                    academyId={academyId!}
+                    student={s}
+                    onUpdatedAction={() => void refreshChildrenList()}
+                  />
+                ) : null}
               </div>
             ))
           )}

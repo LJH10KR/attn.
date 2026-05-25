@@ -213,6 +213,14 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      /** 출석 키오스크 설정(해시·잠금) — Functions만 쓰기, 공개 필드만 읽기 */
+      match /meta/kioskSettings {
+        allow read: if isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyPortalSession(academyId);
+        allow write: if false;
+      }
+
       match /students/{studentId} {
         /**
          * list 쿼리 검증 시 OR 전체가 분석되므로, parentUserId 등 필드가 없을 때 직접 접근하면
@@ -250,6 +258,10 @@ service cloud.firestore {
           || isAcademyOwner(academyId)
           || isAcademyPortalSession(academyId)
           || (isAcademyParentActive(academyId) && resource.data.parentUserId == request.auth.uid);
+
+        match /serverSecrets/{secretId} {
+          allow read, write: if false;
+        }
       }
     }
 
