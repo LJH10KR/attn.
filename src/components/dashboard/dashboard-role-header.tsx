@@ -35,6 +35,8 @@ type DashboardRoleHeaderProps = {
   bellBadgeCount?: number;
   beforeBell?: ReactNode;
   bottomTabs?: DashboardBottomNavTab[];
+  /** true이면 하단 탭·프로필 바 전체를 숨깁니다(키오스크 등) */
+  hideBottomNav?: boolean;
   includeSettingsAction?: boolean;
   onSettingsAction?: () => void;
   settingsLabel?: string;
@@ -60,6 +62,7 @@ export function DashboardRoleHeader({
   bellBadgeCount = 0,
   beforeBell,
   bottomTabs,
+  hideBottomNav = false,
   includeSettingsAction = false,
   onSettingsAction,
   settingsLabel = "사용자 설정",
@@ -125,20 +128,22 @@ export function DashboardRoleHeader({
         showSubline={Boolean(showBack && backHint)}
       />
 
-      <DashboardBottomNav
-        title={title}
-        affiliationLabel={affiliationLabel}
-        showBack={false}
-        onHomeClick={onHomeAction}
-        onBellClick={onBellClickAction}
-        showBellInBottomBar={showBellInBottomBar}
-        bellBadgeCount={bellBadgeCount}
-        bottomTabs={bottomTabs}
-        menuIntro={menuIntro}
-        menuActions={menuActions}
-        includeSrOnlyScreenTitle={false}
-        profile={profile}
-      />
+      {hideBottomNav ? null : (
+        <DashboardBottomNav
+          title={title}
+          affiliationLabel={affiliationLabel}
+          showBack={false}
+          onHomeClick={onHomeAction}
+          onBellClick={onBellClickAction}
+          showBellInBottomBar={showBellInBottomBar}
+          bellBadgeCount={bellBadgeCount}
+          bottomTabs={bottomTabs}
+          menuIntro={menuIntro}
+          menuActions={menuActions}
+          includeSrOnlyScreenTitle={false}
+          profile={profile}
+        />
+      )}
     </>
   );
 }

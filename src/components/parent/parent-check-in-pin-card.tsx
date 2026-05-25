@@ -85,6 +85,7 @@ export function ParentCheckInPinCard({ academyId, student, onUpdatedAction }: Pr
 
       <PinPadModal
         open={open}
+        phaseKey={open ? step : "closed"}
         title={
           step === "current"
             ? "기존 출석 PIN"

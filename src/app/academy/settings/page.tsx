@@ -4,7 +4,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { PinPadModal } from "@/components/academy/pin-pad-modal";
 import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
@@ -15,6 +15,7 @@ import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { fetchIsOwner } from "@/lib/firebase/owner-profile";
 import { FirebaseError } from "firebase/app";
+import { SlideSwitch } from "@/components/ui/slide-switch";
 
 const glassCard = "glass-card";
 
@@ -35,8 +36,9 @@ function AcademySettingsInner() {
   const [busy, setBusy] = useState(false);
   const [exitPinModal, setExitPinModal] = useState<"set" | "change" | null>(null);
   const [exitPinStep, setExitPinStep] = useState<"current" | "new" | "confirm">("new");
-  const [pendingNewPin, setPendingNewPin] = useState<string | null>(null);
   const [pinModalError, setPinModalError] = useState<string | null>(null);
+  const currentExitPinRef = useRef("");
+  const pendingNewPinRef = useRef<string | null>(null);
 
   const loadSettings = useCallback(async () => {
     if (!academyId) return;
@@ -85,26 +87,37 @@ function AcademySettingsInner() {
   }, [academyId, loadSettings]);
 
   const updateSettings = useCallback(
-    async (payload: Record<string, unknown>) => {
+    async (
+      payload: Record<string, unknown>,
+      opts?: { errorTarget?: "toast" | "pinModal" },
+    ) => {
       if (!academyId) return;
       setBusy(true);
-      setToast(null);
+      if (opts?.errorTarget !== "pinModal") {
+        setToast(null);
+      }
       try {
         const fn = httpsCallable(getFirebaseFunctions(), "updateAcademyKioskSettings");
         const res = await fn({ academyId, ...payload });
         const data = res.data as { settings?: AcademyKioskSettingsPublic };
         setSettings(data.settings ?? null);
+        setPinModalError(null);
         setToast("저장되었습니다.");
+        return true;
       } catch (err) {
-        setToast(callableMessage(err, "저장에 실패했습니다."));
+        const msg = callableMessage(err, "저장에 실패했습니다.");
+        if (opts?.errorTarget === "pinModal") {
+          setPinModalError(msg);
+        } else {
+          setToast(msg);
+        }
+        return false;
       } finally {
         setBusy(false);
       }
     },
     [academyId],
   );
-
-  const currentExitPinRef = { current: "" as string };
 
   if (gate === "loading") {
     return (
@@ -184,7 +197,7 @@ function AcademySettingsInner() {
               onClick={() => {
                 setExitPinModal(settings?.exitPinConfigured ? "change" : "set");
                 setExitPinStep(settings?.exitPinConfigured ? "current" : "new");
-                setPendingNewPin(null);
+                pendingNewPinRef.current = null;
                 setPinModalError(null);
                 currentExitPinRef.current = "";
               }}
@@ -209,23 +222,25 @@ function AcademySettingsInner() {
           <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
             켜면 학부모가 자녀별 출석 PIN을 설정해야 키오스크에서 출석할 수 있습니다.
           </p>
-          <label className="mt-4 flex items-center justify-between gap-3">
-            <span className="text-sm text-foreground">출석 시 PIN 사용</span>
-            <input
-              type="checkbox"
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <span className="text-sm text-neutral-800 dark:text-neutral-200">
+              {settings?.requireStudentCheckInPin ? "출석 PIN 사용 중" : "출석 PIN 사용 안 함"}
+            </span>
+            <SlideSwitch
               checked={settings?.requireStudentCheckInPin ?? false}
               disabled={busy || !settings}
-              onChange={(e) =>
-                void updateSettings({ requireStudentCheckInPin: e.target.checked })
+              ariaLabel="출석 시 PIN 사용"
+              onCheckedChangeAction={(checked) =>
+                void updateSettings({ requireStudentCheckInPin: checked })
               }
-              className="h-5 w-5 rounded border-neutral-300"
             />
-          </label>
+          </div>
         </section>
       </main>
 
       <PinPadModal
         open={Boolean(exitPinModal)}
+        phaseKey={exitPinModal ? `${exitPinModal}-${exitPinStep}` : "closed"}
         title={
           exitPinStep === "current"
             ? "기존 종료 PIN"
@@ -249,31 +264,30 @@ function AcademySettingsInner() {
             return;
           }
           if (exitPinStep === "new") {
-            setPendingNewPin(pin);
+            pendingNewPinRef.current = pin;
             setExitPinStep("confirm");
             return;
           }
+          if (pin !== pendingNewPinRef.current) {
+            setPinModalError("PIN이 일치하지 않습니다.");
+            setExitPinStep("new");
+            pendingNewPinRef.current = null;
+            return;
+          }
           void (async () => {
-            if (pin !== pendingNewPin) {
-              setPinModalError("PIN이 일치하지 않습니다.");
-              setExitPinStep("new");
-              setPendingNewPin(null);
-              return;
-            }
-            setBusy(true);
-            setPinModalError(null);
-            try {
-              await updateSettings({
+            const ok = await updateSettings(
+              {
                 newExitPin: pin,
                 ...(exitPinModal === "change"
                   ? { currentExitPin: currentExitPinRef.current }
                   : {}),
-              });
+              },
+              { errorTarget: "pinModal" },
+            );
+            if (ok) {
               setExitPinModal(null);
-            } catch (err) {
-              setPinModalError(callableMessage(err, "PIN 저장에 실패했습니다."));
-            } finally {
-              setBusy(false);
+              currentExitPinRef.current = "";
+              pendingNewPinRef.current = null;
             }
           })();
         }}

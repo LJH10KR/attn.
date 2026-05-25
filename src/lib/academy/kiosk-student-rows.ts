@@ -49,3 +49,12 @@ export async function loadKioskStudentRows(academyId: string): Promise<KioskStud
 export function kioskModeStorageKey(academyId: string): string {
   return `attn_kiosk_mode_${academyId}`;
 }
+
+export function isKioskModeActive(academyId: string): boolean {
+  if (!academyId) return false;
+  try {
+    return sessionStorage.getItem(kioskModeStorageKey(academyId)) === "1";
+  } catch {
+    return false;
+  }
+}

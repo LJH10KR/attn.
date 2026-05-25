@@ -4,12 +4,44 @@ import { useCallback, useEffect, useState } from "react";
 
 const PIN_LEN = 4;
 
+function shuffleDigits(): string[] {
+  const digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+  for (let i = digits.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const a = digits[i]!;
+    digits[i] = digits[j]!;
+    digits[j] = a;
+  }
+  return digits;
+}
+
+/** 3×3 숫자 + 하단(빈칸·숫자·⌫) — 숫자 배치는 매번 무작위 */
+function buildShuffledKeypad(): string[] {
+  const shuffled = shuffleDigits();
+  return [
+    shuffled[0]!,
+    shuffled[1]!,
+    shuffled[2]!,
+    shuffled[3]!,
+    shuffled[4]!,
+    shuffled[5]!,
+    shuffled[6]!,
+    shuffled[7]!,
+    shuffled[8]!,
+    "",
+    shuffled[9]!,
+    "⌫",
+  ];
+}
+
 export type PinPadModalProps = {
   open: boolean;
   title: string;
   description?: string;
   error?: string | null;
   busy?: boolean;
+  /** 단계가 바뀔 때마다 바뀌는 값 — 입력란·키패드 배치 초기화 */
+  phaseKey?: string | number;
   onCloseAction: () => void;
   onCompleteAction: (pin: string) => void;
 };
@@ -20,14 +52,21 @@ export function PinPadModal({
   description,
   error,
   busy = false,
+  phaseKey = 0,
   onCloseAction,
   onCompleteAction,
 }: PinPadModalProps) {
   const [digits, setDigits] = useState("");
+  const [keypadKeys, setKeypadKeys] = useState(() => buildShuffledKeypad());
 
   useEffect(() => {
-    if (!open) setDigits("");
-  }, [open]);
+    if (!open) {
+      setDigits("");
+      return;
+    }
+    setDigits("");
+    setKeypadKeys(buildShuffledKeypad());
+  }, [open, phaseKey]);
 
   const append = useCallback(
     (d: string) => {
@@ -36,7 +75,10 @@ export function PinPadModal({
         if (prev.length >= PIN_LEN) return prev;
         const next = prev + d;
         if (next.length === PIN_LEN) {
-          queueMicrotask(() => onCompleteAction(next));
+          queueMicrotask(() => {
+            setDigits("");
+            onCompleteAction(next);
+          });
         }
         return next;
       });
@@ -103,14 +145,14 @@ export function PinPadModal({
         ) : null}
 
         <div className="mt-6 grid grid-cols-3 gap-2">
-          {["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"].map((key) => {
+          {keypadKeys.map((key, idx) => {
             if (key === "") {
-              return <div key="spacer" />;
+              return <div key={`spacer-${idx}`} aria-hidden />;
             }
             const isBack = key === "⌫";
             return (
               <button
-                key={key}
+                key={`${key}-${idx}`}
                 type="button"
                 disabled={busy}
                 onClick={() => (isBack ? backspace() : append(key))}

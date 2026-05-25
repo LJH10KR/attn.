@@ -28,7 +28,7 @@ import {
 } from "firebase/firestore";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DashboardNotificationsModal } from "@/components/dashboard/dashboard-notifications-modal";
 import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
@@ -45,10 +45,13 @@ import { httpsCallable } from "firebase/functions";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
 import type { AcademyKioskSettingsPublic } from "@/lib/firebase/attn-schema";
 import {
+  isKioskModeActive,
   kioskModeStorageKey,
   loadKioskStudentRows,
 } from "@/lib/academy/kiosk-student-rows";
+import { verifyKioskExitPinAndClear } from "@/lib/academy/kiosk-exit";
 import { FirebaseError } from "firebase/app";
+import { SlideSwitch } from "@/components/ui/slide-switch";
 
 const glassCard = "glass-card";
 
@@ -291,6 +294,8 @@ export function AcademyDashboard() {
   const [kioskExitPinError, setKioskExitPinError] = useState<string | null>(null);
   const [kioskActionBusy, setKioskActionBusy] = useState(false);
   const [kioskToast, setKioskToast] = useState<string | null>(null);
+  const pendingSectionAfterExitRef = useRef<AcademySection | null>(null);
+  const sectionExitPromptedRef = useRef(false);
 
   const {
     items: academyBellItems,
@@ -335,6 +340,42 @@ export function AcademyDashboard() {
       setKioskMode(false);
     }
   }, [academyId, gate, loadKioskSettings]);
+
+  useEffect(() => {
+    if (!academyId || gate !== "ready") return;
+    const syncKioskFromStorage = () => {
+      try {
+        setKioskMode(sessionStorage.getItem(kioskModeStorageKey(academyId)) === "1");
+      } catch {
+        setKioskMode(false);
+      }
+    };
+    syncKioskFromStorage();
+    window.addEventListener("focus", syncKioskFromStorage);
+    return () => window.removeEventListener("focus", syncKioskFromStorage);
+  }, [academyId, gate]);
+
+  useEffect(() => {
+    if (!academyId || gate !== "ready") return;
+    if (!isKioskModeActive(academyId)) {
+      sectionExitPromptedRef.current = false;
+      return;
+    }
+    const sec = parseSection(searchParams.get("section"));
+    if (sec === "home") {
+      sectionExitPromptedRef.current = false;
+      return;
+    }
+    if (sectionExitPromptedRef.current) return;
+    sectionExitPromptedRef.current = true;
+    pendingSectionAfterExitRef.current = sec;
+    setKioskExitPinError(null);
+    setKioskExitPinOpen(true);
+    const p = new URLSearchParams(searchParams.toString());
+    p.delete("section");
+    const qs = p.toString();
+    router.replace(qs ? `/academy?${qs}` : "/academy", { scroll: false });
+  }, [academyId, gate, router, searchParams]);
 
   useEffect(() => {
     if (!academyId || !kioskMode) return;
@@ -403,10 +444,17 @@ export function AcademyDashboard() {
       setKioskActionBusy(true);
       setKioskExitPinError(null);
       try {
-        const fn = httpsCallable(getFirebaseFunctions(), "verifyKioskExitPin");
-        await fn({ academyId, pin });
+        await verifyKioskExitPinAndClear(academyId, pin);
         persistKioskMode(academyId, false);
         setKioskExitPinOpen(false);
+        const pendingSection = pendingSectionAfterExitRef.current;
+        pendingSectionAfterExitRef.current = null;
+        sectionExitPromptedRef.current = false;
+        if (pendingSection && pendingSection !== "home") {
+          const p = new URLSearchParams(searchParams.toString());
+          p.set("section", pendingSection);
+          router.replace(`/academy?${p.toString()}`, { scroll: false });
+        }
         void loadKioskSettings(academyId);
       } catch (err) {
         setKioskExitPinError(callableMsg(err, "PIN 확인에 실패했습니다."));
@@ -415,7 +463,7 @@ export function AcademyDashboard() {
         setKioskActionBusy(false);
       }
     },
-    [academyId, loadKioskSettings, persistKioskMode],
+    [academyId, loadKioskSettings, persistKioskMode, router, searchParams],
   );
 
   const navigateSection = useCallback(
@@ -721,54 +769,39 @@ export function AcademyDashboard() {
   }
 
   return (
-    <div className="min-h-[100dvh] bg-background pb-28">
+    <div className={`min-h-[100dvh] bg-background ${kioskMode ? "pb-6" : "pb-28"}`}>
       <DashboardRoleHeader
         title={kioskMode ? "출석 키오스크" : "학원 대시보드"}
         affiliationLabel={academyLabelForGreeting(academyName, academyId)}
-        includeSettingsAction
-        onSettingsAction={() =>
-          router.push(`/academy/settings?id=${encodeURIComponent(academyId)}`)
+        includeSettingsAction={!kioskMode}
+        onSettingsAction={
+          kioskMode
+            ? undefined
+            : () => router.push(`/academy/settings?id=${encodeURIComponent(academyId)}`)
         }
         settingsLabel="학원 설정"
         beforeBell={
-          <button
-            type="button"
-            onClick={() => (kioskMode ? requestKioskOff() : requestKioskOn())}
-            className={`inline-flex h-10 w-10 items-center justify-center rounded-full transition ${
-              kioskMode
-                ? "bg-[#222] text-white dark:bg-neutral-100 dark:text-neutral-950"
-                : "text-foreground hover:bg-black/[0.05] dark:hover:bg-white/10"
-            }`}
-            aria-label={kioskMode ? "출석 키오스크 끄기" : "출석 키오스크 켜기"}
-            aria-pressed={kioskMode}
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <rect
-                x="4"
-                y="3"
-                width="16"
-                height="18"
-                rx="2"
-                stroke="currentColor"
-                strokeWidth="1.6"
-              />
-              <path
-                d="M8 8h8M8 12h5"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-              />
-            </svg>
-          </button>
+          <div className="flex items-center gap-2">
+            <SlideSwitch
+              checked={kioskMode}
+              disabled={kioskActionBusy}
+              ariaLabel="출석 키오스크"
+              onCheckedChangeAction={(next) => {
+                if (next) requestKioskOn();
+                else requestKioskOff();
+              }}
+            />
+          </div>
         }
         menuIntro={
-          showBack ? (
+          showBack && !kioskMode ? (
             <span className="text-neutral-600 dark:text-neutral-400">
               오너 계정에서 이 학원 대시보드를 보고 있어요.
             </span>
           ) : undefined
         }
-        showBack={showBack}
+        showBack={showBack && !kioskMode}
+        hideBottomNav={kioskMode}
         onBackAction={onBackToOwner}
         backAriaLabel="오너 대시보드로 돌아가기"
         onHomeAction={() => router.push("/")}
@@ -776,57 +809,44 @@ export function AcademyDashboard() {
         showBellInBottomBar={false}
         onBellClickAction={() => setNotificationsOpen(true)}
         bellBadgeCount={academyBellCount}
-        bottomTabs={
-          kioskMode
-            ? [
-                {
-                  id: "kiosk",
-                  label: "키오스크",
-                  showLabel: false,
-                  icon: (active: boolean) => <AttnTabLogo active={active} />,
-                  active: true,
-                  onSelect: () => {},
-                },
-              ]
-            : [
-                {
-                  id: "home",
-                  label: "요약",
-                  showLabel: false,
-                  icon: (active: boolean) => <AttnTabLogo active={active} />,
-                  active: section === "home",
-                  onSelect: () => navigateSection("home"),
-                },
-                {
-                  id: "teachers",
-                  label: "선생님",
-                  icon: (active: boolean) => <IconMonitor active={active} />,
-                  active: section === "teachers",
-                  onSelect: () => navigateSection("teachers"),
-                },
-                {
-                  id: "parents",
-                  label: "학부모",
-                  icon: (active: boolean) => <IconPerson active={active} />,
-                  active: section === "parents",
-                  onSelect: () => navigateSection("parents"),
-                },
-                {
-                  id: "students",
-                  label: "학생",
-                  icon: (active: boolean) => <IconBackpack active={active} />,
-                  active: section === "students",
-                  onSelect: () => navigateSection("students"),
-                },
-                {
-                  id: "notifications",
-                  label: "알림 기록",
-                  icon: (active: boolean) => <IconBellMini active={active} />,
-                  active: section === "notifications",
-                  onSelect: () => navigateSection("notifications"),
-                },
-              ]
-        }
+        bottomTabs={[
+          {
+            id: "home",
+            label: "요약",
+            showLabel: false,
+            icon: (active: boolean) => <AttnTabLogo active={active} />,
+            active: section === "home",
+            onSelect: () => navigateSection("home"),
+          },
+          {
+            id: "teachers",
+            label: "선생님",
+            icon: (active: boolean) => <IconMonitor active={active} />,
+            active: section === "teachers",
+            onSelect: () => navigateSection("teachers"),
+          },
+          {
+            id: "parents",
+            label: "학부모",
+            icon: (active: boolean) => <IconPerson active={active} />,
+            active: section === "parents",
+            onSelect: () => navigateSection("parents"),
+          },
+          {
+            id: "students",
+            label: "학생",
+            icon: (active: boolean) => <IconBackpack active={active} />,
+            active: section === "students",
+            onSelect: () => navigateSection("students"),
+          },
+          {
+            id: "notifications",
+            label: "알림 기록",
+            icon: (active: boolean) => <IconBellMini active={active} />,
+            active: section === "notifications",
+            onSelect: () => navigateSection("notifications"),
+          },
+        ]}
         onLogoutAction={
           isAcademyPortalSession
             ? () => void onPortalLogout()
@@ -875,6 +895,7 @@ export function AcademyDashboard() {
 
       <PinPadModal
         open={kioskExitPinOpen}
+        phaseKey={kioskExitPinOpen ? "exit" : "exit-closed"}
         title="키오스크 종료 PIN"
         description="키오스크를 끄려면 종료 PIN 4자리를 입력해 주세요."
         error={kioskExitPinError}
@@ -883,6 +904,8 @@ export function AcademyDashboard() {
           if (!kioskActionBusy) {
             setKioskExitPinOpen(false);
             setKioskExitPinError(null);
+            pendingSectionAfterExitRef.current = null;
+            sectionExitPromptedRef.current = false;
           }
         }}
         onCompleteAction={(pin) => void verifyExitPinAndOff(pin)}
@@ -891,19 +914,13 @@ export function AcademyDashboard() {
       <main className="mx-auto max-w-lg px-4 pt-4">
         {kioskMode ? (
           <section className="mt-2">
-            {kioskRowsBusy ? (
-              <p className="py-20 text-center text-sm text-neutral-500">
-                학생 목록 불러오는 중…
-              </p>
-            ) : (
-              <AcademyKioskPanel
-                academyId={academyId}
-                requireStudentCheckInPin={
-                  kioskSettings?.requireStudentCheckInPin ?? false
-                }
-                rows={kioskRows}
-              />
-            )}
+            <AcademyKioskPanel
+              academyId={academyId}
+              requireStudentCheckInPin={
+                kioskSettings?.requireStudentCheckInPin ?? false
+              }
+              rows={kioskRowsBusy ? [] : kioskRows}
+            />
           </section>
         ) : (
           <>

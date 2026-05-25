@@ -25,11 +25,13 @@ function normalizeQuery(q: string): string {
 }
 
 function matchesRow(row: KioskStudentRow, q: string): boolean {
-  if (!q) return true;
   const nq = normalizeQuery(q);
+  if (!nq) return false;
   if (normalizeQuery(row.name).includes(nq)) return true;
   if (row.parentName && normalizeQuery(row.parentName).includes(nq)) return true;
-  if (row.phoneLast4 && row.phoneLast4.includes(nq.replace(/\D/g, ""))) return true;
+  const phoneQ = nq.replace(/\D/g, "");
+  // 숫자 없는 검색어는 ""가 되어 전화 끝 4자리에 모두 매칭되는 버그 방지
+  if (phoneQ.length > 0 && row.phoneLast4?.includes(phoneQ)) return true;
   return false;
 }
 
@@ -51,9 +53,15 @@ export function AcademyKioskPanel({
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
+  const trimmedQuery = query.trim();
+  const showResults = trimmedQuery.length > 0;
+
   const filtered = useMemo(
-    () => rows.filter((r) => matchesRow(r, query)).slice(0, 40),
-    [rows, query],
+    () =>
+      showResults
+        ? rows.filter((r) => matchesRow(r, trimmedQuery)).slice(0, 40)
+        : [],
+    [rows, trimmedQuery, showResults],
   );
 
   const submitCheckIn = useCallback(
@@ -117,29 +125,29 @@ export function AcademyKioskPanel({
         </p>
       ) : null}
 
-      <ul className="flex flex-1 flex-col gap-2 pb-8">
-        {filtered.length === 0 ? (
-          <li className="py-16 text-center text-sm text-neutral-500">
-            {query.trim() ? "검색 결과가 없습니다." : "학생 목록을 불러오는 중이거나 등록된 학생이 없습니다."}
-          </li>
-        ) : (
-          filtered.map((row) => (
-            <li key={row.studentId}>
-              <button
-                type="button"
-                onClick={() => onSelectStudent(row)}
-                className="glass-tile glass-tile-hover flex w-full flex-col items-start gap-0.5 rounded-2xl px-4 py-3.5 text-left"
-              >
-                <span className="text-base font-semibold text-foreground">{row.name}</span>
-                <span className="text-xs text-neutral-500 dark:text-neutral-400">
-                  {row.phoneLast4 ? `전화 ···${row.phoneLast4}` : "연락처 없음"}
-                  {row.parentName ? ` · ${row.parentName}` : ""}
-                </span>
-              </button>
-            </li>
-          ))
-        )}
-      </ul>
+      {showResults ? (
+        <ul className="flex flex-1 flex-col gap-2 pb-8">
+          {filtered.length === 0 ? (
+            <li className="py-16 text-center text-sm text-neutral-500">검색 결과가 없습니다.</li>
+          ) : (
+            filtered.map((row) => (
+              <li key={row.studentId}>
+                <button
+                  type="button"
+                  onClick={() => onSelectStudent(row)}
+                  className="glass-tile glass-tile-hover flex w-full flex-col items-start gap-0.5 rounded-2xl px-4 py-3.5 text-left"
+                >
+                  <span className="text-base font-semibold text-foreground">{row.name}</span>
+                  <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                    {row.phoneLast4 ? `전화 ···${row.phoneLast4}` : "연락처 없음"}
+                    {row.parentName ? ` · ${row.parentName}` : ""}
+                  </span>
+                </button>
+              </li>
+            ))
+          )}
+        </ul>
+      ) : null}
 
       {confirmStudent ? (
         <div
@@ -177,6 +185,7 @@ export function AcademyKioskPanel({
 
       <PinPadModal
         open={Boolean(pinStudent)}
+        phaseKey={pinStudent?.studentId ?? "closed"}
         title="출석 PIN"
         description={
           pinStudent
