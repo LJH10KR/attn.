@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { FirebaseError } from "firebase/app";
+import { formatKrPhoneDisplay } from "@/lib/phone/kr-phone";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, onSnapshot, Timestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
@@ -446,12 +447,15 @@ export default function TeacherDashboardPage() {
                   </span>
                 </p>
                 <p className="mt-2 text-[11px] text-neutral-600">
-                  연락 <span className="text-foreground">{s.phone || "—"}</span>
+                  연락{" "}
+                  <span className="text-foreground">
+                    {formatKrPhoneDisplay(s.phone) || "—"}
+                  </span>
                 </p>
                 <p className="mt-0.5 text-[11px] text-neutral-600">
                   비상 연락{" "}
                   <span className="text-foreground">
-                    {s.emergencyContact || "—"}
+                    {formatKrPhoneDisplay(s.emergencyContact) || "—"}
                   </span>
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">

@@ -31,6 +31,7 @@ import {
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
 import { FirebaseError } from "firebase/app";
+import { formatKrPhoneDisplay } from "@/lib/phone/kr-phone";
 
 const glassCard = "glass-card";
 
@@ -469,12 +470,15 @@ export default function ParentDashboardPage() {
                   </span>
                 </p>
                 <p className="mt-2 text-[11px] text-neutral-600">
-                  연락 <span className="text-foreground">{s.phone || "—"}</span>
+                  연락{" "}
+                  <span className="text-foreground">
+                    {formatKrPhoneDisplay(s.phone) || "—"}
+                  </span>
                 </p>
                 <p className="mt-0.5 text-[11px] text-neutral-600">
                   비상 연락{" "}
                   <span className="text-foreground">
-                    {s.emergencyContact || "—"}
+                    {formatKrPhoneDisplay(s.emergencyContact) || "—"}
                   </span>
                 </p>
                 {kioskRequirePin ? (

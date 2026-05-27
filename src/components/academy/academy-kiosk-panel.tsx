@@ -10,6 +10,8 @@ export type KioskStudentRow = {
   studentId: string;
   name: string;
   phoneLast4: string | null;
+  /** 키오스크 표시용 010-****-1234 */
+  phoneMasked: string | null;
   parentName: string;
 };
 
@@ -139,7 +141,7 @@ export function AcademyKioskPanel({
                 >
                   <span className="text-base font-semibold text-foreground">{row.name}</span>
                   <span className="text-xs text-neutral-500 dark:text-neutral-400">
-                    {row.phoneLast4 ? `전화 ···${row.phoneLast4}` : "연락처 없음"}
+                    {row.phoneMasked ?? "연락처 없음"}
                     {row.parentName ? ` · ${row.parentName}` : ""}
                   </span>
                 </button>

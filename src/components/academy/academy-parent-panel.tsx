@@ -25,6 +25,8 @@ import { getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
+import { KrPhoneInput } from "@/components/ui/kr-phone-input";
+import { formatKrPhoneDisplay, phoneMatchesSearch } from "@/lib/phone/kr-phone";
 
 const glassCard = "glass-card";
 
@@ -264,13 +266,11 @@ function RegisterChildModal({
             <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="c-phone">
               연락처 (필수)
             </label>
-            <input
+            <KrPhoneInput
               id="c-phone"
               className={inputClass}
               value={formPhone}
-              onChange={(e) => setFormPhone(e.target.value)}
-              maxLength={30}
-              inputMode="tel"
+              onChange={setFormPhone}
               disabled={busy || atCap}
             />
           </div>
@@ -278,13 +278,11 @@ function RegisterChildModal({
             <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="c-em">
               비상 연락처 (필수)
             </label>
-            <input
+            <KrPhoneInput
               id="c-em"
               className={inputClass}
               value={formEmergency}
-              onChange={(e) => setFormEmergency(e.target.value)}
-              maxLength={30}
-              inputMode="tel"
+              onChange={setFormEmergency}
               disabled={busy || atCap}
             />
           </div>
@@ -822,8 +820,8 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
       (t) =>
         t.name.toLowerCase().includes(q) ||
         t.email.toLowerCase().includes(q) ||
-        (t.phone ?? "").toLowerCase().includes(q) ||
-        (t.emergencyContact ?? "").toLowerCase().includes(q),
+        phoneMatchesSearch(t.phone, q) ||
+        phoneMatchesSearch(t.emergencyContact, q),
     );
   }, [rows, queryText]);
 
@@ -1042,7 +1040,7 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
                       </span>
                       <span className="mt-0.5 block text-[11px] text-neutral-500">
                         자녀 {t.childrenCount}명
-                        {t.phone ? ` · ${t.phone}` : ""}
+                        {t.phone ? ` · ${formatKrPhoneDisplay(t.phone)}` : ""}
                       </span>
                       {t.status === "invitation_sent" && t.invitationExpiresAt ? (
                         <span className="mt-1 block">
@@ -1069,7 +1067,7 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
                       {t.emergencyContact ? (
                         <p>
                           <span className="font-medium text-neutral-500">비상연락</span>{" "}
-                          {t.emergencyContact}
+                          {formatKrPhoneDisplay(t.emergencyContact)}
                         </p>
                       ) : (
                         <p className="text-neutral-400">비상연락처 없음</p>
@@ -1151,13 +1149,11 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
                 <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="p-phone">
                   연락처 (선택)
                 </label>
-                <input
+                <KrPhoneInput
                   id="p-phone"
                   className={inputClass}
                   value={formPhone}
-                  onChange={(e) => setFormPhone(e.target.value)}
-                  maxLength={30}
-                  inputMode="tel"
+                  onChange={setFormPhone}
                 />
               </div>
               <div>
@@ -1167,13 +1163,11 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
                 >
                   비상연락처 (선택)
                 </label>
-                <input
+                <KrPhoneInput
                   id="p-emergency"
                   className={inputClass}
                   value={formEmergencyContact}
-                  onChange={(e) => setFormEmergencyContact(e.target.value)}
-                  maxLength={30}
-                  inputMode="tel"
+                  onChange={setFormEmergencyContact}
                 />
               </div>
               <div>

@@ -1,13 +1,7 @@
 import { collection, getDocs } from "firebase/firestore";
 import type { KioskStudentRow } from "@/components/academy/academy-kiosk-panel";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
-
-function phoneLast4(phone: unknown): string | null {
-  if (typeof phone !== "string") return null;
-  const digits = phone.replace(/\D/g, "");
-  if (digits.length < 4) return null;
-  return digits.slice(-4);
-}
+import { maskKrPhoneForKiosk, phoneLast4Digits } from "@/lib/phone/kr-phone";
 
 export async function loadKioskStudentRows(academyId: string): Promise<KioskStudentRow[]> {
   const db = getFirebaseDb();
@@ -35,10 +29,14 @@ export async function loadKioskStudentRows(academyId: string): Promise<KioskStud
       typeof parentUserId === "string"
         ? parentNameByUid.get(parentUserId) ?? ""
         : "";
+    const phoneRaw = d.get("phone");
+    const phone =
+      typeof phoneRaw === "string" && phoneRaw.trim() ? phoneRaw.trim() : null;
     rows.push({
       studentId: d.id,
       name: name.trim(),
-      phoneLast4: phoneLast4(d.get("phone")),
+      phoneLast4: phoneLast4Digits(phone),
+      phoneMasked: maskKrPhoneForKiosk(phone),
       parentName,
     });
   }

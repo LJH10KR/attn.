@@ -20,6 +20,7 @@ import { getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
+import { KrPhoneInput } from "@/components/ui/kr-phone-input";
 
 const glassCard = "glass-card";
 
@@ -818,13 +819,11 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
                 <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="t-phone">
                   연락처 (선택)
                 </label>
-                <input
+                <KrPhoneInput
                   id="t-phone"
                   className={inputClass}
                   value={formPhone}
-                  onChange={(e) => setFormPhone(e.target.value)}
-                  maxLength={30}
-                  inputMode="tel"
+                  onChange={setFormPhone}
                 />
               </div>
               {formError ? <p className="text-sm text-red-700">{formError}</p> : null}

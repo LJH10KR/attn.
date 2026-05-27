@@ -24,6 +24,8 @@ import { getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
+import { KrPhoneInput } from "@/components/ui/kr-phone-input";
+import { formatKrPhoneDisplay, phoneMatchesSearch } from "@/lib/phone/kr-phone";
 
 const glassCard = "glass-card";
 
@@ -242,13 +244,11 @@ function EditStudentModal({
             <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="es-phone">
               연락처
             </label>
-            <input
+            <KrPhoneInput
               id="es-phone"
               className={inputClass}
               value={formPhone}
-              onChange={(e) => setFormPhone(e.target.value)}
-              maxLength={30}
-              inputMode="tel"
+              onChange={setFormPhone}
               disabled={busy}
             />
           </div>
@@ -256,13 +256,11 @@ function EditStudentModal({
             <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="es-em">
               비상 연락처
             </label>
-            <input
+            <KrPhoneInput
               id="es-em"
               className={inputClass}
               value={formEmergency}
-              onChange={(e) => setFormEmergency(e.target.value)}
-              maxLength={30}
-              inputMode="tel"
+              onChange={setFormEmergency}
               disabled={busy}
             />
           </div>
@@ -570,8 +568,8 @@ export function AcademyParentStudentList({
     setEditErr(null);
     setFormName(s.name);
     setFormAge(String(s.age));
-    setFormPhone(s.phone);
-    setFormEmergency(s.emergencyContact);
+    setFormPhone(formatKrPhoneDisplay(s.phone));
+    setFormEmergency(formatKrPhoneDisplay(s.emergencyContact));
     setEditTarget(s);
   };
 
@@ -683,7 +681,8 @@ export function AcademyParentStudentList({
                   <span className="font-medium text-foreground">{s.name}</span>
                   <span className="text-neutral-500"> · 만 {s.age}세</span>
                   <div className="mt-0.5 text-[11px] text-neutral-600">
-                    연락 {s.phone || "—"} · 비상 {s.emergencyContact || "—"}
+                    연락 {formatKrPhoneDisplay(s.phone) || "—"} · 비상{" "}
+                    {formatKrPhoneDisplay(s.emergencyContact) || "—"}
                   </div>
                   {s.assignedTeacherUids.length > 0 ? (
                     <div className="mt-0.5 text-[11px] text-sky-900">
@@ -856,8 +855,8 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
       return (
         r.name.toLowerCase().includes(q) ||
         r.parentName.toLowerCase().includes(q) ||
-        r.phone.toLowerCase().includes(q) ||
-        r.emergencyContact.toLowerCase().includes(q) ||
+        phoneMatchesSearch(r.phone, q) ||
+        phoneMatchesSearch(r.emergencyContact, q) ||
         ageStr.includes(q) ||
         r.parentUserId.toLowerCase().includes(q) ||
         r.teacherLabel.toLowerCase().includes(q) ||
@@ -895,8 +894,8 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
     setEditErr(null);
     setFormName(s.name);
     setFormAge(String(s.age));
-    setFormPhone(s.phone);
-    setFormEmergency(s.emergencyContact);
+    setFormPhone(formatKrPhoneDisplay(s.phone));
+    setFormEmergency(formatKrPhoneDisplay(s.emergencyContact));
     setEditTarget(s);
   };
 
@@ -1063,7 +1062,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                         학부모 {s.parentName} · 만 {s.age}세
                       </span>
                       <span className="mt-0.5 block text-[11px] text-neutral-500">
-                        연락 {s.phone || "—"} · 전담 선생{" "}
+                        연락 {formatKrPhoneDisplay(s.phone) || "—"} · 전담 선생{" "}
                         <span className="font-medium text-sky-900/90">
                           {s.assignedTeacherUids.length > 0
                             ? `${s.assignedTeacherUids.length}명`
