@@ -2,6 +2,7 @@ import * as admin from "firebase-admin";
 import { FieldValue, Timestamp, type DocumentReference } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
+import { countUserDashboardBellItems } from "./app-badge-count";
 
 export const ATTENDANCE_COOLDOWN_MS = 60_000;
 
@@ -181,6 +182,8 @@ export async function sendStudentAttendanceNotificationCore(
     return { ok: true as const, sent: 0, reason: "no_token" as const };
   }
 
+  const appBadgeCount = await countUserDashboardBellItems(db, parentUserId);
+
   const dataPayload: Record<string, string> = {
     title: "attn.",
     body,
@@ -189,6 +192,8 @@ export async function sendStudentAttendanceNotificationCore(
     studentId,
     studentName,
     academyId,
+    parentUserId,
+    appBadgeCount: String(appBadgeCount),
   };
 
   try {

@@ -3,6 +3,7 @@ import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { assertFourDigitPin, hashPin, verifyPin } from "./pin-utils";
+import { countUserDashboardBellItems } from "./app-badge-count";
 import { sendStudentAttendanceNotificationCore } from "./attendance-send-core";
 
 const KIOSK_SETTINGS_DOC_ID = "kioskSettings";
@@ -387,6 +388,8 @@ async function maybeSendPinSetupReminder(
   }
   if (tokens.length === 0) return;
 
+  const appBadgeCount = await countUserDashboardBellItems(db, parentUserId);
+
   try {
     await admin.messaging().sendEachForMulticast({
       tokens,
@@ -396,6 +399,8 @@ async function maybeSendPinSetupReminder(
         type: "pin_setup_reminder",
         academyId,
         studentId,
+        parentUserId,
+        appBadgeCount: String(appBadgeCount),
       },
     });
   } catch (e) {

@@ -12,6 +12,7 @@ import {
 } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
 import { useDashboardRefetchOnFocus } from "@/lib/firebase/use-dashboard-refetch-on-focus";
+import { setAppIconBadgeCount } from "@/lib/ios/app-badge";
 
 function readTs(v: unknown): Timestamp | undefined {
   return v instanceof Timestamp ? v : undefined;
@@ -190,6 +191,12 @@ export function useAcademyDashboardBell(academyId: string | null) {
     () => rawItems.filter((i) => !dismissed.has(i.id)),
     [rawItems, dismissed],
   );
+
+  useEffect(() => {
+    setAppIconBadgeCount(items.length, {
+      badgeUserId: academyId ? `academy:${academyId}` : undefined,
+    });
+  }, [items.length, academyId]);
 
   const dismissOne = useCallback(
     (id: string) => {

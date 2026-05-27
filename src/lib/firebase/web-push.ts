@@ -12,6 +12,7 @@ import {
 } from "firebase/messaging";
 import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { getFirebaseWebVapidKey, isFirebaseEmulatorEnabled, isWebPushConfigured } from "@/lib/firebase/config";
+import { setAppIconBadgeFromPushData } from "@/lib/ios/app-badge";
 
 /** 마지막으로 서버에 동기화한 FCM 토큰 — 변경 시에만 `syncParentPushSubscription` 호출 */
 export const FCM_LAST_SYNCED_TOKEN_STORAGE_KEY = "attn_fcm_last_synced_token";
@@ -207,7 +208,9 @@ export function subscribeForegroundMessages(
     if (!reg || cancelled) return;
     unsub = onMessage(prep.messaging, (payload) => {
       const d = payload.data;
-      if (!d || d.type !== "attendance") return;
+      if (!d) return;
+      setAppIconBadgeFromPushData(d);
+      if (d.type !== "attendance") return;
       const body = typeof d.body === "string" ? d.body : "";
       if (body) onPayload(body);
     });
