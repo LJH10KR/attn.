@@ -3,6 +3,7 @@ import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { sendStudentAttendanceNotificationCore } from "./attendance-send-core";
+import { pruneStalePushSubscriptions } from "./push-subscription-delivery";
 
 function studentAssignedToTeacher(data: Record<string, unknown>, teacherUid: string): boolean {
   const raw = data.assignedTeacherUids;
@@ -72,6 +73,9 @@ async function resolveAttendanceSender(params: {
 
 /**
  * 학부모 푸시 구독 동기화 — 토큰 저장/삭제는 Admin만 수행해 클라이언트 규칙과 무관하게 일관되게 유지합니다.
+ *
+ * 기기 정책: 최근 동기화 토큰을 우선하되, 롤오버·재실행 직후 구간을 위해 최대 3개까지 병행 유지합니다.
+ * 오래된 구독(7일+)만 sync 시 정리합니다.
  */
 export const syncParentPushSubscription = onCall(async (request) => {
   if (!request.auth?.uid) {
@@ -107,27 +111,24 @@ export const syncParentPushSubscription = onCall(async (request) => {
   const subId = crypto.createHash("sha256").update(fcmToken).digest("hex").slice(0, 48);
   const subRef = userRef.collection("pushSubscriptions").doc(subId);
 
-  const existingSubs = await userRef.collection("pushSubscriptions").get();
   const batch = db.batch();
-  for (const d of existingSubs.docs) {
-    if (d.id !== subId) {
-      batch.delete(d.ref);
-    }
-  }
   batch.set(subRef, {
     token: fcmToken,
     platform: "web",
     updatedAt: FieldValue.serverTimestamp(),
+    invalidDeliveryCount: 0,
   });
   batch.set(
     userRef,
     {
       pushNotificationsEnabled: true,
+      pushSubscriptionLastSyncedAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     },
     { merge: true },
   );
   await batch.commit();
+  await pruneStalePushSubscriptions(userRef, subId);
 
   return { ok: true as const, pushNotificationsEnabled: true };
 });

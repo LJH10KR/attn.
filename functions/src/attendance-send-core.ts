@@ -1,35 +1,16 @@
 import * as admin from "firebase-admin";
-import { FieldValue, Timestamp, type DocumentReference } from "firebase-admin/firestore";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { countUserDashboardBellItems } from "./app-badge-count";
+import {
+  applyMulticastDeliveryResults,
+  type PushTokenBucket,
+} from "./push-subscription-delivery";
 
 export const ATTENDANCE_COOLDOWN_MS = 60_000;
 
 const TEMP_TEACHER_ATTENDANCE_COOLDOWN_BYPASS_PER_UTC_DAY = 10;
-
-const FCM_TOKEN_INVALID_CODES = new Set([
-  "messaging/registration-token-not-registered",
-  "messaging/invalid-registration-token",
-]);
-
-const FCM_NEVER_DELETE_SUBSCRIPTION_CODES = new Set([
-  "messaging/unavailable",
-  "messaging/internal-error",
-  "messaging/internal",
-  "messaging/server-unavailable",
-  "messaging/timeout",
-  "messaging/quota-exceeded",
-  "messaging/message-rate-exceeded",
-  "messaging/device-message-rate-exceeded",
-  "messaging/too-many-topics",
-  "messaging/payload-size-limit-exceeded",
-  "messaging/invalid-payload",
-  "messaging/invalid-package-name",
-  "messaging/mismatched-credential",
-  "messaging/sender-id-mismatch",
-  "messaging/third-party-auth-error",
-]);
 
 function utcDayKey(): string {
   return new Date().toISOString().slice(0, 10);
@@ -161,19 +142,33 @@ export async function sendStudentAttendanceNotificationCore(
     return { ok: true as const, sent: 0, reason: "parent_opt_out" as const };
   }
 
+  const userLastSyncedAt = userSnap.get("pushSubscriptionLastSyncedAt") as Timestamp | undefined;
+
   const subsSnap = await parentUserRef.collection("pushSubscriptions").get();
-  type TokenBucket = { token: string; refs: DocumentReference[] };
-  const buckets: TokenBucket[] = [];
+  const buckets: PushTokenBucket[] = [];
   const indexByToken = new Map<string, number>();
   for (const d of subsSnap.docs) {
     const t = d.get("token");
     if (typeof t !== "string" || t.length <= 20) continue;
+    const updatedAt = d.get("updatedAt") as Timestamp | undefined;
+    const millis = updatedAt?.toMillis() ?? 0;
+    const invalidDeliveryCount =
+      typeof d.get("invalidDeliveryCount") === "number"
+        ? (d.get("invalidDeliveryCount") as number)
+        : 0;
     const existing = indexByToken.get(t);
     if (existing !== undefined) {
       buckets[existing]!.refs.push(d.ref);
+      buckets[existing]!.invalidCounts.push(invalidDeliveryCount);
+      buckets[existing]!.updatedAtMillis = Math.max(buckets[existing]!.updatedAtMillis, millis);
     } else {
       indexByToken.set(t, buckets.length);
-      buckets.push({ token: t, refs: [d.ref] });
+      buckets.push({
+        token: t,
+        refs: [d.ref],
+        updatedAtMillis: millis,
+        invalidCounts: [invalidDeliveryCount],
+      });
     }
   }
   const tokens = buckets.map((b) => b.token);
@@ -205,35 +200,18 @@ export async function sendStudentAttendanceNotificationCore(
       logger.warn("sendStudentAttendanceNotification partial failure", {
         success: resp.successCount,
         failure: resp.failureCount,
+        parentUserId,
       });
     }
 
-    const deadRefs: DocumentReference[] = [];
-    for (let i = 0; i < resp.responses.length; i++) {
-      const r = resp.responses[i];
-      if (r.success) continue;
-      const code = r.error?.code ?? "";
-      if (FCM_NEVER_DELETE_SUBSCRIPTION_CODES.has(code) || !FCM_TOKEN_INVALID_CODES.has(code)) {
-        continue;
-      }
-      const bucket = buckets[i];
-      if (!bucket) continue;
-      for (const ref of bucket.refs) deadRefs.push(ref);
-    }
-    if (deadRefs.length > 0) {
-      let batch = db.batch();
-      let n = 0;
-      for (const ref of deadRefs) {
-        batch.delete(ref);
-        n++;
-        if (n >= 450) {
-          await batch.commit();
-          batch = db.batch();
-          n = 0;
-        }
-      }
-      if (n > 0) await batch.commit();
-    }
+    await applyMulticastDeliveryResults({
+      db,
+      parentUserId,
+      userLastSyncedAt,
+      buckets,
+      responses: resp.responses,
+      logContext: "sendStudentAttendanceNotification",
+    });
 
     return { ok: true as const, sent: resp.successCount, failureCount: resp.failureCount };
   } catch (e) {

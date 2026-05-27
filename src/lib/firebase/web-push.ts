@@ -1,6 +1,7 @@
 "use client";
 
 import { getApp } from "firebase/app";
+import { doc, getDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import {
   deleteToken,
@@ -10,14 +11,17 @@ import {
   onMessage,
   type Messaging,
 } from "firebase/messaging";
-import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { getFirebaseAuth, getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { getFirebaseWebVapidKey, isFirebaseEmulatorEnabled, isWebPushConfigured } from "@/lib/firebase/config";
 import { setAppIconBadgeFromPushData } from "@/lib/ios/app-badge";
 
-/** 마지막으로 서버에 동기화한 FCM 토큰 — 변경 시에만 `syncParentPushSubscription` 호출 */
+/** 마지막으로 서버에 동기화한 FCM 토큰 — 로그아웃·계정 전환 시 제거 */
 export const FCM_LAST_SYNCED_TOKEN_STORAGE_KEY = "attn_fcm_last_synced_token";
 
-const RESYNC_MIN_INTERVAL_MS = 45_000;
+/** focus/visibility 등이 연속으로 올 때 Callable 폭주 방지 (포그라운드마다 동기화는 유지) */
+const RESYNC_MIN_INTERVAL_MS = 5_000;
+const RESYNC_MAX_ATTEMPTS = 3;
+
 let resyncInFlight: Promise<void> | null = null;
 let lastResyncFinishedAt = 0;
 
@@ -72,7 +76,21 @@ export async function registerMessagingServiceWorker(): Promise<ServiceWorkerReg
   }
 }
 
-export async function fetchFcmToken(): Promise<{ token: string | null; error?: string }> {
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export type FetchFcmTokenOptions = {
+  /**
+   * iOS PWA 재실행 직후 등: 기존 등록을 지우고 FCM에 새 구독을 요청합니다.
+   * 문자열이 같아도 FCM 쪽 `registration-token-not-registered`를 줄이는 데 도움이 됩니다.
+   */
+  rotateToken?: boolean;
+};
+
+export async function fetchFcmToken(
+  options?: FetchFcmTokenOptions,
+): Promise<{ token: string | null; error?: string }> {
   const prep = await prepareWebPushMessaging();
   if (!prep.ok) {
     return { token: null, error: prep.message ?? "푸시를 준비할 수 없습니다." };
@@ -83,6 +101,14 @@ export async function fetchFcmToken(): Promise<{ token: string | null; error?: s
   }
   const vapidKey = getFirebaseWebVapidKey();
   try {
+    if (options?.rotateToken === true) {
+      try {
+        await deleteToken(prep.messaging);
+      } catch {
+        /* 이미 없거나 만료 — 새 getToken 시도는 계속 */
+      }
+      await sleep(400);
+    }
     const token = await getToken(prep.messaging, { vapidKey, serviceWorkerRegistration: reg });
     if (!token) {
       return { token: null, error: "FCM 토큰을 받지 못했습니다." };
@@ -142,55 +168,74 @@ export async function tearDownParentWebPushForLogout(): Promise<void> {
   clearLastSyncedFcmTokenStorage();
 }
 
+export type ParentPushResyncOptions = {
+  parentUid: string;
+  /** ref 등 빠른 경로; true면 Firestore 재확인을 생략하고 바로 동기화합니다 */
+  enabled?: boolean;
+  force?: boolean;
+};
+
+async function resolveParentPushEnabled(
+  parentUid: string,
+  enabled?: boolean,
+): Promise<boolean> {
+  try {
+    if (enabled === true) return true;
+    const snap = await getDoc(doc(getFirebaseDb(), "users", parentUid));
+    return snap.data()?.pushNotificationsEnabled === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * 푸시가 켜진 상태에서만: FCM 토큰을 받아 서버(`pushSubscriptions`)에 맞춥니다.
- *
- * 예전에는 sessionStorage의 마지막 토큰과 같으면 Callable을 건너뛰었는데, 서버가 무효 토큰 문서만
- * 삭제한 뒤에는 클라이언트 토큰 문자열이 그대로여도 Firestore 구독이 비어 있을 수 있습니다.
- * 그때 재업로드를 생략하면 “설정은 켜짐인데 푸시가 안 옴”이 됩니다. 문자열이 같아도 동기화합니다.
+ * 푸시 ON 상태에서 FCM 토큰을 받아 서버(`pushSubscriptions`)와 맞춥니다.
+ * 토큰 문자열이 같아도 서버에 매번 올려 무효 토큰 삭제·iOS 절전 이후 공백을 복구합니다.
  */
-async function resyncParentPushTokenAfterResumeInner(
-  isPushEnabled: () => boolean,
-  force: boolean,
-): Promise<void> {
+async function resyncParentPushTokenAfterResumeInner(options: ParentPushResyncOptions): Promise<void> {
   if (typeof window === "undefined") return;
-  if (!isPushEnabled()) return;
+
+  const { parentUid, enabled, force = false } = options;
+  if (!parentUid) return;
+
+  const enabledVerified = await resolveParentPushEnabled(parentUid, enabled);
+  if (!enabledVerified) return;
 
   const now = Date.now();
   if (!force && now - lastResyncFinishedAt < RESYNC_MIN_INTERVAL_MS) {
     return;
   }
 
-  const { token, error } = await fetchFcmToken();
+  const { token, error } = await fetchFcmToken({ rotateToken: force });
   if (!token || error) return;
 
-  try {
-    await callSyncParentPushSubscription(true, token);
+  for (let attempt = 0; attempt < RESYNC_MAX_ATTEMPTS; attempt++) {
     try {
-      sessionStorage.setItem(FCM_LAST_SYNCED_TOKEN_STORAGE_KEY, token);
+      await callSyncParentPushSubscription(true, token);
+      try {
+        sessionStorage.setItem(FCM_LAST_SYNCED_TOKEN_STORAGE_KEY, token);
+      } catch {
+        /* ignore */
+      }
+      lastResyncFinishedAt = Date.now();
+      return;
     } catch {
-      /* ignore */
+      if (attempt < RESYNC_MAX_ATTEMPTS - 1) {
+        await sleep(1000 * (attempt + 1));
+      }
     }
-    lastResyncFinishedAt = Date.now();
-  } catch {
-    /* 다음 복귀 시 재시도 */
   }
 }
 
 /**
- * 앱 재실행·탭 복귀 시 FCM 토큰을 서버와 맞춥니다.
- * visibility/focus/onSnapshot이 동시에 호출돼 문서가 여러 개 쌓이지 않도록 in-flight·최소 간격을 둡니다.
+ * 앱 재실행·탭 복귀·SW 갱신 시 FCM 토큰을 서버와 조용히 맞춥니다 (iOS/Android PWA 공통).
  */
-export async function resyncParentPushTokenAfterResume(
-  isPushEnabled: () => boolean,
-  opts?: { force?: boolean },
-): Promise<void> {
-  const force = opts?.force === true;
+export async function resyncParentPushTokenAfterResume(options: ParentPushResyncOptions): Promise<void> {
   if (resyncInFlight) {
     await resyncInFlight;
     return;
   }
-  resyncInFlight = resyncParentPushTokenAfterResumeInner(isPushEnabled, force).finally(() => {
+  resyncInFlight = resyncParentPushTokenAfterResumeInner(options).finally(() => {
     resyncInFlight = null;
   });
   await resyncInFlight;
