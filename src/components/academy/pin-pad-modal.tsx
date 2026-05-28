@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { ProcessStatusModal } from "@/components/ui/process-status-modal";
 
 const PIN_LEN = 4;
 
@@ -40,6 +41,8 @@ export type PinPadModalProps = {
   description?: string;
   error?: string | null;
   busy?: boolean;
+  busyTitle?: string;
+  busyDescription?: string;
   /** 단계가 바뀔 때마다 바뀌는 값 — 입력란·키패드 배치 초기화 */
   phaseKey?: string | number;
   onCloseAction: () => void;
@@ -52,6 +55,8 @@ export function PinPadModal({
   description,
   error,
   busy = false,
+  busyTitle = "처리 중...",
+  busyDescription,
   phaseKey = 0,
   onCloseAction,
   onCompleteAction,
@@ -93,6 +98,16 @@ export function PinPadModal({
 
   if (!open) return null;
 
+  if (busy) {
+    return (
+      <ProcessStatusModal
+        open={true}
+        title={busyTitle}
+        description={busyDescription}
+      />
+    );
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 p-4 sm:items-center"
@@ -115,7 +130,6 @@ export function PinPadModal({
           <button
             type="button"
             onClick={onCloseAction}
-            disabled={busy}
             className="shrink-0 rounded-full px-2 py-1 text-sm text-neutral-500 hover:bg-black/5 dark:hover:bg-white/10"
           >
             닫기
@@ -154,19 +168,14 @@ export function PinPadModal({
               <button
                 key={`${key}-${idx}`}
                 type="button"
-                disabled={busy}
                 onClick={() => (isBack ? backspace() : append(key))}
-                className="flex h-12 items-center justify-center rounded-2xl bg-neutral-100 text-lg font-medium text-foreground transition hover:bg-neutral-200 disabled:opacity-50 dark:bg-white/10 dark:hover:bg-white/15"
+                className="flex h-12 items-center justify-center rounded-2xl bg-neutral-100 text-lg font-medium text-foreground transition hover:bg-neutral-200 dark:bg-white/10 dark:hover:bg-white/15"
               >
                 {key}
               </button>
             );
           })}
         </div>
-
-        {busy ? (
-          <p className="mt-4 text-center text-xs text-neutral-500">처리 중…</p>
-        ) : null}
       </div>
     </div>
   );

@@ -900,6 +900,8 @@ export function AcademyDashboard() {
         description="키오스크를 끄려면 종료 PIN 4자리를 입력해 주세요."
         error={kioskExitPinError}
         busy={kioskActionBusy}
+        busyTitle="키오스크 종료 중..."
+        busyDescription="잠시만 기다려 주세요."
         onCloseAction={() => {
           if (!kioskActionBusy) {
             setKioskExitPinOpen(false);

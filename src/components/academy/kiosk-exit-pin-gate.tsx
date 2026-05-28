@@ -78,6 +78,8 @@ export function KioskExitPinGate({
         description="이동을 계속하려면 종료 PIN 4자리를 입력해 주세요."
         error={pinError}
         busy={busy}
+        busyTitle="키오스크 종료 중..."
+        busyDescription="잠시만 기다려 주세요."
         onCloseAction={onCancelAction}
         onCompleteAction={(pin) => void onPinCompleteAction(pin)}
       />
