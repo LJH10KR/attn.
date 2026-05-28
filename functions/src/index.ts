@@ -226,6 +226,7 @@ export {
   syncParentPushSubscription,
   listAttendanceNotifications,
 } from "./push";
+export { retryAttendancePushDelivery } from "./attendance-push-delivery";
 export {
   activateParent,
   deactivateParent,

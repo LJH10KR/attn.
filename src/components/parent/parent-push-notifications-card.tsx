@@ -93,7 +93,10 @@ export function ParentPushNotificationsCard() {
           setError(tokenErr ?? "푸시 등록에 실패했습니다.");
           return;
         }
-        await callSyncParentPushSubscription(true, token);
+        await callSyncParentPushSubscription(true, token, {
+          clientAtMillis: Date.now(),
+          syncMode: "normal",
+        });
         try {
           sessionStorage.setItem(FCM_LAST_SYNCED_TOKEN_STORAGE_KEY, token);
         } catch {

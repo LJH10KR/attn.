@@ -85,6 +85,13 @@ export const syncParentPushSubscription = onCall(async (request) => {
   const enabled = Boolean(request.data?.enabled);
   const fcmTokenRaw = request.data?.fcmToken;
   const fcmToken = typeof fcmTokenRaw === "string" ? fcmTokenRaw.trim() : "";
+  const clientAtMillisRaw = request.data?.clientAtMillis;
+  const clientAtMillis =
+    typeof clientAtMillisRaw === "number" && Number.isFinite(clientAtMillisRaw)
+      ? Math.floor(clientAtMillisRaw)
+      : undefined;
+  const syncModeRaw = request.data?.syncMode;
+  const syncMode = syncModeRaw === "force_rotate" ? "force_rotate" : "normal";
   if (enabled && (!fcmToken || fcmToken.length < 80)) {
     throw new HttpsError("invalid-argument", "유효한 FCM 토큰이 필요합니다.");
   }
@@ -118,11 +125,17 @@ export const syncParentPushSubscription = onCall(async (request) => {
     updatedAt: FieldValue.serverTimestamp(),
     invalidDeliveryCount: 0,
   });
+  const tokenHash = crypto.createHash("sha256").update(fcmToken).digest("hex").slice(0, 16);
   batch.set(
     userRef,
     {
       pushNotificationsEnabled: true,
       pushSubscriptionLastSyncedAt: FieldValue.serverTimestamp(),
+      pushLastSyncServerAt: FieldValue.serverTimestamp(),
+      pushLastSyncClientAtMillis: clientAtMillis ?? null,
+      pushLastSyncMode: syncMode,
+      pushLastSyncResult: "ok",
+      pushLastSyncTokenHash: tokenHash,
       updatedAt: FieldValue.serverTimestamp(),
     },
     { merge: true },

@@ -130,11 +130,25 @@ export async function removeFcmTokenLocal(): Promise<void> {
   }
 }
 
-export async function callSyncParentPushSubscription(enabled: boolean, fcmToken?: string): Promise<void> {
+export type ParentPushSyncMeta = {
+  clientAtMillis?: number;
+  syncMode?: "normal" | "force_rotate";
+};
+
+export async function callSyncParentPushSubscription(
+  enabled: boolean,
+  fcmToken?: string,
+  meta?: ParentPushSyncMeta,
+): Promise<void> {
   const fn = httpsCallable(getFirebaseFunctions(), "syncParentPushSubscription");
   await fn(
     enabled
-      ? { enabled: true, fcmToken: fcmToken ?? "" }
+      ? {
+          enabled: true,
+          fcmToken: fcmToken ?? "",
+          clientAtMillis: meta?.clientAtMillis,
+          syncMode: meta?.syncMode ?? "normal",
+        }
       : { enabled: false },
   );
 }
@@ -211,7 +225,10 @@ async function resyncParentPushTokenAfterResumeInner(options: ParentPushResyncOp
 
   for (let attempt = 0; attempt < RESYNC_MAX_ATTEMPTS; attempt++) {
     try {
-      await callSyncParentPushSubscription(true, token);
+      await callSyncParentPushSubscription(true, token, {
+        clientAtMillis: Date.now(),
+        syncMode: force ? "force_rotate" : "normal",
+      });
       try {
         sessionStorage.setItem(FCM_LAST_SYNCED_TOKEN_STORAGE_KEY, token);
       } catch {

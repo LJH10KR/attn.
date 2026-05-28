@@ -2,11 +2,10 @@ import * as admin from "firebase-admin";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
-import { countUserDashboardBellItems } from "./app-badge-count";
 import {
-  applyMulticastDeliveryResults,
-  type PushTokenBucket,
-} from "./push-subscription-delivery";
+  createAttendancePushDeliveryDoc,
+  deliverAttendancePushOnce,
+} from "./attendance-push-delivery";
 
 export const ATTENDANCE_COOLDOWN_MS = 60_000;
 
@@ -14,6 +13,22 @@ const TEMP_TEACHER_ATTENDANCE_COOLDOWN_BYPASS_PER_UTC_DAY = 10;
 
 function utcDayKey(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function formatRequestedTimeLabel(date: Date): string {
+  try {
+    const hhmm = new Intl.DateTimeFormat("ko-KR", {
+      timeZone: "Asia/Seoul",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(date);
+    return `요청 시각 ${hhmm}`;
+  } catch {
+    const hh = String(date.getHours()).padStart(2, "0");
+    const mm = String(date.getMinutes()).padStart(2, "0");
+    return `요청 시각 ${hh}:${mm}`;
+  }
 }
 
 export type AttendanceSender = {
@@ -108,10 +123,11 @@ export async function sendStudentAttendanceNotificationCore(
 
   const studentName =
     typeof studentData.name === "string" && studentData.name ? studentData.name : "학생";
+  const requestedAtLabel = formatRequestedTimeLabel(new Date());
   const body =
     kind === "present"
-      ? `${studentName} 학생이 출석했습니다.`
-      : `${studentName} 학생이 결석 처리되었습니다.`;
+      ? `${studentName} 학생이 출석했습니다. (${requestedAtLabel})`
+      : `${studentName} 학생이 결석 처리되었습니다. (${requestedAtLabel})`;
 
   await parentUserRef.collection("dashboardBellItems").add({
     kind: kind === "present" ? "attendance_present" : "attendance_absent",
@@ -125,7 +141,7 @@ export async function sendStudentAttendanceNotificationCore(
     createdAt: FieldValue.serverTimestamp(),
   });
 
-  await db.collection(`academies/${academyId}/attendanceNotifications`).add({
+  const notifRef = await db.collection(`academies/${academyId}/attendanceNotifications`).add({
     kind,
     academyId,
     studentId,
@@ -142,78 +158,31 @@ export async function sendStudentAttendanceNotificationCore(
     return { ok: true as const, sent: 0, reason: "parent_opt_out" as const };
   }
 
-  const userLastSyncedAt = userSnap.get("pushSubscriptionLastSyncedAt") as Timestamp | undefined;
-
   const subsSnap = await parentUserRef.collection("pushSubscriptions").get();
-  const buckets: PushTokenBucket[] = [];
-  const indexByToken = new Map<string, number>();
-  for (const d of subsSnap.docs) {
+  const hasToken = subsSnap.docs.some((d) => {
     const t = d.get("token");
-    if (typeof t !== "string" || t.length <= 20) continue;
-    const updatedAt = d.get("updatedAt") as Timestamp | undefined;
-    const millis = updatedAt?.toMillis() ?? 0;
-    const invalidDeliveryCount =
-      typeof d.get("invalidDeliveryCount") === "number"
-        ? (d.get("invalidDeliveryCount") as number)
-        : 0;
-    const existing = indexByToken.get(t);
-    if (existing !== undefined) {
-      buckets[existing]!.refs.push(d.ref);
-      buckets[existing]!.invalidCounts.push(invalidDeliveryCount);
-      buckets[existing]!.updatedAtMillis = Math.max(buckets[existing]!.updatedAtMillis, millis);
-    } else {
-      indexByToken.set(t, buckets.length);
-      buckets.push({
-        token: t,
-        refs: [d.ref],
-        updatedAtMillis: millis,
-        invalidCounts: [invalidDeliveryCount],
-      });
-    }
-  }
-  const tokens = buckets.map((b) => b.token);
-
-  if (tokens.length === 0) {
+    return typeof t === "string" && t.length > 20;
+  });
+  if (!hasToken) {
     return { ok: true as const, sent: 0, reason: "no_token" as const };
   }
 
-  const appBadgeCount = await countUserDashboardBellItems(db, parentUserId);
-
-  const dataPayload: Record<string, string> = {
-    title: "attn.",
-    body,
-    type: "attendance",
-    status: kind,
-    studentId,
-    studentName,
+  const deliveryId = notifRef.id;
+  await createAttendancePushDeliveryDoc(db, {
+    deliveryId,
     academyId,
+    studentId,
     parentUserId,
-    appBadgeCount: String(appBadgeCount),
-  };
+    kind,
+    studentName,
+    body,
+  });
 
   try {
-    const resp = await admin.messaging().sendEachForMulticast({
-      tokens,
-      data: dataPayload,
+    const { sent, failureCount } = await deliverAttendancePushOnce(db, deliveryId, {
+      allowScheduleRetries: true,
     });
-    if (resp.failureCount > 0) {
-      logger.warn("sendStudentAttendanceNotification partial failure", {
-        success: resp.successCount,
-        failure: resp.failureCount,
-        parentUserId,
-      });
-    }
-
-    await applyMulticastDeliveryResults({
-      db,
-      parentUserId,
-      userLastSyncedAt,
-      buckets,
-      responses: resp.responses,
-      logContext: "sendStudentAttendanceNotification",
-    });
-
-    return { ok: true as const, sent: resp.successCount, failureCount: resp.failureCount };
+    return { ok: true as const, sent, failureCount };
   } catch (e) {
     logger.error("sendStudentAttendanceNotificationCore", e);
     throw new HttpsError("internal", "알림 전송에 실패했습니다.");
