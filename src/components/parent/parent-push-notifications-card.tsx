@@ -191,7 +191,7 @@ export function ParentPushNotificationsCard() {
             >
               <span
                 className={`absolute top-1 left-1 h-7 w-7 rounded-full bg-white shadow transition-transform ${
-                  remoteEnabled ? "translate-x-[1.35rem]" : "translate-x-0"
+                  remoteEnabled ? "translate-x-4" : "translate-x-0"
                 }`}
               />
             </button>

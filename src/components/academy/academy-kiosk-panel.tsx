@@ -110,15 +110,55 @@ export function AcademyKioskPanel({
         <label className="sr-only" htmlFor="kiosk-search">
           학생 검색
         </label>
-        <input
-          id="kiosk-search"
-          type="search"
-          autoComplete="off"
-          placeholder="이름 · 전화 끝 4자리 · 학부모 이름"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          className="w-full rounded-2xl border border-neutral-200/80 bg-white/80 px-4 py-3.5 text-base shadow-sm outline-none ring-0 placeholder:text-neutral-400 focus:border-[#222]/30 dark:border-white/12 dark:bg-white/8 dark:focus:border-white/25"
-        />
+        <div className="overflow-hidden rounded-full border border-white/65 bg-white/38 p-[2px] shadow-[0_12px_30px_-14px_rgba(0,0,0,0.10),0_-12px_30px_-14px_rgba(0,0,0,0.10),12px_0_30px_-14px_rgba(0,0,0,0.10),-12px_0_30px_-14px_rgba(0,0,0,0.10),inset_0_1px_0_rgba(255,255,255,0.8)] backdrop-blur-xl dark:border-white/20 dark:bg-white/12 dark:shadow-[0_14px_34px_-16px_rgba(0,0,0,0.36),0_-14px_34px_-16px_rgba(0,0,0,0.36),14px_0_34px_-16px_rgba(0,0,0,0.36),-14px_0_34px_-16px_rgba(0,0,0,0.36),inset_0_1px_0_rgba(255,255,255,0.2)]">
+          <div className="flex items-center gap-2 rounded-full bg-white/68 px-3.5 py-2.5 dark:bg-neutral-900/72">
+            <svg
+              aria-hidden
+              viewBox="0 0 24 24"
+              className="h-5 w-5 shrink-0 text-neutral-500 dark:text-neutral-400"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.5-3.5" />
+            </svg>
+            <input
+              id="kiosk-search"
+              type="search"
+              autoComplete="off"
+              placeholder="이름 · 전화 끝 4자리 · 학부모 이름"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="h-9 min-w-0 flex-1 bg-transparent text-base text-foreground outline-none ring-0 placeholder:text-neutral-400"
+            />
+            {query.length > 0 ? (
+              <button
+                type="button"
+                aria-label="검색어 지우기"
+                onClick={() => setQuery("")}
+                className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neutral-300/55 bg-white/55 text-neutral-700 shadow-[0_4px_14px_-4px_rgba(0,0,0,0.12)] backdrop-blur-md transition hover:bg-white/85 active:scale-[0.98] dark:border-white/12 dark:bg-white/10 dark:text-neutral-200 dark:hover:bg-white/15"
+              >
+                <span className="pointer-events-none absolute inset-[1px] rounded-full bg-gradient-to-br from-white/70 via-white/20 to-transparent dark:from-white/20 dark:via-white/5 dark:to-transparent" />
+                <svg
+                  aria-hidden
+                  viewBox="0 0 24 24"
+                  className="relative z-[1] h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </svg>
+              </button>
+            ) : null}
+          </div>
+        </div>
       </div>
 
       {toast ? (
