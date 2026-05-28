@@ -251,6 +251,8 @@ function AcademySettingsInner() {
         description="숫자 4자리를 입력해 주세요."
         error={pinModalError}
         busy={busy}
+        busyTitle="PIN 저장 중..."
+        busyDescription="잠시만 기다려 주세요."
         onCloseAction={() => {
           if (!busy) {
             setExitPinModal(null);

@@ -96,6 +96,8 @@ export function ParentCheckInPinCard({ academyId, student, onUpdatedAction }: Pr
         description={`${student.name} 학생`}
         error={error}
         busy={busy}
+        busyTitle="출석 PIN 저장 중..."
+        busyDescription="잠시만 기다려 주세요."
         onCloseAction={() => {
           if (!busy) {
             setOpen(false);

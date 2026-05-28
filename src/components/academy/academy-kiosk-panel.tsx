@@ -196,6 +196,8 @@ export function AcademyKioskPanel({
         }
         error={pinError}
         busy={busy}
+        busyTitle="출석 처리 중..."
+        busyDescription="잠시만 기다려 주세요."
         onCloseAction={() => {
           if (!busy) {
             setPinStudent(null);
