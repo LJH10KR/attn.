@@ -127,7 +127,7 @@ export function AcademyKioskPanel({
             </svg>
             <input
               id="kiosk-search"
-              type="search"
+              type="text"
               autoComplete="off"
               placeholder="이름 · 전화 끝 4자리 · 학부모 이름"
               value={query}
