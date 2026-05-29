@@ -2,7 +2,10 @@
 
 import { httpsCallable } from "firebase/functions";
 import { useCallback, useMemo, useState } from "react";
+import { KioskHangulKeyboard } from "@/components/academy/kiosk-hangul-keyboard";
+import { KioskNumericKeypad } from "@/components/academy/kiosk-numeric-keypad";
 import { PinPadModal } from "@/components/academy/pin-pad-modal";
+import { appendHangulJamo, backspaceHangul } from "@/lib/hangul/kiosk-hangul-input";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { FirebaseError } from "firebase/app";
 
@@ -15,6 +18,8 @@ export type KioskStudentRow = {
   parentName: string;
 };
 
+type SearchMode = "phone" | "name";
+
 type Props = {
   academyId: string;
   requireStudentCheckInPin: boolean;
@@ -26,13 +31,15 @@ function normalizeQuery(q: string): string {
   return q.trim().toLowerCase().replace(/\s+/g, "");
 }
 
-function matchesRow(row: KioskStudentRow, q: string): boolean {
+function matchesRow(row: KioskStudentRow, q: string, mode: SearchMode): boolean {
   const nq = normalizeQuery(q);
   if (!nq) return false;
-  if (normalizeQuery(row.name).includes(nq)) return true;
-  if (row.parentName && normalizeQuery(row.parentName).includes(nq)) return true;
+  if (mode === "name") {
+    if (normalizeQuery(row.name).includes(nq)) return true;
+    if (row.parentName && normalizeQuery(row.parentName).includes(nq)) return true;
+    return false;
+  }
   const phoneQ = nq.replace(/\D/g, "");
-  // 숫자 없는 검색어는 ""가 되어 전화 끝 4자리에 모두 매칭되는 버그 방지
   if (phoneQ.length > 0 && row.phoneLast4?.includes(phoneQ)) return true;
   return false;
 }
@@ -42,12 +49,18 @@ function callableMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
+const MODE_OPTIONS: { id: SearchMode; label: string }[] = [
+  { id: "phone", label: "전화번호" },
+  { id: "name", label: "이름" },
+];
+
 export function AcademyKioskPanel({
   academyId,
   requireStudentCheckInPin,
   rows,
   onCheckInDoneAction,
 }: Props) {
+  const [searchMode, setSearchMode] = useState<SearchMode>("phone");
   const [query, setQuery] = useState("");
   const [confirmStudent, setConfirmStudent] = useState<KioskStudentRow | null>(null);
   const [pinStudent, setPinStudent] = useState<KioskStudentRow | null>(null);
@@ -57,14 +70,41 @@ export function AcademyKioskPanel({
 
   const trimmedQuery = query.trim();
   const showResults = trimmedQuery.length > 0;
+  const keyboardHidden = Boolean(confirmStudent || pinStudent);
 
   const filtered = useMemo(
     () =>
       showResults
-        ? rows.filter((r) => matchesRow(r, trimmedQuery)).slice(0, 40)
+        ? rows.filter((r) => matchesRow(r, trimmedQuery, searchMode)).slice(0, 40)
         : [],
-    [rows, trimmedQuery, showResults],
+    [rows, trimmedQuery, showResults, searchMode],
   );
+
+  const switchSearchMode = (mode: SearchMode) => {
+    if (mode === searchMode) return;
+    setSearchMode(mode);
+    setQuery("");
+  };
+
+  const appendPhoneDigit = useCallback((digit: string) => {
+    setQuery((prev) => (prev + digit).replace(/\D/g, "").slice(0, 4));
+  }, []);
+
+  const backspacePhone = useCallback(() => {
+    setQuery((prev) => prev.slice(0, -1));
+  }, []);
+
+  const appendJamo = useCallback((jamo: string) => {
+    setQuery((prev) => appendHangulJamo(prev, jamo));
+  }, []);
+
+  const appendSpace = useCallback(() => {
+    setQuery((prev) => `${prev} `);
+  }, []);
+
+  const backspaceName = useCallback(() => {
+    setQuery((prev) => backspaceHangul(prev));
+  }, []);
 
   const submitCheckIn = useCallback(
     async (student: KioskStudentRow, checkInPin?: string) => {
@@ -104,9 +144,38 @@ export function AcademyKioskPanel({
     }
   };
 
+  const searchPlaceholder =
+    searchMode === "phone" ? "전화번호 끝 4자리" : "학생 · 학부모 이름";
+
   return (
     <div className="flex min-h-[50dvh] flex-col">
       <div className="sticky top-[calc(max(0.85rem,env(safe-area-inset-top))+3.25rem)] z-20 -mx-4 bg-background/90 px-4 pb-3 pt-2 backdrop-blur-md">
+        <div
+          className="mb-2 flex rounded-full border border-white/55 bg-white/30 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] backdrop-blur-md dark:border-white/15 dark:bg-white/8"
+          role="tablist"
+          aria-label="검색 방식"
+        >
+          {MODE_OPTIONS.map(({ id, label }) => {
+            const active = searchMode === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => switchSearchMode(id)}
+                className={`flex-1 rounded-full py-2 text-sm font-medium transition ${
+                  active
+                    ? "bg-white text-foreground shadow-sm dark:bg-neutral-800 dark:text-neutral-50"
+                    : "text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+
         <label className="sr-only" htmlFor="kiosk-search">
           학생 검색
         </label>
@@ -128,11 +197,17 @@ export function AcademyKioskPanel({
             <input
               id="kiosk-search"
               type="text"
+              readOnly
+              inputMode="none"
               autoComplete="off"
-              placeholder="이름 · 전화 끝 4자리 · 학부모 이름"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              placeholder={searchPlaceholder}
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="h-9 min-w-0 flex-1 bg-transparent text-base text-foreground outline-none ring-0 placeholder:text-neutral-400"
+              onChange={() => {}}
+              onFocus={(e) => e.currentTarget.blur()}
+              className="h-9 min-w-0 flex-1 cursor-default bg-transparent text-base text-foreground outline-none ring-0 placeholder:text-neutral-400"
             />
             {query.length > 0 ? (
               <button
@@ -159,6 +234,11 @@ export function AcademyKioskPanel({
             ) : null}
           </div>
         </div>
+        {searchMode === "name" ? (
+          <p className="mt-2 text-center text-xs text-neutral-500 dark:text-neutral-400">
+            전화번호가 없는 학생은 이름으로 검색해 주세요.
+          </p>
+        ) : null}
       </div>
 
       {toast ? (
@@ -168,7 +248,7 @@ export function AcademyKioskPanel({
       ) : null}
 
       {showResults ? (
-        <ul className="flex flex-1 flex-col gap-2 pb-8">
+        <ul className="flex flex-1 flex-col gap-2 pb-[20rem]">
           {filtered.length === 0 ? (
             <li className="py-16 text-center text-sm text-neutral-500">검색 결과가 없습니다.</li>
           ) : (
@@ -189,6 +269,25 @@ export function AcademyKioskPanel({
             ))
           )}
         </ul>
+      ) : (
+        <div className="flex-1 pb-[20rem]" aria-hidden />
+      )}
+
+      {!keyboardHidden ? (
+        <div className="fixed inset-x-0 bottom-0 z-30 mx-auto max-w-lg">
+          {searchMode === "phone" ? (
+            <KioskNumericKeypad
+              onDigitAction={appendPhoneDigit}
+              onBackspaceAction={backspacePhone}
+            />
+          ) : (
+            <KioskHangulKeyboard
+              onJamoAction={appendJamo}
+              onSpaceAction={appendSpace}
+              onBackspaceAction={backspaceName}
+            />
+          )}
+        </div>
       ) : null}
 
       {confirmStudent ? (
