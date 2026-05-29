@@ -49,6 +49,10 @@ import {
   kioskModeStorageKey,
   loadKioskStudentRows,
 } from "@/lib/academy/kiosk-student-rows";
+import {
+  KIOSK_MODE_CHANGED_EVENT,
+  notifyKioskModeChanged,
+} from "@/lib/academy/kiosk-mode-events";
 import { verifyKioskExitPinAndClear } from "@/lib/academy/kiosk-exit";
 import { FirebaseError } from "firebase/app";
 import { SlideSwitch } from "@/components/ui/slide-switch";
@@ -352,7 +356,11 @@ export function AcademyDashboard() {
     };
     syncKioskFromStorage();
     window.addEventListener("focus", syncKioskFromStorage);
-    return () => window.removeEventListener("focus", syncKioskFromStorage);
+    window.addEventListener(KIOSK_MODE_CHANGED_EVENT, syncKioskFromStorage);
+    return () => {
+      window.removeEventListener("focus", syncKioskFromStorage);
+      window.removeEventListener(KIOSK_MODE_CHANGED_EVENT, syncKioskFromStorage);
+    };
   }, [academyId, gate]);
 
   useEffect(() => {
@@ -404,6 +412,7 @@ export function AcademyDashboard() {
       /* ignore */
     }
     setKioskMode(on);
+    notifyKioskModeChanged();
   }, []);
 
   const callableMsg = (err: unknown, fallback: string) =>

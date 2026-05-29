@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useState, type ReactNode } from "react";
 import { PinPadModal } from "@/components/academy/pin-pad-modal";
 import { isKioskModeActive } from "@/lib/academy/kiosk-student-rows";
+import { notifyKioskModeChanged } from "@/lib/academy/kiosk-mode-events";
 import { verifyKioskExitPinAndClear } from "@/lib/academy/kiosk-exit";
 import { FirebaseError } from "firebase/app";
 
@@ -50,6 +51,7 @@ export function KioskExitPinGate({
         await verifyKioskExitPinAndClear(academyId, pin);
         setUnlocked(true);
         setPinOpen(false);
+        notifyKioskModeChanged();
         onUnlockedAction?.();
       } catch (err) {
         setPinError(callableMessage(err, "PIN 확인에 실패했습니다."));
