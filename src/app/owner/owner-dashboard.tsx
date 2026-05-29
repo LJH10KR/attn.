@@ -29,6 +29,7 @@ import {
 import { fetchIsOwner } from "@/lib/firebase/owner-profile";
 import { COLLECTIONS, type Academy } from "@/lib/firebase/attn-schema";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
+import { OwnerEasyAcademyWizard } from "@/components/owner/owner-easy-academy-wizard";
 
 type AcademyRow = Academy & { id: string };
 
@@ -80,14 +81,12 @@ export function OwnerDashboard() {
 
   const [modal, setModal] = useState<"create" | "edit" | "delete" | null>(null);
   const [editTarget, setEditTarget] = useState<AcademyRow | null>(null);
-  const [formAcademyId, setFormAcademyId] = useState("");
   const [formName, setFormName] = useState("");
-  const [formPortalPassword, setFormPortalPassword] = useState("");
-  const [formPortalPassword2, setFormPortalPassword2] = useState("");
   const [formStatus, setFormStatus] = useState<"active" | "archived">("active");
   const [editPortalPassword, setEditPortalPassword] = useState("");
   const [editPortalPassword2, setEditPortalPassword2] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<AcademyRow | null>(null);
+  const [easyWizardOpen, setEasyWizardOpen] = useState(false);
   const ownerInitGenerationRef = useRef(0);
   const ownerListLoadedUidRef = useRef<string | null>(null);
 
@@ -185,14 +184,7 @@ export function OwnerDashboard() {
   }, [configured, gate, router]);
 
   const openCreate = useCallback(() => {
-    setFormError(null);
-    setFormAcademyId("");
-    setFormName("");
-    setFormPortalPassword("");
-    setFormPortalPassword2("");
-    setFormStatus("active");
-    setEditTarget(null);
-    setModal("create");
+    setEasyWizardOpen(true);
   }, []);
 
   const openEdit = useCallback((row: AcademyRow) => {
@@ -216,67 +208,6 @@ export function OwnerDashboard() {
     setDeleteTarget(null);
     setFormError(null);
   }, []);
-
-  const onCreate = useCallback(async () => {
-    const auth = getFirebaseAuth();
-    if (!auth.currentUser) {
-      return;
-    }
-    const academyId = formAcademyId.trim().toLowerCase();
-    const name = formName.trim();
-    if (!academyId) {
-      setFormError("학원 로그인 ID를 입력해 주세요.");
-      return;
-    }
-    if (!/^[a-z0-9][a-z0-9_-]{1,47}$/.test(academyId)) {
-      setFormError(
-        "학원 ID는 3~48자, 영문 소문자·숫자·밑줄(_)·하이픈(-)만 사용할 수 있습니다.",
-      );
-      return;
-    }
-    if (!name) {
-      setFormError("학원 이름을 입력해 주세요.");
-      return;
-    }
-    if (formPortalPassword.length < 6) {
-      setFormError("포털 비밀번호는 6자 이상이어야 합니다.");
-      return;
-    }
-    if (formPortalPassword !== formPortalPassword2) {
-      setFormError("포털 비밀번호가 서로 일치하지 않습니다.");
-      return;
-    }
-    setBusy(true);
-    setFormError(null);
-    try {
-      const fn = httpsCallable(
-        getFirebaseFunctions(),
-        "createAcademyWithPortal",
-      );
-      await fn({
-        academyId,
-        name,
-        portalPassword: formPortalPassword,
-        status: formStatus,
-      });
-      closeModal();
-    } catch (err) {
-      if (err instanceof FirebaseError) {
-        setFormError(ownerFirebaseErrorMessage(err));
-      } else {
-        setFormError("등록에 실패했습니다.");
-      }
-    } finally {
-      setBusy(false);
-    }
-  }, [
-    closeModal,
-    formAcademyId,
-    formName,
-    formPortalPassword,
-    formPortalPassword2,
-    formStatus,
-  ]);
 
   const onUpdate = useCallback(async () => {
     if (!editTarget) {
@@ -487,7 +418,7 @@ export function OwnerDashboard() {
                       {a.name}
                     </p>
                     <p className="mt-1 font-mono text-[10px] text-neutral-400">
-                      ID · {a.id}
+                      로그인 번호 · {a.attnId ?? a.id}
                     </p>
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
                       <span
@@ -541,7 +472,12 @@ export function OwnerDashboard() {
 
       <DashboardBottomScrim />
 
-      {modal === "create" || modal === "edit" ? (
+      <OwnerEasyAcademyWizard
+        open={easyWizardOpen}
+        onCloseAction={() => setEasyWizardOpen(false)}
+      />
+
+      {modal === "edit" ? (
         <div
           className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-black/25 p-4 py-8"
           role="dialog"
@@ -556,42 +492,19 @@ export function OwnerDashboard() {
               id="academy-form-title"
               className="shrink-0 text-lg font-semibold text-foreground"
             >
-              {modal === "create" ? "학원 등록" : "학원 수정"}
+              학원 수정
             </h3>
             <div className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-              {modal === "create" ? (
-                <div>
-                  <label
-                    className="mb-1 block text-xs font-medium text-neutral-600"
-                    htmlFor="ac-login-id"
-                  >
-                    학원 로그인 ID
-                  </label>
-                  <input
-                    id="ac-login-id"
-                    value={formAcademyId}
-                    onChange={(e) =>
-                      setFormAcademyId(e.target.value.toLowerCase())
-                    }
-                    className={inputClass}
-                    placeholder="예: haesal-math"
-                    maxLength={48}
-                    autoComplete="off"
-                  />
-                  <p className="mt-1 text-[11px] text-neutral-500">
-                    포털 로그인 시 사용합니다. 3~48자, 소문자·숫자·_-
-                  </p>
-                </div>
-              ) : editTarget ? (
+              {editTarget ? (
                 <div>
                   <p className="mb-1 text-xs font-medium text-neutral-600">
-                    학원 로그인 ID
+                    학원 로그인 번호
                   </p>
                   <p className="rounded-2xl border border-neutral-200/80 bg-white/40 px-4 py-3 font-mono text-sm text-foreground">
-                    {editTarget.id}
+                    {editTarget.attnId ?? editTarget.id}
                   </p>
                   <p className="mt-1 text-[11px] text-neutral-500">
-                    등록 후에는 ID를 바꿀 수 없습니다.
+                    등록 후에는 번호를 바꿀 수 없습니다.
                   </p>
                 </div>
               ) : null}
@@ -611,65 +524,27 @@ export function OwnerDashboard() {
                   maxLength={80}
                 />
               </div>
-              {modal === "create" ? (
-                <>
-                  <div>
-                    <label
-                      className="mb-1 block text-xs font-medium text-neutral-600"
-                      htmlFor="ac-portal-pw"
-                    >
-                      포털 비밀번호
-                    </label>
-                    <input
-                      id="ac-portal-pw"
-                      type="password"
-                      value={formPortalPassword}
-                      onChange={(e) => setFormPortalPassword(e.target.value)}
-                      className={inputClass}
-                      placeholder="6자 이상"
-                      autoComplete="new-password"
-                    />
-                  </div>
-                  <div>
-                    <label
-                      className="mb-1 block text-xs font-medium text-neutral-600"
-                      htmlFor="ac-portal-pw2"
-                    >
-                      포털 비밀번호 확인
-                    </label>
-                    <input
-                      id="ac-portal-pw2"
-                      type="password"
-                      value={formPortalPassword2}
-                      onChange={(e) => setFormPortalPassword2(e.target.value)}
-                      className={inputClass}
-                      autoComplete="new-password"
-                    />
-                  </div>
-                </>
-              ) : (
-                <>
-                  <p className="text-xs font-medium text-neutral-600">
-                    포털 비밀번호 변경 (선택)
-                  </p>
-                  <input
-                    type="password"
-                    value={editPortalPassword}
-                    onChange={(e) => setEditPortalPassword(e.target.value)}
-                    className={inputClass}
-                    placeholder="변경 시에만 입력 (6자 이상)"
-                    autoComplete="new-password"
-                  />
-                  <input
-                    type="password"
-                    value={editPortalPassword2}
-                    onChange={(e) => setEditPortalPassword2(e.target.value)}
-                    className={inputClass}
-                    placeholder="새 비밀번호 확인"
-                    autoComplete="new-password"
-                  />
-                </>
-              )}
+              <>
+                <p className="text-xs font-medium text-neutral-600">
+                  포털 비밀번호 변경 (선택)
+                </p>
+                <input
+                  type="password"
+                  value={editPortalPassword}
+                  onChange={(e) => setEditPortalPassword(e.target.value)}
+                  className={inputClass}
+                  placeholder="변경 시에만 입력 (6자 이상)"
+                  autoComplete="new-password"
+                />
+                <input
+                  type="password"
+                  value={editPortalPassword2}
+                  onChange={(e) => setEditPortalPassword2(e.target.value)}
+                  className={inputClass}
+                  placeholder="새 비밀번호 확인"
+                  autoComplete="new-password"
+                />
+              </>
               <div>
                 <label
                   className="mb-1 block text-xs font-medium text-neutral-600"
@@ -706,10 +581,10 @@ export function OwnerDashboard() {
               <button
                 type="button"
                 disabled={busy}
-                onClick={modal === "create" ? onCreate : onUpdate}
+                onClick={() => void onUpdate()}
                 className="flex-1 rounded-2xl bg-[#222] dark:bg-neutral-100 py-3 text-sm font-medium text-white dark:text-neutral-950 disabled:opacity-50"
               >
-                {busy ? "처리 중…" : modal === "create" ? "등록" : "저장"}
+                {busy ? "처리 중…" : "저장"}
               </button>
             </div>
           </div>

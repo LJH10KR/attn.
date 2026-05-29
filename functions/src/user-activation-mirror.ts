@@ -4,6 +4,7 @@ import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import * as logger from "firebase-functions/logger";
 
 type TeacherStatus =
+  | "pending_setup"
   | "invitation_needed"
   | "invitation_sent"
   | "pending_registration"
@@ -13,6 +14,7 @@ type TeacherStatus =
 type ParentStatus = TeacherStatus;
 
 const TEACHER_STATUS_PRIORITY: TeacherStatus[] = [
+  "pending_setup",
   "pending_registration",
   "invitation_sent",
   "inactive",
@@ -20,6 +22,7 @@ const TEACHER_STATUS_PRIORITY: TeacherStatus[] = [
 ];
 
 const PARENT_STATUS_PRIORITY: ParentStatus[] = [
+  "pending_setup",
   "pending_registration",
   "invitation_sent",
   "inactive",
@@ -163,6 +166,9 @@ function authUidsFromMembershipChange(
   const uids = new Set<string>();
   for (const snap of [before, after]) {
     if (!snap?.exists) continue;
+    if (snap.id) {
+      uids.add(snap.id);
+    }
     const au = snap.get("authUid");
     if (typeof au === "string" && au.length > 0) {
       uids.add(au);

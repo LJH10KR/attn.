@@ -108,6 +108,9 @@ function activationPathFromState(
   if (!state.primaryStatus) {
     return null;
   }
+  if (state.primaryStatus === "pending_setup") {
+    return `/${role}/setup`;
+  }
   if (state.primaryStatus === "invitation_sent") {
     const p = new URLSearchParams();
     if (state.primaryAcademyId) p.set("academyId", state.primaryAcademyId);

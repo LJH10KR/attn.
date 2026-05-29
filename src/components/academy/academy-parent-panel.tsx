@@ -26,6 +26,10 @@ import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-re
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 import { KrPhoneInput } from "@/components/ui/kr-phone-input";
+import {
+  AcademyMemberCredentialActions,
+  AcademyMemberProvisionModal,
+} from "@/components/academy/academy-member-provision";
 import { formatKrPhoneDisplay, phoneMatchesSearch } from "@/lib/phone/kr-phone";
 
 const glassCard = "glass-card";
@@ -35,6 +39,7 @@ const inputClass =
 
 export type ParentRowVM = {
   id: string;
+  attnId: string;
   name: string;
   email: string;
   status: ParentRegistrationStatus;
@@ -72,7 +77,7 @@ function StatusDot({ status }: { status: ParentRegistrationStatus }) {
       />
     );
   }
-  if (status === "pending_registration") {
+  if (status === "pending_registration" || status === "pending_setup") {
     return <span className="h-3 w-3 shrink-0 rounded-full bg-amber-400 ring-2 ring-amber-500/40" />;
   }
   return <span className="h-3 w-3 shrink-0 rounded-full bg-red-500 ring-2 ring-red-600/25" />;
@@ -761,6 +766,7 @@ function docToRow(id: string, data: Record<string, unknown>): ParentRowVM {
     typeof cc === "number" && Number.isFinite(cc) ? Math.max(0, Math.floor(cc)) : 0;
   return {
     id,
+    attnId: typeof data.attnId === "string" ? data.attnId : "",
     name: typeof data.displayName === "string" ? data.displayName : "",
     email: typeof data.email === "string" ? data.email : "",
     status,
@@ -779,6 +785,8 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
   const [rows, setRows] = useState<ParentRowVM[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [registerOpen, setRegisterOpen] = useState(false);
+  const [provisionOpen, setProvisionOpen] = useState(false);
+  const [studentProvisionParentId, setStudentProvisionParentId] = useState<string | null>(null);
   useBodyScrollLock(registerOpen);
   const [formEmail, setFormEmail] = useState("");
   const [formName, setFormName] = useState("");
@@ -947,10 +955,7 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
           <AcademyPanelRefreshButton busy={listBusy} onRefreshAction={refreshParentsList} />
           <button
             type="button"
-            onClick={() => {
-              setFormError(null);
-              setRegisterOpen(true);
-            }}
+            onClick={() => setProvisionOpen(true)}
             className="rounded-full bg-[#222] dark:bg-neutral-100 px-3.5 py-2 text-xs font-medium text-white dark:text-neutral-950 shadow-sm hover:bg-[#333] dark:hover:bg-white"
           >
             + 학부모 등록
@@ -1073,6 +1078,20 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
                         <p className="text-neutral-400">비상연락처 없음</p>
                       )}
                     </div>
+                    <AcademyMemberCredentialActions
+                      academyId={academyId}
+                      authUid={t.id}
+                      role="parent"
+                      attnId={t.attnId}
+                      status={t.status}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setStudentProvisionParentId(t.id)}
+                      className="mb-3 w-full rounded-xl border border-neutral-300/70 bg-white/50 py-2 text-xs font-medium text-foreground"
+                    >
+                      자녀 등록
+                    </button>
                     <ParentRowActions
                       academyId={academyId}
                       row={t}
@@ -1101,6 +1120,22 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
           </div>
         ) : null}
       </div>
+
+      <AcademyMemberProvisionModal
+        academyId={academyId}
+        kind="parent"
+        open={provisionOpen}
+        onCloseAction={() => setProvisionOpen(false)}
+        onDoneAction={refreshParentsList}
+      />
+      <AcademyMemberProvisionModal
+        academyId={academyId}
+        kind="students"
+        parentAuthUid={studentProvisionParentId ?? undefined}
+        open={studentProvisionParentId !== null}
+        onCloseAction={() => setStudentProvisionParentId(null)}
+        onDoneAction={refreshParentsList}
+      />
 
       {registerOpen ? (
         <div

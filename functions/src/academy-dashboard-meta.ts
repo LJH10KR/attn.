@@ -5,6 +5,7 @@ import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import * as logger from "firebase-functions/logger";
 
 type MemberStatus =
+  | "pending_setup"
   | "invitation_needed"
   | "invitation_sent"
   | "pending_registration"
@@ -70,9 +71,11 @@ export async function reconcileAcademyDashboardStats(
     parents,
     students,
     teachersPending,
+    teachersPendingSetup,
     teachersInviteNeeded,
     teachersInviteSent,
     parentsPending,
+    parentsPendingSetup,
     parentsInviteNeeded,
     parentsInviteSent,
   ] = await Promise.all([
@@ -80,9 +83,11 @@ export async function reconcileAcademyDashboardStats(
     countCollection(db, academyId, "parents"),
     countCollection(db, academyId, "students"),
     countCollection(db, academyId, "teachers", "pending_registration"),
+    countCollection(db, academyId, "teachers", "pending_setup"),
     countCollection(db, academyId, "teachers", "invitation_needed"),
     countCollection(db, academyId, "teachers", "invitation_sent"),
     countCollection(db, academyId, "parents", "pending_registration"),
+    countCollection(db, academyId, "parents", "pending_setup"),
     countCollection(db, academyId, "parents", "invitation_needed"),
     countCollection(db, academyId, "parents", "invitation_sent"),
   ]);
@@ -92,10 +97,10 @@ export async function reconcileAcademyDashboardStats(
     teachers,
     parents,
     students,
-    teachersPending,
+    teachersPending: teachersPending + teachersPendingSetup,
     teachersInviteNeeded,
     teachersInviteSent,
-    parentsPending,
+    parentsPending: parentsPending + parentsPendingSetup,
     parentsInviteNeeded,
     parentsInviteSent,
     updatedAt: FieldValue.serverTimestamp(),
@@ -127,7 +132,7 @@ async function syncTeacherInbox(
     updatedAt: FieldValue.serverTimestamp(),
   };
 
-  if (status === "pending_registration") {
+  if (status === "pending_registration" || status === "pending_setup") {
     await inviteRef.delete();
     await pendingRef.set({
       ...base,
@@ -178,7 +183,7 @@ async function syncParentInbox(
     updatedAt: FieldValue.serverTimestamp(),
   };
 
-  if (status === "pending_registration") {
+  if (status === "pending_registration" || status === "pending_setup") {
     await inviteRef.delete();
     await pendingRef.set({
       ...base,

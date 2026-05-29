@@ -57,6 +57,15 @@ function requireAcademyDocumentId(raw: unknown): string {
   return id;
 }
 
+/** attnId 학원(00001_03) 또는 구 슬러그 ID */
+function resolveAcademyLoginId(raw: unknown): string {
+  const id = requireAcademyDocumentId(raw);
+  if (/^\d{5}_\d{2}$/.test(id)) {
+    return id;
+  }
+  return id.toLowerCase();
+}
+
 function assertValidNewAcademySlug(academyId: string): void {
   if (!/^[a-z0-9][a-z0-9_-]{1,47}$/.test(academyId)) {
     throw new HttpsError(
@@ -181,11 +190,11 @@ export const deleteOwnerAcademy = onCall(async (request) => {
  * 학원 포털 로그인
  */
 export const signInAcademy = onCall(async (request) => {
-  const academyId = requireAcademyDocumentId(request.data?.academyId);
+  const academyId = resolveAcademyLoginId(request.data?.academyId);
   const password = typeof request.data?.password === "string" ? request.data.password : "";
 
   if (!password) {
-    throw new HttpsError("invalid-argument", "학원 ID와 비밀번호를 입력해 주세요.");
+    throw new HttpsError("invalid-argument", "로그인 번호와 비밀번호를 입력해 주세요.");
   }
 
   const academySnap = await admin.firestore().doc(`academies/${academyId}`).get();
@@ -277,6 +286,21 @@ export {
 } from "./kiosk";
 export { openShortAuthLink } from "./auth-short-links";
 export { sendOwnerSignupVerificationEmail } from "./owner-auth-mail";
+export {
+  createAcademyEasy,
+  provisionTemplateTeachers,
+  provisionTemplateParents,
+  provisionTeachersBatch,
+  provisionParentsBatch,
+  provisionStudentsBatch,
+} from "./academy-provision";
+export {
+  signInTeacher,
+  signInParent,
+  completeMemberFirstLogin,
+  regenerateMemberTempPassword,
+  listAcademyIssuedAccounts,
+} from "./member-auth";
 export {
   onTeacherMembershipWritten,
   onParentMembershipWritten,

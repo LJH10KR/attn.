@@ -84,6 +84,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [academyId, setAcademyId] = useState("");
+  const [attnId, setAttnId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resetSent, setResetSent] = useState(false);
@@ -144,6 +145,11 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
        * 초청 발송 직후 — 로그인한 채로 등록 완료(Callable)까지 가야 함.
        * 여기서 session으로 보내면 등록 완료 처리가 불가능해 교착 상태가 됩니다.
        */
+      if (state === "pending_setup") {
+        router.replace("/teacher/setup");
+        return false;
+      }
+
       if (state === "invitation_sent") {
         const p = new URLSearchParams();
         if (academyId) p.set("academyId", academyId);
@@ -175,6 +181,11 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
       const state = data?.primaryStatus ?? "unknown";
       const aid = data?.primaryAcademyId ?? "";
 
+      if (state === "pending_setup") {
+        router.replace("/parent/setup");
+        return false;
+      }
+
       if (state === "invitation_sent") {
         const p = new URLSearchParams();
         if (aid) p.set("academyId", aid);
@@ -189,8 +200,8 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
       router.replace(`/parent/session?${q.toString()}`);
       return false;
     }, [router]);
-  const showEmailAuth =
-    role === "owner" || role === "teacher" || role === "parent";
+  const showOwnerEmailAuth = role === "owner";
+  const showMemberAttnAuth = role === "teacher" || role === "parent";
   const showGoogle = role === "owner";
   const showAcademyFields = role === "academy";
   const hasSession = Boolean(sessionUser);
@@ -233,7 +244,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
     if (!u) return;
     setBusy(true);
     try {
-      if (showEmailAuth && !u.emailVerified) {
+      if (showOwnerEmailAuth && !u.emailVerified) {
         router.replace("/verify-email");
         return;
       }
@@ -268,8 +279,80 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
     configured,
     role,
     router,
-    showEmailAuth,
+    showOwnerEmailAuth,
   ]);
+
+  const onMemberAttnLogin = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      setError(null);
+      setResetSent(false);
+      if (!configured) {
+        setError("Firebase 환경 변수를 먼저 설정해 주세요.");
+        return;
+      }
+      const id = attnId.trim();
+      if (!id || !password) {
+        setError("로그인 번호와 비밀번호를 입력해 주세요.");
+        return;
+      }
+      if (getFirebaseAuth().currentUser) {
+        setError("다른 계정으로 로그인하려면 먼저 로그아웃해 주세요.");
+        return;
+      }
+      setBusy(true);
+      try {
+        const auth = getFirebaseAuth();
+        const functions = getFirebaseFunctions();
+        const fnName = role === "teacher" ? "signInTeacher" : "signInParent";
+        const signIn = httpsCallable(functions, fnName);
+        const result = await signIn({ attnId: id, password });
+        const data = result.data as {
+          customToken?: string;
+          membershipStatus?: string;
+        };
+        if (!data?.customToken) {
+          setError("로그인 응답이 올바르지 않습니다.");
+          return;
+        }
+        await signInWithCustomToken(auth, data.customToken);
+        if (data.membershipStatus === "pending_setup") {
+          router.replace(role === "teacher" ? "/teacher/setup" : "/parent/setup");
+          return;
+        }
+        if (role === "teacher") {
+          const ok = await checkTeacherActivationOrRedirect();
+          if (!ok) return;
+        } else {
+          const ok = await checkParentActivationOrRedirect();
+          if (!ok) return;
+        }
+        router.replace(role === "teacher" ? "/teacher" : "/parent");
+      } catch (err) {
+        if (err instanceof FirebaseError) {
+          setError(
+            err.code === "functions/permission-denied" ||
+              err.code === "functions/not-found"
+              ? "로그인 번호 또는 비밀번호가 올바르지 않습니다."
+              : functionsErrorMessage(err),
+          );
+        } else {
+          setError("로그인에 실패했습니다.");
+        }
+      } finally {
+        setBusy(false);
+      }
+    },
+    [
+      attnId,
+      checkParentActivationOrRedirect,
+      checkTeacherActivationOrRedirect,
+      configured,
+      password,
+      role,
+      router,
+    ],
+  );
 
   const onEmailLogin = useCallback(
     async (e: React.FormEvent) => {
@@ -298,7 +381,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
           email.trim(),
           password,
         );
-        if (showEmailAuth && !cred.user.emailVerified) {
+        if (showOwnerEmailAuth && !cred.user.emailVerified) {
           router.replace("/verify-email");
           return;
         }
@@ -337,7 +420,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
       password,
       router,
       role,
-      showEmailAuth,
+      showOwnerEmailAuth,
     ],
   );
 
@@ -418,8 +501,8 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
         const auth = getFirebaseAuth();
         const functions = getFirebaseFunctions();
         const signIn = httpsCallable(functions, "signInAcademy");
-        const result = await signIn({
-          academyId: academyId.trim().toLowerCase(),
+        const result =         await signIn({
+          academyId: academyId.trim(),
           password,
         });
         const data = result.data as { customToken?: string };
@@ -587,7 +670,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
                 className="mb-1.5 block text-xs font-medium text-neutral-600"
                 htmlFor="academy-id"
               >
-                학원 ID
+                로그인 번호
               </label>
               <input
                 id="academy-id"
@@ -595,8 +678,8 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
                 autoComplete="username"
                 value={academyId}
                 onChange={(e) => setAcademyId(e.target.value)}
-                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 text-foreground shadow-inner shadow-white/40 outline-none ring-0 transition placeholder:text-neutral-400 focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]"
-                placeholder="오너가 설정한 학원 로그인 ID"
+                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 font-mono text-foreground shadow-inner shadow-white/40 outline-none ring-0 transition placeholder:text-neutral-400 focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]"
+                placeholder="학원 로그인 번호 (예: 00001_03)"
               />
             </div>
             <div>
@@ -615,6 +698,51 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 text-foreground shadow-inner shadow-white/40 outline-none focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]"
                 placeholder="포털 비밀번호"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={busy || !configured || sessionBlocked}
+              className="mt-2 w-full rounded-2xl bg-[#222] dark:bg-neutral-100 py-3.5 text-[15px] font-medium text-white dark:text-neutral-950 shadow-[0_8px_24px_rgba(0,0,0,0.18)] transition hover:bg-[#333] dark:hover:bg-white active:scale-[0.99] disabled:opacity-50"
+            >
+              {busy ? "처리 중…" : "로그인"}
+            </button>
+          </form>
+        ) : showMemberAttnAuth ? (
+          <form className="mt-6 space-y-4" onSubmit={onMemberAttnLogin}>
+            <div>
+              <label
+                className="mb-1.5 block text-xs font-medium text-neutral-600"
+                htmlFor="attn-id"
+              >
+                로그인 번호
+              </label>
+              <input
+                id="attn-id"
+                name="attnId"
+                autoComplete="username"
+                value={attnId}
+                onChange={(e) => setAttnId(e.target.value)}
+                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 font-mono text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]"
+                placeholder="학원에서 발급한 로그인 번호"
+              />
+            </div>
+            <div>
+              <label
+                className="mb-1.5 block text-xs font-medium text-neutral-600"
+                htmlFor="member-password"
+              >
+                비밀번호
+              </label>
+              <input
+                id="member-password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]"
+                placeholder="임시 또는 설정한 비밀번호"
               />
             </div>
             <button
@@ -694,7 +822,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
         ) : null}
 
         <div className="mt-8 space-y-2 text-center text-sm text-neutral-600">
-          {showEmailAuth ? (
+          {showOwnerEmailAuth ? (
             <p>
               비밀번호를 잊으셨나요?{" "}
               <button
@@ -707,7 +835,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
               </button>
             </p>
           ) : null}
-          {showEmailAuth && role === "owner" ? (
+          {showOwnerEmailAuth && role === "owner" ? (
             <p>
               오너 계정이 없으신가요?{" "}
               <Link
@@ -717,9 +845,10 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
                 회원가입
               </Link>
             </p>
-          ) : showEmailAuth ? (
+          ) : showMemberAttnAuth ? (
             <p className="text-xs text-neutral-500">
-              선생님·학부모 계정은 학원에서 안내에 따라 가입해 주세요.
+              로그인 번호와 임시 비밀번호는 학원에서 발급받으세요. 최초 로그인 후 비밀번호를
+              변경해야 이용할 수 있습니다.
             </p>
           ) : (
             <p className="text-xs text-neutral-500">

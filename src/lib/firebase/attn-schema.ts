@@ -14,7 +14,11 @@ import type { Timestamp } from "firebase/firestore";
 export const COLLECTIONS = {
   users: "users",
   academies: "academies",
+  attnLoginIndex: "attnLoginIndex",
 } as const;
+
+/** 발급형 멤버 상태 — v2 */
+export type MemberProvisionStatus = "pending_setup" | "active" | "inactive";
 
 export function academyPath(academyId: string) {
   return `${COLLECTIONS.academies}/${academyId}`;
@@ -150,6 +154,9 @@ export type UserProfile = {
 export type Academy = {
   ownerUid: string;
   name: string;
+  /** 공개 로그인 번호 — Firestore 문서 ID와 동일 */
+  attnId?: string;
+  ownerAttnSeq?: string;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
   /** 필요 시: 운영 상태 등 */
@@ -161,6 +168,7 @@ export type Academy = {
  * 생성·수정·삭제는 Cloud Functions(Admin SDK)만 수행.
  */
 export type TeacherRegistrationStatus =
+  | "pending_setup"
   | "invitation_needed"
   | "invitation_sent"
   | "pending_registration"
@@ -177,6 +185,7 @@ export const PARENT_INVITE_TTL_MS = TEACHER_INVITE_TTL_MS;
 export type ParentRegistrationStatus = TeacherRegistrationStatus;
 
 export type AcademyTeacher = {
+  attnId?: string;
   email: string;
   displayName: string;
   subject?: string | null;
@@ -198,8 +207,10 @@ export type AcademyTeacher = {
  * 생성·수정·삭제는 Cloud Functions만 수행.
  */
 export type AcademyParent = {
+  attnId?: string;
   email: string;
   displayName: string;
+  nextStudentSeq?: number;
   phone?: string | null;
   emergencyContact?: string | null;
   childrenCount: number;
@@ -219,6 +230,7 @@ export const MAX_ASSIGNED_TEACHERS_PER_STUDENT = 20;
 
 /** 학생 — 부모와 연결, Auth 없을 수 있음 */
 export type AcademyStudent = {
+  attnId?: string;
   parentUserId: string;
   name: string;
   /** 만 나이 등 정수(0~120) */

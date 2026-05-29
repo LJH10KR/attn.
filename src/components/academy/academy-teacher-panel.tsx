@@ -20,7 +20,10 @@ import { getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
-import { KrPhoneInput } from "@/components/ui/kr-phone-input";
+import {
+  AcademyMemberCredentialActions,
+  AcademyMemberProvisionModal,
+} from "@/components/academy/academy-member-provision";
 
 const glassCard = "glass-card";
 
@@ -29,6 +32,7 @@ const inputClass =
 
 export type TeacherRowVM = {
   id: string;
+  attnId: string;
   name: string;
   email: string;
   status: TeacherRegistrationStatus;
@@ -65,7 +69,7 @@ function StatusDot({ status }: { status: TeacherRegistrationStatus }) {
       />
     );
   }
-  if (status === "pending_registration") {
+  if (status === "pending_registration" || status === "pending_setup") {
     return <span className="h-3 w-3 shrink-0 rounded-full bg-amber-400 ring-2 ring-amber-500/40" />;
   }
   return <span className="h-3 w-3 shrink-0 rounded-full bg-red-500 ring-2 ring-red-600/25" />;
@@ -445,6 +449,7 @@ function docToRow(id: string, data: Record<string, unknown>): TeacherRowVM {
   }
   return {
     id,
+    attnId: typeof data.attnId === "string" ? data.attnId : "",
     name: typeof data.displayName === "string" ? data.displayName : "",
     email: typeof data.email === "string" ? data.email : "",
     status,
@@ -461,14 +466,7 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
   const [expandedTeacherId, setExpandedTeacherId] = useState<string | null>(null);
   const [rows, setRows] = useState<TeacherRowVM[]>([]);
   const [listError, setListError] = useState<string | null>(null);
-  const [registerOpen, setRegisterOpen] = useState(false);
-  useBodyScrollLock(registerOpen);
-  const [formEmail, setFormEmail] = useState("");
-  const [formName, setFormName] = useState("");
-  const [formSubject, setFormSubject] = useState("");
-  const [formPhone, setFormPhone] = useState("");
-  const [formBusy, setFormBusy] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
+  const [provisionOpen, setProvisionOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -535,42 +533,6 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
     });
   };
 
-  const onRegister = useCallback(async () => {
-    setFormError(null);
-    const email = formEmail.trim().toLowerCase();
-    const name = formName.trim();
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setFormError("유효한 이메일을 입력해 주세요.");
-      return;
-    }
-    if (!name) {
-      setFormError("이름을 입력해 주세요.");
-      return;
-    }
-    setFormBusy(true);
-    try {
-      const reg = httpsCallable(getFirebaseFunctions(), "registerTeacherInvite");
-      await reg({
-        academyId,
-        email,
-        displayName: name,
-        subject: formSubject.trim() || undefined,
-        phone: formPhone.trim() || undefined,
-      });
-      setRegisterOpen(false);
-      setFormEmail("");
-      setFormName("");
-      setFormSubject("");
-      setFormPhone("");
-      setNotice("선생님이 초청 필요 상태로 등록되었습니다.");
-      refreshTeachersList();
-    } catch (e) {
-      setFormError(callableErr(e));
-    } finally {
-      setFormBusy(false);
-    }
-  }, [academyId, formEmail, formName, formPhone, formSubject, refreshTeachersList]);
-
   const onBulkInvite = useCallback(async () => {
     if (inviteSelectedCount === 0) {
       return;
@@ -617,10 +579,7 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
           <AcademyPanelRefreshButton busy={listBusy} onRefreshAction={refreshTeachersList} />
           <button
             type="button"
-            onClick={() => {
-              setFormError(null);
-              setRegisterOpen(true);
-            }}
+            onClick={() => setProvisionOpen(true)}
             className="rounded-full bg-[#222] dark:bg-neutral-100 px-3.5 py-2 text-xs font-medium text-white dark:text-neutral-950 shadow-sm hover:bg-[#333] dark:hover:bg-white"
           >
             + 선생님 등록
@@ -731,6 +690,13 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
                       teacherStatus={t.status}
                       setNoticeAction={setNotice}
                     />
+                    <AcademyMemberCredentialActions
+                      academyId={academyId}
+                      authUid={t.id}
+                      role="teacher"
+                      attnId={t.attnId}
+                      status={t.status}
+                    />
                     <TeacherRowActions
                       academyId={academyId}
                       row={t}
@@ -760,94 +726,14 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
         ) : null}
       </div>
 
-      {registerOpen ? (
-        <div
-          className="fixed inset-0 z-30 flex items-center justify-center bg-black/30 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="reg-teacher-title"
-        >
-          <div
-            className={`w-full max-w-md max-h-[min(32rem,calc(100dvh-2rem))] min-h-0 overflow-y-auto p-6 ${glassCard}`}
-          >
-            <h3 id="reg-teacher-title" className="text-lg font-semibold text-foreground">
-              선생님 등록
-            </h3>
-            <p className="mt-1 text-xs text-neutral-500">
-              등록 후 &quot;초청필요&quot; 상태로 표시됩니다. 초청 시 Firebase 계정이 만들어지고 메일이
-              발송되며, 발송 시점부터 <strong>24시간</strong> 안에 선생님이 절차를 마쳐야 합니다.
-            </p>
-            <div className="mt-4 space-y-3">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="t-email">
-                  이메일 (필수)
-                </label>
-                <input
-                  id="t-email"
-                  type="email"
-                  className={inputClass}
-                  value={formEmail}
-                  onChange={(e) => setFormEmail(e.target.value)}
-                  autoComplete="email"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="t-name">
-                  이름 (필수)
-                </label>
-                <input
-                  id="t-name"
-                  className={inputClass}
-                  value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
-                  maxLength={60}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="t-sub">
-                  과목 (선택)
-                </label>
-                <input
-                  id="t-sub"
-                  className={inputClass}
-                  value={formSubject}
-                  onChange={(e) => setFormSubject(e.target.value)}
-                  maxLength={80}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="t-phone">
-                  연락처 (선택)
-                </label>
-                <KrPhoneInput
-                  id="t-phone"
-                  className={inputClass}
-                  value={formPhone}
-                  onChange={setFormPhone}
-                />
-              </div>
-              {formError ? <p className="text-sm text-red-700">{formError}</p> : null}
-            </div>
-            <div className="mt-6 flex gap-2">
-              <button
-                type="button"
-                onClick={() => setRegisterOpen(false)}
-                className="flex-1 rounded-2xl border border-neutral-300/70 py-3 text-sm font-medium text-foreground"
-              >
-                취소
-              </button>
-              <button
-                type="button"
-                disabled={formBusy}
-                onClick={() => void onRegister()}
-                className="flex-1 rounded-2xl bg-[#222] dark:bg-neutral-100 py-3 text-sm font-medium text-white dark:text-neutral-950 disabled:opacity-60"
-              >
-                {formBusy ? "등록 중…" : "등록"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <AcademyMemberProvisionModal
+        academyId={academyId}
+        kind="teacher"
+        open={provisionOpen}
+        onCloseAction={() => setProvisionOpen(false)}
+        onDoneAction={refreshTeachersList}
+      />
+
     </div>
   );
 }

@@ -265,6 +265,15 @@ service cloud.firestore {
       }
     }
 
+    /** attnId 로그인 조회 — Functions(Admin SDK)만 쓰기 */
+    match /attnLoginIndex/{attnIdKey} {
+      allow read, write: if false;
+    }
+
+    match /meta/attnGlobal {
+      allow read, write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
