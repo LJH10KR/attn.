@@ -304,9 +304,15 @@ export {
 export {
   getParentSignupAcademyInfo,
   checkParentLoginIdAvailable,
+  getParentSignupGoogleStatus,
+  registerParentGoogleSignup,
   registerParentSelfSignup,
 } from "./parent-self-signup";
-export { updateTeacherProfile, updateParentProfile } from "./member-profiles";
+export {
+  updateTeacherProfile,
+  updateParentProfile,
+  syncParentGoogleLink,
+} from "./member-profiles";
 export {
   onTeacherMembershipWritten,
   onParentMembershipWritten,

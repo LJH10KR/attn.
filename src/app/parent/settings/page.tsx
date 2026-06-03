@@ -10,6 +10,7 @@ import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
+import { ParentGoogleLinkCard } from "@/components/parent/parent-google-link-card";
 import { ParentPushNotificationsCard } from "@/components/parent/parent-push-notifications-card";
 import {
   getFirebaseAuth,
@@ -32,6 +33,9 @@ export default function ParentSettingsPage() {
   const [displayName, setDisplayName] = useState("");
   const [loginId, setLoginId] = useState("");
   const [attnId, setAttnId] = useState("");
+  const [authProvider, setAuthProvider] = useState<string>("");
+  const [googleEmail, setGoogleEmail] = useState<string>("");
+  const [googleLinked, setGoogleLinked] = useState(false);
   const [profileBusy, setProfileBusy] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [profileSaved, setProfileSaved] = useState(false);
@@ -98,6 +102,9 @@ export default function ParentSettingsPage() {
             );
             setLoginId(typeof d?.loginId === "string" ? d.loginId : "");
             setAttnId(typeof d?.attnId === "string" ? d.attnId : "");
+            setAuthProvider(typeof d?.authProvider === "string" ? d.authProvider : "");
+            setGoogleEmail(typeof d?.googleEmail === "string" ? d.googleEmail : "");
+            setGoogleLinked(d?.googleLinked === true);
           },
         )
       : () => {};
@@ -165,7 +172,7 @@ export default function ParentSettingsPage() {
           affiliationLabel={affiliationLabel}
           menuIntro={
             <span className="text-neutral-600 dark:text-neutral-400">
-              알림 및 기기 안내를 관리합니다.
+              프로필, Google 연동, 알림 및 기기 안내를 관리합니다.
             </span>
           }
           showBack
@@ -236,6 +243,14 @@ export default function ParentSettingsPage() {
               {profileBusy ? "저장 중…" : "이름 저장"}
             </button>
           </section>
+          {primaryAcademyId ? (
+            <ParentGoogleLinkCard
+              memberAuthProvider={authProvider}
+              loginId={loginId || attnId}
+              googleLinked={googleLinked}
+              googleEmail={googleEmail}
+            />
+          ) : null}
           <ParentPushNotificationsCard />
           <section className={`p-4 ${glassCard}`}>
             <h2 className="text-sm font-semibold text-foreground">

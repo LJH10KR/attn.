@@ -29,8 +29,8 @@ export function AcademyParentSignupLink({ academyId }: { academyId: string }) {
       </h3>
       <p className="text-xs leading-relaxed text-neutral-600">
         학부모에게 아래 링크를 보내 가입하도록 안내하세요. 가입 시
-        이름·휴대폰 번호·로그인 ID·비밀번호를 직접 설정합니다. 로그인 ID는 전
-        서비스에서 유일해야 합니다.
+        직접 가입(이름·전화·로그인 ID·비밀번호) 또는 Google 가입을 선택할 수
+        있습니다. Google 가입 시 로그인 ID는 Gmail 주소입니다.
       </p>
       <p className="break-all rounded-xl bg-white/50 px-3 py-2 font-mono text-[11px] text-neutral-700 ring-1 ring-black/5 dark:bg-white/10">
         {signupUrl}

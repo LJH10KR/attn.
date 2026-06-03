@@ -77,6 +77,12 @@ async function signInMember(loginKey: string, password: string, role: MemberKind
   ) {
     throw new HttpsError("failed-precondition", "계정 정보가 올바르지 않습니다.");
   }
+  if (role === "parent" && indexSnap.get("authProvider") === "google") {
+    throw new HttpsError(
+      "failed-precondition",
+      "이 계정은 Google 로그인을 사용합니다. Google로 로그인해 주세요.",
+    );
+  }
 
   const { status } = await verifyMemberPassword(academyId, authUid, role, password);
 

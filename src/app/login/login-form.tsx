@@ -202,7 +202,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
     }, [router]);
   const showOwnerEmailAuth = role === "owner";
   const showMemberAttnAuth = role === "teacher" || role === "parent";
-  const showGoogle = role === "owner";
+  const showGoogle = role === "owner" || role === "parent";
   const showAcademyFields = role === "academy";
   const hasSession = Boolean(sessionUser);
   const sessionBlocked = hasSession;
@@ -450,7 +450,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
       const auth = getFirebaseAuth();
       const provider = new GoogleAuthProvider();
       const cred = await signInWithPopup(auth, provider);
-      if (!cred.user.emailVerified) {
+      if (role === "owner" && !cred.user.emailVerified) {
         router.replace("/verify-email");
         return;
       }
