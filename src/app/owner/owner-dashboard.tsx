@@ -29,7 +29,8 @@ import {
 import { fetchIsOwner } from "@/lib/firebase/owner-profile";
 import { COLLECTIONS, type Academy } from "@/lib/firebase/attn-schema";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
-import { OwnerEasyAcademyWizard } from "@/components/owner/owner-easy-academy-wizard";
+import { AcademyRegistrationOverlay } from "@/components/owner/academy-registration-overlay";
+import { attnIdSortKey, compareAttnIdAsc } from "@/lib/attn-id-sort";
 
 type AcademyRow = Academy & { id: string };
 
@@ -86,9 +87,13 @@ export function OwnerDashboard() {
   const [editPortalPassword, setEditPortalPassword] = useState("");
   const [editPortalPassword2, setEditPortalPassword2] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<AcademyRow | null>(null);
-  const [easyWizardOpen, setEasyWizardOpen] = useState(false);
+  const [registrationOpen, setRegistrationOpen] = useState(false);
+  const [registrationVariant, setRegistrationVariant] = useState<"first" | "add">("add");
+  /** Firestore 학원 목록 첫 스냅샷 수신 전에는 true로 두지 않음(빈 배열 레이스 방지) */
+  const [academiesListReady, setAcademiesListReady] = useState(false);
   const ownerInitGenerationRef = useRef(0);
   const ownerListLoadedUidRef = useRef<string | null>(null);
+  const autoRegistrationPromptedRef = useRef(false);
 
   useBodyScrollLock(modal !== null);
 
@@ -109,6 +114,8 @@ export function OwnerDashboard() {
         setGate("auth");
         unsubAcademies?.();
         setAcademies([]);
+        setAcademiesListReady(false);
+        autoRegistrationPromptedRef.current = false;
         return;
       }
 
@@ -118,6 +125,7 @@ export function OwnerDashboard() {
       }
 
       const gen = ++ownerInitGenerationRef.current;
+      setAcademiesListReady(false);
       setGate("loading");
       const isOwner = await fetchIsOwner(uid);
       if (gen !== ownerInitGenerationRef.current || auth.currentUser?.uid !== uid) {
@@ -127,6 +135,7 @@ export function OwnerDashboard() {
         setGate("forbidden");
         unsubAcademies?.();
         setAcademies([]);
+        setAcademiesListReady(false);
         return;
       }
       setGate("ok");
@@ -147,12 +156,9 @@ export function OwnerDashboard() {
           snap.forEach((d) => {
             rows.push({ id: d.id, ...(d.data() as Academy) });
           });
-          rows.sort((a, b) => {
-            const ta = a.createdAt?.toMillis?.() ?? 0;
-            const tb = b.createdAt?.toMillis?.() ?? 0;
-            return tb - ta;
-          });
+          rows.sort((a, b) => compareAttnIdAsc(attnIdSortKey(a), attnIdSortKey(b)));
           setAcademies(rows);
+          setAcademiesListReady(true);
           ownerListLoadedUidRef.current = uid;
         },
         (err) => {
@@ -165,6 +171,7 @@ export function OwnerDashboard() {
               ? "학원 목록을 불러올 권한이 없습니다."
               : "학원 목록을 불러오지 못했습니다.",
           );
+          setAcademiesListReady(true);
         },
       );
     });
@@ -172,6 +179,7 @@ export function OwnerDashboard() {
     return () => {
       ownerInitGenerationRef.current += 1;
       ownerListLoadedUidRef.current = null;
+      autoRegistrationPromptedRef.current = false;
       unsubAuth();
       unsubAcademies?.();
     };
@@ -183,9 +191,25 @@ export function OwnerDashboard() {
     }
   }, [configured, gate, router]);
 
-  const openCreate = useCallback(() => {
-    setEasyWizardOpen(true);
+  const openCreate = useCallback((variant: "first" | "add" = "add") => {
+    setRegistrationVariant(variant);
+    setRegistrationOpen(true);
   }, []);
+
+  useEffect(() => {
+    if (
+      gate !== "ok" ||
+      !academiesListReady ||
+      academies.length > 0 ||
+      registrationOpen ||
+      autoRegistrationPromptedRef.current
+    ) {
+      return;
+    }
+    autoRegistrationPromptedRef.current = true;
+    setRegistrationVariant("first");
+    setRegistrationOpen(true);
+  }, [gate, academiesListReady, academies.length, registrationOpen]);
 
   const openEdit = useCallback((row: AcademyRow) => {
     setFormError(null);
@@ -384,7 +408,7 @@ export function OwnerDashboard() {
           <h2 className="text-base font-semibold text-foreground">내 학원</h2>
           <button
             type="button"
-            onClick={openCreate}
+            onClick={() => openCreate(academies.length === 0 ? "first" : "add")}
             className="rounded-full bg-[#222] dark:bg-neutral-100 px-4 py-2 text-xs font-medium text-white dark:text-neutral-950 shadow-md hover:bg-[#333] dark:hover:bg-white"
           >
             + 학원 등록
@@ -402,7 +426,7 @@ export function OwnerDashboard() {
             <p className="text-sm text-neutral-600">등록된 학원이 없습니다.</p>
             <button
               type="button"
-              onClick={openCreate}
+              onClick={() => openCreate(academies.length === 0 ? "first" : "add")}
               className="mt-4 rounded-2xl bg-[#222] dark:bg-neutral-100 px-6 py-3 text-sm font-medium text-white dark:text-neutral-950"
             >
               첫 학원 등록하기
@@ -472,9 +496,10 @@ export function OwnerDashboard() {
 
       <DashboardBottomScrim />
 
-      <OwnerEasyAcademyWizard
-        open={easyWizardOpen}
-        onCloseAction={() => setEasyWizardOpen(false)}
+      <AcademyRegistrationOverlay
+        open={registrationOpen}
+        variant={registrationVariant}
+        onCloseAction={() => setRegistrationOpen(false)}
       />
 
       {modal === "edit" ? (

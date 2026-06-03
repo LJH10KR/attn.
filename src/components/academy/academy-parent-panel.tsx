@@ -6,7 +6,6 @@ import {
   collection,
   getCountFromServer,
   getDocs,
-  orderBy,
   query,
   serverTimestamp,
   Timestamp,
@@ -21,6 +20,7 @@ import {
   type ParentRegistrationStatus,
 } from "@/lib/firebase/attn-schema";
 import { AcademyParentStudentList } from "@/components/academy/academy-student-panel";
+import { compareAttnIdAsc } from "@/lib/attn-id-sort";
 import { getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
@@ -30,6 +30,7 @@ import {
   AcademyMemberCredentialActions,
   AcademyMemberProvisionModal,
 } from "@/components/academy/academy-member-provision";
+import { AcademyParentSignupLink } from "@/components/academy/academy-parent-signup-link";
 import { formatKrPhoneDisplay, phoneMatchesSearch } from "@/lib/phone/kr-phone";
 
 const glassCard = "glass-card";
@@ -785,7 +786,6 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
   const [rows, setRows] = useState<ParentRowVM[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [registerOpen, setRegisterOpen] = useState(false);
-  const [provisionOpen, setProvisionOpen] = useState(false);
   const [studentProvisionParentId, setStudentProvisionParentId] = useState<string | null>(null);
   useBodyScrollLock(registerOpen);
   const [formEmail, setFormEmail] = useState("");
@@ -801,13 +801,12 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
 
   const loadParentsList = useCallback(async () => {
     const db = getFirebaseDb();
-    const qy = query(
-      collection(db, "academies", academyId, "parents"),
-      orderBy("createdAt", "desc"),
-    );
+    const qy = query(collection(db, "academies", academyId, "parents"));
     const snap = await getDocs(qy);
     setListError(null);
-    setRows(snap.docs.map((d) => docToRow(d.id, d.data() as Record<string, unknown>)));
+    const list = snap.docs.map((d) => docToRow(d.id, d.data() as Record<string, unknown>));
+    list.sort((a, b) => compareAttnIdAsc(a.attnId, b.attnId));
+    setRows(list);
   }, [academyId]);
 
   const { refresh: refreshParentsList, busy: listBusy } = useAcademyListPoll(
@@ -953,15 +952,10 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
         <h2 className="text-sm font-semibold text-foreground">학부모 관리</h2>
         <div className="flex shrink-0 items-center gap-2">
           <AcademyPanelRefreshButton busy={listBusy} onRefreshAction={refreshParentsList} />
-          <button
-            type="button"
-            onClick={() => setProvisionOpen(true)}
-            className="rounded-full bg-[#222] dark:bg-neutral-100 px-3.5 py-2 text-xs font-medium text-white dark:text-neutral-950 shadow-sm hover:bg-[#333] dark:hover:bg-white"
-          >
-            + 학부모 등록
-          </button>
         </div>
       </div>
+
+      <AcademyParentSignupLink academyId={academyId} />
 
       <div className="flex gap-2">
         <input
@@ -1121,13 +1115,6 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
         ) : null}
       </div>
 
-      <AcademyMemberProvisionModal
-        academyId={academyId}
-        kind="parent"
-        open={provisionOpen}
-        onCloseAction={() => setProvisionOpen(false)}
-        onDoneAction={refreshParentsList}
-      />
       <AcademyMemberProvisionModal
         academyId={academyId}
         kind="students"

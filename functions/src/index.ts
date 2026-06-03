@@ -301,6 +301,8 @@ export {
   regenerateMemberTempPassword,
   listAcademyIssuedAccounts,
 } from "./member-auth";
+export { getParentSignupAcademyInfo, registerParentSelfSignup } from "./parent-self-signup";
+export { updateTeacherProfile, updateParentProfile } from "./member-profiles";
 export {
   onTeacherMembershipWritten,
   onParentMembershipWritten,

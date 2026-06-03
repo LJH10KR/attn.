@@ -1,13 +1,7 @@
 "use client";
 
 import { FirebaseError } from "firebase/app";
-import {
-  collection,
-  getDocs,
-  orderBy,
-  query,
-  Timestamp,
-} from "firebase/firestore";
+import { collection, getDocs, query, Timestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -16,6 +10,7 @@ import {
   TEACHER_INVITE_TTL_MS,
   type TeacherRegistrationStatus,
 } from "@/lib/firebase/attn-schema";
+import { compareAttnIdAsc } from "@/lib/attn-id-sort";
 import { getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
@@ -474,13 +469,12 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
   const loadTeachersList = useCallback(async () => {
     try {
       const db = getFirebaseDb();
-      const qy = query(
-        collection(db, "academies", academyId, "teachers"),
-        orderBy("createdAt", "desc"),
-      );
+      const qy = query(collection(db, "academies", academyId, "teachers"));
       const snap = await getDocs(qy);
       setListError(null);
-      setRows(snap.docs.map((d) => docToRow(d.id, d.data() as Record<string, unknown>)));
+      const list = snap.docs.map((d) => docToRow(d.id, d.data() as Record<string, unknown>));
+      list.sort((a, b) => compareAttnIdAsc(a.attnId, b.attnId));
+      setRows(list);
     } catch (err) {
       setListError(err instanceof Error ? err.message : "목록을 불러오지 못했습니다.");
       setRows([]);

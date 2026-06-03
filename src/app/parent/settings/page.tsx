@@ -1,5 +1,6 @@
-﻿"use client";
+"use client";
 
+import { FirebaseError } from "firebase/app";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, onSnapshot, setDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
@@ -28,6 +29,11 @@ export default function ParentSettingsPage() {
   const [iosModalOpen, setIosModalOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [logoutBusy, setLogoutBusy] = useState(false);
+  const [displayName, setDisplayName] = useState("");
+  const [attnId, setAttnId] = useState("");
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileSaved, setProfileSaved] = useState(false);
   /** undefined: 아직 로딩, null: 기본 학원 없음 */
   const [primaryAcademyId, setPrimaryAcademyId] = useState<
     string | null | undefined
@@ -72,7 +78,8 @@ export default function ParentSettingsPage() {
   useEffect(() => {
     if (!primaryAcademyId) return;
     const db = getFirebaseDb();
-    const unsub = onSnapshot(
+    const uid = getFirebaseAuth().currentUser?.uid;
+    const unsubAcademy = onSnapshot(
       doc(db, "academies", primaryAcademyId),
       (snap) => {
         const n = snap.data()?.name;
@@ -80,8 +87,36 @@ export default function ParentSettingsPage() {
       },
       () => setAcademyName(null),
     );
-    return () => unsub();
+    const unsubParent =
+      uid ?
+        onSnapshot(doc(db, "academies", primaryAcademyId, "parents", uid), (snap) => {
+          const d = snap.data();
+          setDisplayName(typeof d?.displayName === "string" ? d.displayName : "");
+          setAttnId(typeof d?.attnId === "string" ? d.attnId : "");
+        })
+      : () => {};
+    return () => {
+      unsubAcademy();
+      unsubParent();
+    };
   }, [primaryAcademyId]);
+
+  const onSaveProfile = useCallback(async () => {
+    setProfileError(null);
+    setProfileSaved(false);
+    setProfileBusy(true);
+    try {
+      const fn = httpsCallable(getFirebaseFunctions(), "updateParentProfile");
+      await fn({ displayName: displayName.trim() });
+      setProfileSaved(true);
+    } catch (e) {
+      setProfileError(
+        e instanceof FirebaseError ? e.message : "저장에 실패했습니다.",
+      );
+    } finally {
+      setProfileBusy(false);
+    }
+  }, [displayName]);
 
   const affiliationLabel =
     primaryAcademyId === undefined
@@ -155,6 +190,36 @@ export default function ParentSettingsPage() {
         ) : null}
 
         <div className="space-y-4 mt-5">
+          <section className={`p-4 ${glassCard}`}>
+            <h2 className="text-sm font-semibold text-foreground">프로필</h2>
+            <p className="mt-2 text-[11px] text-neutral-600">
+              로그인 번호는 변경할 수 없습니다.
+            </p>
+            <p className="mt-3 text-xs font-medium text-neutral-500">로그인 번호</p>
+            <p className="font-mono text-sm text-foreground">{attnId || "—"}</p>
+            <label className="mt-4 mb-1 block text-xs font-medium text-neutral-600" htmlFor="p-dn">
+              표시 이름
+            </label>
+            <input
+              id="p-dn"
+              className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 px-4 py-2.5 text-sm outline-none focus:border-[#4a90e2]/50"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              maxLength={60}
+            />
+            {profileError ? <p className="mt-2 text-sm text-red-700">{profileError}</p> : null}
+            {profileSaved ? (
+              <p className="mt-2 text-sm text-emerald-800">저장되었습니다.</p>
+            ) : null}
+            <button
+              type="button"
+              disabled={profileBusy}
+              onClick={() => void onSaveProfile()}
+              className="mt-3 w-full rounded-2xl bg-[#222] py-2.5 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-950 disabled:opacity-60"
+            >
+              {profileBusy ? "저장 중…" : "이름 저장"}
+            </button>
+          </section>
           <ParentPushNotificationsCard />
           <section className={`p-4 ${glassCard}`}>
             <h2 className="text-sm font-semibold text-foreground">

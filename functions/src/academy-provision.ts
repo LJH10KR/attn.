@@ -148,7 +148,15 @@ async function runProvisionTemplateTeachers(request: {
   const db = admin.firestore();
   await assertCanManageAcademy(db, academyId, uid, token as admin.auth.DecodedIdToken);
 
-  const usedNames = new Set<string>();
+  if (count === 0) {
+    return { teachers: [] as Array<{
+      attnId: string;
+      displayName: string;
+      tempPassword: string;
+      authUid: string;
+    }> };
+  }
+
   const issued: IssuedCredential[] = [];
 
   await db.runTransaction(async (tx) => {
@@ -160,10 +168,9 @@ async function runProvisionTemplateTeachers(request: {
       const teacherSeq = nextTeacherSeq;
       nextTeacherSeq += 1;
       const attnId = formatTeacherAttnId(academyId, teacherSeq);
-      const displayName = pickTemplateDisplayNameUnique(usedNames);
       issued.push({
         attnId,
-        displayName,
+        displayName: attnId,
         tempPassword: "",
         role: "teacher",
       });
@@ -179,7 +186,7 @@ async function runProvisionTemplateTeachers(request: {
       academyId,
       attnId: row.attnId,
       role: "teacher",
-      displayName: row.displayName,
+      displayName: row.attnId,
     });
     members.push(m);
   }
@@ -187,7 +194,7 @@ async function runProvisionTemplateTeachers(request: {
   return {
     teachers: members.map((m) => ({
       attnId: m.attnId,
-      displayName: m.displayName,
+      displayName: m.attnId,
       tempPassword: m.tempPassword,
       authUid: m.authUid,
     })),

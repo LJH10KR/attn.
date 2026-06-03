@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { FirebaseError } from "firebase/app";
 import { formatKrPhoneDisplay } from "@/lib/phone/kr-phone";
@@ -372,6 +372,8 @@ export default function TeacherDashboardPage() {
         <DashboardRoleHeader
           title="선생님 대시보드"
           affiliationLabel={academyLabelForGreeting(academyName, academyId)}
+          includeSettingsAction
+          onSettingsAction={() => router.push("/teacher/settings")}
           onHomeAction={() => router.push("/")}
           showBellOnTitle
           showBellInBottomBar={false}
