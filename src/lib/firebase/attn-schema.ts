@@ -137,6 +137,7 @@ export function userActivationMirrorPath(userId: string): string {
 /** 모든 로그인 사용자 공통 프로필 (선택) */
 export type UserProfile = {
   displayName?: string | null;
+  phone?: string | null;
   email?: string | null;
   photoURL?: string | null;
   /** 서비스 단위 역할 (오너 가입 등) */
