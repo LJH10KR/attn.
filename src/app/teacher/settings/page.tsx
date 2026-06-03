@@ -41,7 +41,9 @@ export default function TeacherSettingsPage() {
         router.replace("/login/teacher");
         return;
       }
-      const state = await resolveTeacherActivationState(user, { bypassCache: true });
+      const state = await resolveTeacherActivationState(user, {
+        bypassCache: true,
+      });
       if (!state.anyActive && state.primaryStatus === "pending_setup") {
         router.replace("/teacher/setup");
         return;
@@ -107,7 +109,10 @@ export default function TeacherSettingsPage() {
       <div className="mx-auto max-w-lg">
         <DashboardRoleHeader
           title="사용자 설정"
-          affiliationLabel={academyLabelForGreeting(academyName, academyId ?? "")}
+          affiliationLabel={academyLabelForGreeting(
+            academyName,
+            academyId ?? "",
+          )}
           showBack
           onBackAction={() => router.push("/teacher")}
           backAriaLabel="선생님 대시보드로 돌아가기"
@@ -132,14 +137,20 @@ export default function TeacherSettingsPage() {
         <section className={`mt-5 space-y-4 p-4 ${glassCard}`}>
           <h2 className="text-sm font-semibold text-foreground">프로필</h2>
           <p className="text-[11px] text-neutral-600">
-            로그인 번호는 변경할 수 없습니다. 대시보드에 표시되는 이름만 수정합니다.
+            로그인 번호는 변경할 수 없습니다. 대시보드에 표시되는 이름만
+            수정합니다.
           </p>
           <div>
             <p className="text-xs font-medium text-neutral-500">로그인 번호</p>
-            <p className="mt-1 font-mono text-sm text-foreground">{attnId || "—"}</p>
+            <p className="mt-1 font-mono text-sm text-foreground">
+              {attnId || "—"}
+            </p>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="t-dn">
+            <label
+              className="mb-1 block text-xs font-medium text-neutral-600"
+              htmlFor="t-dn"
+            >
               표시 이름
             </label>
             <input

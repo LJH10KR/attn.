@@ -41,6 +41,7 @@ const inputClass =
 export type ParentRowVM = {
   id: string;
   attnId: string;
+  loginId: string;
   name: string;
   email: string;
   status: ParentRegistrationStatus;
@@ -768,6 +769,7 @@ function docToRow(id: string, data: Record<string, unknown>): ParentRowVM {
   return {
     id,
     attnId: typeof data.attnId === "string" ? data.attnId : "",
+    loginId: typeof data.loginId === "string" ? data.loginId : "",
     name: typeof data.displayName === "string" ? data.displayName : "",
     email: typeof data.email === "string" ? data.email : "",
     status,
@@ -1077,6 +1079,7 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
                       authUid={t.id}
                       role="parent"
                       attnId={t.attnId}
+                      loginId={t.loginId}
                       status={t.status}
                     />
                     <button

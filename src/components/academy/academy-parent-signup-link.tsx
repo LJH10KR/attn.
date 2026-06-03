@@ -24,10 +24,13 @@ export function AcademyParentSignupLink({ academyId }: { academyId: string }) {
 
   return (
     <section className="glass-card space-y-3 p-4">
-      <h3 className="text-sm font-semibold text-foreground">학부모 회원 가입 링크</h3>
+      <h3 className="text-sm font-semibold text-foreground">
+        학부모 회원 가입 링크
+      </h3>
       <p className="text-xs leading-relaxed text-neutral-600">
-        학부모에게 아래 링크를 보내 가입하도록 안내하세요. 가입 시 이름·비밀번호를 직접 설정하며,
-        로그인 번호(attnId)는 가입 완료 후 안내됩니다.
+        학부모에게 아래 링크를 보내 가입하도록 안내하세요. 가입 시
+        이름·휴대폰 번호·로그인 ID·비밀번호를 직접 설정합니다. 로그인 ID는 전
+        서비스에서 유일해야 합니다.
       </p>
       <p className="break-all rounded-xl bg-white/50 px-3 py-2 font-mono text-[11px] text-neutral-700 ring-1 ring-black/5 dark:bg-white/10">
         {signupUrl}

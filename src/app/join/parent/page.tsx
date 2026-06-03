@@ -6,9 +6,20 @@ import { httpsCallable } from "firebase/functions";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
+import { PasswordInput } from "@/components/ui/password-input";
 import { ProcessStatusModal } from "@/components/ui/process-status-modal";
+import { resolvePasswordConfirmHint } from "@/lib/ui/password-confirm-hint";
 import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
+import {
+  formatKrPhoneInput,
+  getKrPhoneValidationError,
+  KR_PHONE_INPUT_MAX_LENGTH,
+} from "@/lib/phone/kr-phone";
+import {
+  getParentLoginIdFormatError,
+  normalizeParentLoginId,
+} from "@/lib/parent-login-id";
 
 const inputClass =
   "w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50";
@@ -34,11 +45,20 @@ function ParentJoinForm() {
   const [academyName, setAcademyName] = useState<string | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [loginId, setLoginId] = useState("");
+  const [loginIdStatus, setLoginIdStatus] = useState<
+    "idle" | "checking" | "available" | "taken" | "invalid"
+  >("idle");
+  const [loginIdMessage, setLoginIdMessage] = useState<string | null>(null);
   const [password, setPassword] = useState("");
   const [password2, setPassword2] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showPassword2, setShowPassword2] = useState(false);
+  const [confirmBlurred, setConfirmBlurred] = useState(false);
   const [agree, setAgree] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [doneAttnId, setDoneAttnId] = useState<string | null>(null);
+  const [doneLoginId, setDoneLoginId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [loadingModal, setLoadingModal] = useState<{
     title: string;
@@ -79,18 +99,68 @@ function ParentJoinForm() {
     };
   }, [academyId]);
 
+  useEffect(() => {
+    const formatErr = getParentLoginIdFormatError(loginId);
+    if (!loginId.trim()) {
+      setLoginIdStatus("idle");
+      setLoginIdMessage(null);
+      return;
+    }
+    if (formatErr) {
+      setLoginIdStatus("invalid");
+      setLoginIdMessage(formatErr);
+      return;
+    }
+    let cancelled = false;
+    setLoginIdStatus("checking");
+    setLoginIdMessage("사용 가능 여부를 확인하고 있어요.");
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const fn = httpsCallable(getFirebaseFunctions(), "checkParentLoginIdAvailable");
+          await fn({ loginId });
+          if (!cancelled) {
+            setLoginIdStatus("available");
+            setLoginIdMessage("사용할 수 있는 로그인 ID입니다.");
+          }
+        } catch (e) {
+          if (!cancelled) {
+            const msg =
+              e instanceof FirebaseError
+                ? e.message
+                : "확인에 실패했습니다. 잠시 후 다시 시도해 주세요.";
+            if (e instanceof FirebaseError && e.code === "functions/already-exists") {
+              setLoginIdStatus("taken");
+            } else if (e instanceof FirebaseError && e.code === "functions/invalid-argument") {
+              setLoginIdStatus("invalid");
+            } else {
+              setLoginIdStatus("invalid");
+            }
+            setLoginIdMessage(msg);
+          }
+        }
+      })();
+    }, 400);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [loginId]);
+
+  const passwordConfirmHint = resolvePasswordConfirmHint(password, password2, confirmBlurred);
+
   const onCopyLoginId = useCallback(async () => {
-    if (!doneAttnId) {
+    if (!doneLoginId) {
       return;
     }
     try {
-      await navigator.clipboard.writeText(doneAttnId);
+      await navigator.clipboard.writeText(doneLoginId);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
       setCopied(false);
     }
-  }, [doneAttnId]);
+  }, [doneLoginId]);
 
   const onSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -98,6 +168,32 @@ function ParentJoinForm() {
       setError(null);
       if (!displayName.trim()) {
         setError("이름을 입력해 주세요.");
+        return;
+      }
+      if (displayName.trim().length > 60) {
+        setError("이름은 60자 이하로 입력해 주세요.");
+        return;
+      }
+      const phoneErr = getKrPhoneValidationError(phone);
+      if (phoneErr) {
+        setError(phoneErr);
+        return;
+      }
+      if (!loginId.trim()) {
+        setError("로그인 ID를 입력해 주세요.");
+        return;
+      }
+      const formatErr = getParentLoginIdFormatError(loginId);
+      if (formatErr) {
+        setError(formatErr);
+        return;
+      }
+      if (loginIdStatus !== "available") {
+        setError("사용 가능한 로그인 ID를 입력해 주세요.");
+        return;
+      }
+      if (!password) {
+        setError("비밀번호를 입력해 주세요.");
         return;
       }
       if (password.length < 6) {
@@ -115,16 +211,18 @@ function ParentJoinForm() {
       try {
         setLoadingModal({
           title: "1단계 · 학부모 계정 생성 중",
-          description: "이름과 비밀번호를 안전하게 등록하고 있어요.",
+          description: "로그인 ID와 계정 정보를 안전하게 등록하고 있어요.",
         });
         const fn = httpsCallable(getFirebaseFunctions(), "registerParentSelfSignup");
         const res = await fn({
           academyId,
+          loginId: normalizeParentLoginId(loginId),
           displayName: displayName.trim(),
+          phone: formatKrPhoneInput(phone),
           password,
           agreeTerms: true,
         });
-        const data = res.data as { customToken?: string; attnId?: string };
+        const data = res.data as { customToken?: string; loginId?: string; attnId?: string };
         if (data.customToken) {
           setLoadingModal({
             title: "2단계 · 로그인 연결 중",
@@ -133,13 +231,13 @@ function ParentJoinForm() {
           await signInWithCustomToken(getFirebaseAuth(), data.customToken);
         }
         setLoadingModal(null);
-        setDoneAttnId(data.attnId ?? "");
+        setDoneLoginId(data.loginId ?? normalizeParentLoginId(loginId));
       } catch (err) {
         setLoadingModal(null);
         setError(err instanceof FirebaseError ? err.message : "가입에 실패했습니다.");
       }
     },
-    [academyId, agree, displayName, password, password2],
+    [academyId, agree, displayName, loginId, loginIdStatus, password, password2, phone],
   );
 
   if (!isFirebaseConfigured()) {
@@ -169,19 +267,19 @@ function ParentJoinForm() {
         </p>
       ) : null}
 
-      {!loadErr && academyId && academyName !== null && doneAttnId ? (
+      {!loadErr && academyId && academyName !== null && doneLoginId ? (
         <div className="space-y-4 text-center">
           <p className="text-lg font-semibold text-emerald-800">가입이 완료되었습니다</p>
           <p className="text-sm text-neutral-600">
-            다음부터 로그인할 때 사용할 <strong>로그인 번호</strong>입니다. 꼭 메모해 두세요.
+            다음부터 로그인할 때 사용할 <strong>로그인 ID</strong>입니다. 꼭 메모해 두세요.
           </p>
           <div className="flex items-center gap-2 rounded-xl bg-white/60 px-3 py-3 ring-1 ring-black/5">
-            <p className="min-w-0 flex-1 break-all text-left font-mono text-sm">{doneAttnId}</p>
+            <p className="min-w-0 flex-1 break-all text-left font-mono text-sm">{doneLoginId}</p>
             <button
               type="button"
               onClick={() => void onCopyLoginId()}
               className="shrink-0 rounded-lg p-2 text-neutral-500 transition hover:bg-black/5 hover:text-foreground"
-              aria-label="로그인 번호 복사"
+              aria-label="로그인 ID 복사"
             >
               <ClipboardIcon />
             </button>
@@ -199,8 +297,8 @@ function ParentJoinForm() {
         </div>
       ) : null}
 
-      {!loadErr && academyId && academyName !== null && !doneAttnId ? (
-        <form className="space-y-4" onSubmit={(e) => void onSubmit(e)}>
+      {!loadErr && academyId && academyName !== null && !doneLoginId ? (
+        <form className="space-y-4" onSubmit={(e) => void onSubmit(e)} noValidate>
           <p className="text-center text-sm text-neutral-600">
             <span className="font-medium text-foreground">{academyName}</span> 학부모 회원 가입
           </p>
@@ -211,7 +309,7 @@ function ParentJoinForm() {
           ) : null}
           <div>
             <label className="mb-1.5 block text-xs font-medium text-neutral-600" htmlFor="pj-name">
-              이름
+              이름 <span className="text-red-600">*</span>
             </label>
             <input
               id="pj-name"
@@ -220,37 +318,96 @@ function ParentJoinForm() {
               onChange={(e) => setDisplayName(e.target.value)}
               maxLength={60}
               autoComplete="name"
+              required
               disabled={loadingModal !== null}
             />
           </div>
           <div>
-            <label className="mb-1.5 block text-xs font-medium text-neutral-600" htmlFor="pj-pw">
-              비밀번호
+            <label className="mb-1.5 block text-xs font-medium text-neutral-600" htmlFor="pj-phone">
+              휴대폰 번호 <span className="text-red-600">*</span>
             </label>
             <input
-              id="pj-pw"
-              type="password"
+              id="pj-phone"
+              type="tel"
               className={inputClass}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="new-password"
+              value={phone}
+              onChange={(e) => setPhone(formatKrPhoneInput(e.target.value))}
+              maxLength={KR_PHONE_INPUT_MAX_LENGTH}
+              autoComplete="tel"
+              inputMode="numeric"
+              required
               disabled={loadingModal !== null}
+              placeholder="010-1234-5678"
             />
           </div>
           <div>
-            <label className="mb-1.5 block text-xs font-medium text-neutral-600" htmlFor="pj-pw2">
-              비밀번호 확인
+            <label className="mb-1.5 block text-xs font-medium text-neutral-600" htmlFor="pj-login-id">
+              로그인 ID <span className="text-red-600">*</span>
             </label>
             <input
-              id="pj-pw2"
-              type="password"
+              id="pj-login-id"
               className={inputClass}
-              value={password2}
-              onChange={(e) => setPassword2(e.target.value)}
-              autoComplete="new-password"
+              value={loginId}
+              onChange={(e) => setLoginId(e.target.value.toLowerCase())}
+              maxLength={20}
+              autoComplete="username"
+              autoCapitalize="none"
+              spellCheck={false}
+              required
               disabled={loadingModal !== null}
+              placeholder="예: kim_mom"
             />
+            <p className="mt-1 text-[11px] text-neutral-500">
+              영문 소문자·숫자·밑줄(_), 4~20자. 전 서비스에서 유일해야 합니다.
+            </p>
+            {loginIdMessage ? (
+              <p
+                className={`mt-1 text-xs ${
+                  loginIdStatus === "available"
+                    ? "text-emerald-600"
+                    : loginIdStatus === "checking"
+                      ? "text-neutral-500"
+                      : "text-red-600"
+                }`}
+              >
+                {loginIdMessage}
+              </p>
+            ) : null}
           </div>
+          <PasswordInput
+            id="pj-pw"
+            label={
+              <>
+                비밀번호 <span className="text-red-600">*</span>
+              </>
+            }
+            value={password}
+            onChangeAction={setPassword}
+            visible={showPassword}
+            onToggleVisibleAction={() => setShowPassword((v) => !v)}
+            inputClassName={inputClass}
+            disabled={loadingModal !== null}
+            required
+            minLength={6}
+          />
+          <PasswordInput
+            id="pj-pw2"
+            label={
+              <>
+                비밀번호 확인 <span className="text-red-600">*</span>
+              </>
+            }
+            value={password2}
+            onChangeAction={setPassword2}
+            onBlurAction={() => setConfirmBlurred(true)}
+            visible={showPassword2}
+            onToggleVisibleAction={() => setShowPassword2((v) => !v)}
+            confirmHint={passwordConfirmHint}
+            inputClassName={inputClass}
+            disabled={loadingModal !== null}
+            required
+            minLength={6}
+          />
           <label className="flex items-start gap-2 text-xs text-neutral-600">
             <input
               type="checkbox"

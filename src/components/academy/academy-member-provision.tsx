@@ -174,14 +174,18 @@ export function AcademyMemberCredentialActions({
   authUid,
   role,
   attnId,
+  loginId,
   status,
 }: {
   academyId: string;
   authUid: string;
   role: "teacher" | "parent";
   attnId: string;
+  /** 학부모 링크 가입 등 — 로그인에 쓰는 ID (없으면 attnId) */
+  loginId?: string;
   status: string;
 }) {
+  const credentialLogin = loginId?.trim() || attnId;
   const [busy, setBusy] = useState(false);
   const [tempPassword, setTempPassword] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -201,22 +205,25 @@ export function AcademyMemberCredentialActions({
     }
   }, [academyId, authUid, role]);
 
-  if (!attnId) {
+  if (!credentialLogin) {
     return null;
   }
 
   return (
     <div className="mt-1 space-y-1 text-[11px]">
       <p className="font-mono text-neutral-600">
-        로그인 번호: {attnId}
+        {role === "parent" && loginId ? "로그인 ID" : "로그인 번호"}: {credentialLogin}
         <button
           type="button"
           className="ml-2 text-[#4a90e2] underline"
-          onClick={() => void navigator.clipboard.writeText(attnId)}
+          onClick={() => void navigator.clipboard.writeText(credentialLogin)}
         >
           복사
         </button>
       </p>
+      {role === "parent" && loginId && attnId && loginId !== attnId ? (
+        <p className="text-neutral-500">관리 번호(attn): {attnId}</p>
+      ) : null}
       {status === "pending_setup" ? (
         <button
           type="button"

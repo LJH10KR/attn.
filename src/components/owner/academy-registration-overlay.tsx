@@ -3,7 +3,9 @@
 import { FirebaseError } from "firebase/app";
 import { httpsCallable } from "firebase/functions";
 import { useCallback, useEffect, useState } from "react";
+import { PasswordInput } from "@/components/ui/password-input";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { resolvePasswordConfirmHint } from "@/lib/ui/password-confirm-hint";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 
 const inputClass =
@@ -37,28 +39,6 @@ function errMsg(err: unknown): string {
   return "요청에 실패했습니다.";
 }
 
-const PASSWORD_MATCH_MSG = "비밀번호가 일치합니다.";
-const PASSWORD_MISMATCH_MSG = "비밀번호가 일치하지 않습니다.";
-
-type PasswordConfirmHint = "none" | "match" | "mismatch";
-
-function resolvePasswordConfirmHint(
-  password: string,
-  confirm: string,
-  confirmBlurred: boolean,
-): PasswordConfirmHint {
-  if (password.length > 0 && confirm === password) {
-    return "match";
-  }
-  if (confirm.length === password.length && confirm !== password && password.length > 0) {
-    return "mismatch";
-  }
-  if (confirmBlurred && confirm !== password && (password.length > 0 || confirm.length > 0)) {
-    return "mismatch";
-  }
-  return "none";
-}
-
 function parseTeacherCountInput(raw: string): number {
   if (raw.trim() === "") {
     return 0;
@@ -68,91 +48,6 @@ function parseTeacherCountInput(raw: string): number {
     return 0;
   }
   return Math.min(50, Math.max(0, n));
-}
-
-function EyeOpenIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.5" />
-    </svg>
-  );
-}
-
-function EyeOffIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M3 3l18 18M10.5 10.7A3 3 0 0 0 12 15a3 3 0 0 0 2.3-1M6.7 6.8C4.6 8.4 3 10.5 2 12s3.5 7 10 7c1.8 0 3.4-.4 4.8-1.1M17.3 17.2C19.4 15.6 21 13.5 22 12s-3.5-7-10-7c-1.8 0-3.4.4-4.8 1.1"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function PasswordInput({
-  id,
-  label,
-  value,
-  onChangeAction,
-  onBlurAction,
-  visible,
-  onToggleVisibleAction,
-  confirmHint = "none",
-}: {
-  id: string;
-  label: string;
-  value: string;
-  onChangeAction: (next: string) => void;
-  onBlurAction?: () => void;
-  visible: boolean;
-  onToggleVisibleAction: () => void;
-  confirmHint?: PasswordConfirmHint;
-}) {
-  return (
-    <div>
-      <label className="mt-6 block text-xs font-medium text-neutral-600" htmlFor={id}>
-        {label}
-      </label>
-      <div className="relative mt-2">
-        <input
-          id={id}
-          type={visible ? "text" : "password"}
-          className={`${inputClass} pr-12`}
-          value={value}
-          onChange={(e) => onChangeAction(e.target.value)}
-          onBlur={onBlurAction}
-          autoComplete="new-password"
-          aria-invalid={confirmHint === "mismatch"}
-          aria-describedby={confirmHint !== "none" ? `${id}-hint` : undefined}
-        />
-        <button
-          type="button"
-          onClick={onToggleVisibleAction}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-foreground"
-          aria-label={visible ? "비밀번호 숨기기" : "비밀번호 보기"}
-        >
-          {visible ? <EyeOffIcon /> : <EyeOpenIcon />}
-        </button>
-      </div>
-      {confirmHint === "match" ? (
-        <p id={`${id}-hint`} className="mt-1.5 text-xs text-emerald-600 dark:text-emerald-400">
-          {PASSWORD_MATCH_MSG}
-        </p>
-      ) : null}
-      {confirmHint === "mismatch" ? (
-        <p id={`${id}-hint`} className="mt-1.5 text-xs text-red-600 dark:text-red-400">
-          {PASSWORD_MISMATCH_MSG}
-        </p>
-      ) : null}
-    </div>
-  );
 }
 
 export function AcademyRegistrationOverlay({
@@ -528,6 +423,8 @@ export function AcademyRegistrationOverlay({
                 onChangeAction={setPortalPassword}
                 visible={showPortalPassword}
                 onToggleVisibleAction={() => setShowPortalPassword((v) => !v)}
+                inputClassName={inputClass}
+                labelClassName="mt-6 block text-xs font-medium text-neutral-600"
               />
               <PasswordInput
                 id="portal-password-confirm"
@@ -538,6 +435,8 @@ export function AcademyRegistrationOverlay({
                 visible={showPortalPassword2}
                 onToggleVisibleAction={() => setShowPortalPassword2((v) => !v)}
                 confirmHint={passwordConfirmHint}
+                inputClassName={inputClass}
+                labelClassName="mt-6 block text-xs font-medium text-neutral-600"
               />
             </div>
           ) : null}

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { FirebaseError } from "firebase/app";
 import { onAuthStateChanged, signOut } from "firebase/auth";
@@ -30,6 +30,7 @@ export default function ParentSettingsPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [displayName, setDisplayName] = useState("");
+  const [loginId, setLoginId] = useState("");
   const [attnId, setAttnId] = useState("");
   const [profileBusy, setProfileBusy] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
@@ -87,13 +88,18 @@ export default function ParentSettingsPage() {
       },
       () => setAcademyName(null),
     );
-    const unsubParent =
-      uid ?
-        onSnapshot(doc(db, "academies", primaryAcademyId, "parents", uid), (snap) => {
-          const d = snap.data();
-          setDisplayName(typeof d?.displayName === "string" ? d.displayName : "");
-          setAttnId(typeof d?.attnId === "string" ? d.attnId : "");
-        })
+    const unsubParent = uid
+      ? onSnapshot(
+          doc(db, "academies", primaryAcademyId, "parents", uid),
+          (snap) => {
+            const d = snap.data();
+            setDisplayName(
+              typeof d?.displayName === "string" ? d.displayName : "",
+            );
+            setLoginId(typeof d?.loginId === "string" ? d.loginId : "");
+            setAttnId(typeof d?.attnId === "string" ? d.attnId : "");
+          },
+        )
       : () => {};
     return () => {
       unsubAcademy();
@@ -193,11 +199,19 @@ export default function ParentSettingsPage() {
           <section className={`p-4 ${glassCard}`}>
             <h2 className="text-sm font-semibold text-foreground">프로필</h2>
             <p className="mt-2 text-[11px] text-neutral-600">
-              로그인 번호는 변경할 수 없습니다.
+              로그인 ID는 변경할 수 없습니다.
             </p>
-            <p className="mt-3 text-xs font-medium text-neutral-500">로그인 번호</p>
-            <p className="font-mono text-sm text-foreground">{attnId || "—"}</p>
-            <label className="mt-4 mb-1 block text-xs font-medium text-neutral-600" htmlFor="p-dn">
+            <p className="mt-3 text-xs font-medium text-neutral-500">로그인 ID</p>
+            <p className="font-mono text-sm text-foreground">{loginId || attnId || "—"}</p>
+            {loginId && attnId && loginId !== attnId ? (
+              <p className="mt-2 text-[11px] text-neutral-500">
+                관리 번호(attn): <span className="font-mono">{attnId}</span>
+              </p>
+            ) : null}
+            <label
+              className="mt-4 mb-1 block text-xs font-medium text-neutral-600"
+              htmlFor="p-dn"
+            >
               표시 이름
             </label>
             <input
@@ -207,7 +221,9 @@ export default function ParentSettingsPage() {
               onChange={(e) => setDisplayName(e.target.value)}
               maxLength={60}
             />
-            {profileError ? <p className="mt-2 text-sm text-red-700">{profileError}</p> : null}
+            {profileError ? (
+              <p className="mt-2 text-sm text-red-700">{profileError}</p>
+            ) : null}
             {profileSaved ? (
               <p className="mt-2 text-sm text-emerald-800">저장되었습니다.</p>
             ) : null}

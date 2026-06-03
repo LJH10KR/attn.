@@ -45,6 +45,22 @@ export function phoneLast4Digits(phone: string | null | undefined): string | nul
 }
 
 /** 목록 검색: 하이픈 유무·숫자만 입력 모두 매칭 */
+/** 가입·폼 검증 — 미입력·자릿수·010 등 형식 */
+export function getKrPhoneValidationError(phone: string): string | null {
+  const trimmed = phone.trim();
+  if (!trimmed) {
+    return "전화번호를 입력해 주세요.";
+  }
+  const d = digitsOnly(trimmed);
+  if (d.length < 10 || d.length > 11) {
+    return "올바른 휴대폰 번호(10~11자리)를 입력해 주세요.";
+  }
+  if (!/^01[0-9]/.test(d)) {
+    return "휴대폰 번호 형식을 확인해 주세요.";
+  }
+  return null;
+}
+
 export function phoneMatchesSearch(phone: string | null | undefined, query: string): boolean {
   if (!phone?.trim()) return false;
   const q = query.trim().toLowerCase();

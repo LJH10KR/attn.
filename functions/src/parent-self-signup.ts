@@ -7,6 +7,12 @@ import {
   attnLoginIndexPath,
   formatParentAttnId,
 } from "./lib/attn-id";
+import { assertKrPhoneRequired } from "./lib/kr-phone";
+import {
+  assertParentLoginIdAvailable,
+  normalizeParentLoginId,
+  validateParentLoginIdFormat,
+} from "./lib/parent-login-id";
 
 function internalEmailForAttnId(attnId: string): string {
   const safe = attnId.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -41,12 +47,31 @@ export const getParentSignupAcademyInfo = onCall(async (request) => {
   };
 });
 
-/** 공개 — 학부모 자가 가입 (비밀번호·이름 직접 설정 → 즉시 active) */
+/** 공개 — 학부모 로그인 ID 중복 확인 (전역 유일) */
+export const checkParentLoginIdAvailable = onCall(async (request) => {
+  const raw =
+    typeof request.data?.loginId === "string"
+      ? request.data.loginId
+      : typeof request.data?.loginIdRaw === "string"
+        ? request.data.loginIdRaw
+        : "";
+  if (!raw.trim()) {
+    throw new HttpsError("invalid-argument", "로그인 ID를 입력해 주세요.");
+  }
+  const db = admin.firestore();
+  const loginId = await assertParentLoginIdAvailable(db, raw);
+  return { available: true, loginId };
+});
+
+/** 공개 — 학부모 자가 가입 (비밀번호·이름·로그인 ID 직접 설정 → 즉시 active) */
 export const registerParentSelfSignup = onCall(async (request) => {
   const academyId =
     typeof request.data?.academyId === "string" ? request.data.academyId.trim() : "";
-  const displayName =
-    typeof request.data?.displayName === "string" ? request.data.displayName.trim() : "";
+  const loginIdRaw =
+    typeof request.data?.loginId === "string" ? request.data.loginId : "";
+  const displayNameRaw =
+    typeof request.data?.displayName === "string" ? request.data.displayName : "";
+  const displayName = displayNameRaw.trim();
   const password = typeof request.data?.password === "string" ? request.data.password : "";
   const agreeTerms = request.data?.agreeTerms === true;
 
@@ -58,8 +83,15 @@ export const registerParentSelfSignup = onCall(async (request) => {
   } catch {
     throw new HttpsError("invalid-argument", "학원 로그인 번호 형식이 올바르지 않습니다.");
   }
-  if (!displayName || displayName.length > 60) {
-    throw new HttpsError("invalid-argument", "이름을 1~60자로 입력해 주세요.");
+  if (!displayName) {
+    throw new HttpsError("invalid-argument", "이름을 입력해 주세요.");
+  }
+  if (displayName.length > 60) {
+    throw new HttpsError("invalid-argument", "이름은 60자 이하로 입력해 주세요.");
+  }
+  const phone = assertKrPhoneRequired(request.data?.phone);
+  if (!password) {
+    throw new HttpsError("invalid-argument", "비밀번호를 입력해 주세요.");
   }
   if (password.length < 6) {
     throw new HttpsError("invalid-argument", "비밀번호는 6자 이상이어야 합니다.");
@@ -67,6 +99,11 @@ export const registerParentSelfSignup = onCall(async (request) => {
   if (!agreeTerms) {
     throw new HttpsError("invalid-argument", "서비스 이용에 동의해 주세요.");
   }
+  if (!loginIdRaw.trim()) {
+    throw new HttpsError("invalid-argument", "로그인 ID를 입력해 주세요.");
+  }
+  validateParentLoginIdFormat(loginIdRaw);
+  const normalizedLoginId = normalizeParentLoginId(loginIdRaw);
 
   const db = admin.firestore();
   const academySnap = await db.doc(`academies/${academyId}`).get();
@@ -82,10 +119,10 @@ export const registerParentSelfSignup = onCall(async (request) => {
     const seqSnap = await tx.get(seqRef);
     const nextParentSeq = (seqSnap.get("nextParentSeq") as number) || 1;
     const newAttnId = formatParentAttnId(academyId, nextParentSeq);
-    const indexRef = db.doc(attnLoginIndexPath(newAttnId));
-    const indexSnap = await tx.get(indexRef);
-    if (indexSnap.exists) {
-      throw new HttpsError("internal", "가입 번호를 할당하지 못했습니다. 다시 시도해 주세요.");
+    const loginIndexRef = db.doc(attnLoginIndexPath(normalizedLoginId));
+    const loginIndexSnap = await tx.get(loginIndexRef);
+    if (loginIndexSnap.exists) {
+      throw new HttpsError("already-exists", "이미 사용 중인 로그인 ID입니다.");
     }
     tx.set(seqRef, { nextParentSeq: nextParentSeq + 1 }, { merge: true });
     return newAttnId;
@@ -115,7 +152,9 @@ export const registerParentSelfSignup = onCall(async (request) => {
   const batch = db.batch();
   batch.set(memberRef, {
     attnId,
+    loginId: normalizedLoginId,
     displayName,
+    phone,
     email: "",
     academyId,
     status: "active",
@@ -131,8 +170,9 @@ export const registerParentSelfSignup = onCall(async (request) => {
     password,
     updatedAt: FieldValue.serverTimestamp(),
   });
-  batch.set(db.doc(attnLoginIndexPath(attnId)), {
+  batch.set(db.doc(attnLoginIndexPath(normalizedLoginId)), {
     attnId,
+    loginId: normalizedLoginId,
     academyId,
     authUid,
     role: "parent",
@@ -154,6 +194,7 @@ export const registerParentSelfSignup = onCall(async (request) => {
 
   return {
     attnId,
+    loginId: normalizedLoginId,
     academyId,
     customToken,
     membershipStatus: "active" as const,
