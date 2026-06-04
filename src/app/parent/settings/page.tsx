@@ -10,6 +10,7 @@ import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
+import { MemberPasswordSettingsCard } from "@/components/account/password-settings-cards";
 import { ParentGoogleLinkCard } from "@/components/parent/parent-google-link-card";
 import { ParentPushNotificationsCard } from "@/components/parent/parent-push-notifications-card";
 import {
@@ -172,7 +173,7 @@ export default function ParentSettingsPage() {
           affiliationLabel={affiliationLabel}
           menuIntro={
             <span className="text-neutral-600 dark:text-neutral-400">
-              프로필, Google 연동, 알림 및 기기 안내를 관리합니다.
+              프로필, 비밀번호, Google 연동, 알림 및 기기 안내를 관리합니다.
             </span>
           }
           showBack
@@ -243,6 +244,14 @@ export default function ParentSettingsPage() {
               {profileBusy ? "저장 중…" : "이름 저장"}
             </button>
           </section>
+          {primaryAcademyId && authProvider !== "google" ? (
+            <MemberPasswordSettingsCard
+              callableName="updateParentPassword"
+              idPrefix="parent"
+              description="로그인 ID와 함께 쓰는 비밀번호를 변경합니다. Google 연결 시 본인 확인에도 사용됩니다."
+              disabled={profileBusy || logoutBusy}
+            />
+          ) : null}
           {primaryAcademyId ? (
             <ParentGoogleLinkCard
               memberAuthProvider={authProvider}

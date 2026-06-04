@@ -3,9 +3,8 @@
 import { FirebaseError } from "firebase/app";
 import { httpsCallable } from "firebase/functions";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PasswordInput } from "@/components/ui/password-input";
+import { MemberPasswordSettingsCard } from "@/components/account/password-settings-cards";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
-import { resolvePasswordConfirmHint } from "@/lib/ui/password-confirm-hint";
 
 const inputClass =
   "w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3 text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50";
@@ -228,129 +227,12 @@ export function TeacherAttnIdSettingsCard({
 }
 
 export function TeacherPasswordSettingsCard({ disabled }: { disabled?: boolean }) {
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [newPassword2, setNewPassword2] = useState("");
-  const [showCurrent, setShowCurrent] = useState(false);
-  const [showNew, setShowNew] = useState(false);
-  const [showNew2, setShowNew2] = useState(false);
-  const [confirmBlurred, setConfirmBlurred] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-
-  const passwordConfirmHint = resolvePasswordConfirmHint(
-    newPassword,
-    newPassword2,
-    confirmBlurred,
-  );
-
-  const onSave = useCallback(async () => {
-    setError(null);
-    setSaved(false);
-    if (!currentPassword) {
-      setError("현재 비밀번호를 입력해 주세요.");
-      return;
-    }
-    if (newPassword.length < 6) {
-      setError("새 비밀번호는 6자 이상이어야 합니다.");
-      return;
-    }
-    if (newPassword !== newPassword2) {
-      setError("새 비밀번호가 서로 일치하지 않습니다.");
-      return;
-    }
-    if (currentPassword === newPassword) {
-      setError("새 비밀번호는 현재 비밀번호와 달라야 합니다.");
-      return;
-    }
-    setBusy(true);
-    try {
-      const fn = httpsCallable(getFirebaseFunctions(), "updateTeacherPassword");
-      await fn({ currentPassword, newPassword });
-      setSaved(true);
-      setCurrentPassword("");
-      setNewPassword("");
-      setNewPassword2("");
-      setConfirmBlurred(false);
-    } catch (e) {
-      setError(e instanceof FirebaseError ? e.message : "변경에 실패했습니다.");
-    } finally {
-      setBusy(false);
-    }
-  }, [currentPassword, newPassword, newPassword2]);
-
-  const formDisabled = disabled || busy;
-
   return (
-    <section className="glass-card space-y-4 p-4">
-      <h2 className="text-sm font-semibold text-foreground">비밀번호 변경</h2>
-      <p className="text-[11px] leading-relaxed text-neutral-600">
-        로그인 번호와 함께 쓰는 비밀번호를 변경합니다. Google 연결 시 본인 확인에도
-        사용됩니다.
-      </p>
-      <PasswordInput
-        id="t-cur-pw"
-        label={
-          <>
-            현재 비밀번호 <span className="text-red-600">*</span>
-          </>
-        }
-        value={currentPassword}
-        onChangeAction={setCurrentPassword}
-        visible={showCurrent}
-        onToggleVisibleAction={() => setShowCurrent((v) => !v)}
-        inputClassName={inputClass}
-        labelClassName="mb-1 block text-xs font-medium text-neutral-600"
-        disabled={formDisabled}
-        autoComplete="current-password"
-      />
-      <PasswordInput
-        id="t-new-pw"
-        label={
-          <>
-            새 비밀번호 <span className="text-red-600">*</span>
-          </>
-        }
-        value={newPassword}
-        onChangeAction={setNewPassword}
-        visible={showNew}
-        onToggleVisibleAction={() => setShowNew((v) => !v)}
-        inputClassName={inputClass}
-        labelClassName="mb-1 block text-xs font-medium text-neutral-600"
-        disabled={formDisabled}
-        minLength={6}
-        autoComplete="new-password"
-      />
-      <PasswordInput
-        id="t-new-pw2"
-        label={
-          <>
-            새 비밀번호 확인 <span className="text-red-600">*</span>
-          </>
-        }
-        value={newPassword2}
-        onChangeAction={setNewPassword2}
-        onBlurAction={() => setConfirmBlurred(true)}
-        visible={showNew2}
-        onToggleVisibleAction={() => setShowNew2((v) => !v)}
-        confirmHint={passwordConfirmHint}
-        inputClassName={inputClass}
-        labelClassName="mb-1 block text-xs font-medium text-neutral-600"
-        disabled={formDisabled}
-        minLength={6}
-        autoComplete="new-password"
-      />
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
-      {saved ? <p className="text-sm text-emerald-800">비밀번호가 변경되었습니다.</p> : null}
-      <button
-        type="button"
-        disabled={formDisabled}
-        onClick={() => void onSave()}
-        className="w-full rounded-2xl bg-[#222] py-2.5 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-950 disabled:opacity-60"
-      >
-        {busy ? "변경 중…" : "비밀번호 저장"}
-      </button>
-    </section>
+    <MemberPasswordSettingsCard
+      callableName="updateTeacherPassword"
+      idPrefix="teacher"
+      description="로그인 번호와 함께 쓰는 비밀번호를 변경합니다. Google 연결 시 본인 확인에도 사용됩니다."
+      disabled={disabled}
+    />
   );
 }

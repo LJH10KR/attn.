@@ -31,14 +31,33 @@ function assertTeacherAuth(request: {
   return { uid: request.auth.uid, academyId };
 }
 
-async function verifyTeacherPassword(
+function assertParentAuth(request: {
+  auth?: { uid: string; token: Record<string, unknown> };
+}): { uid: string; academyId: string } {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+  }
+  const token = request.auth.token;
+  if (token.role !== "parent") {
+    throw new HttpsError("permission-denied", "학부모 계정만 수정할 수 있습니다.");
+  }
+  const academyId = typeof token.academyId === "string" ? token.academyId : "";
+  if (!academyId) {
+    throw new HttpsError("failed-precondition", "학원 정보가 없습니다.");
+  }
+  return { uid: request.auth.uid, academyId };
+}
+
+async function verifyMemberLoginPassword(
   academyId: string,
   uid: string,
+  role: "teacher" | "parent",
   password: string,
 ): Promise<void> {
+  const col = role === "teacher" ? "teachers" : "parents";
   const secretSnap = await admin
     .firestore()
-    .doc(`academies/${academyId}/teachers/${uid}/secrets/login`)
+    .doc(`academies/${academyId}/${col}/${uid}/secrets/login`)
     .get();
   if (!secretSnap.exists) {
     throw new HttpsError("failed-precondition", "로그인 정보가 설정되지 않았습니다.");
@@ -297,7 +316,7 @@ export const updateTeacherAttnId = onCall(async (request) => {
     );
   }
 
-  await verifyTeacherPassword(academyId, uid, currentPassword);
+  await verifyMemberLoginPassword(academyId, uid, "teacher", currentPassword);
 
   const db = admin.firestore();
   const memberRef = db.doc(`academies/${academyId}/teachers/${uid}`);
@@ -379,10 +398,59 @@ export const updateTeacherPassword = onCall(async (request) => {
     );
   }
 
-  await verifyTeacherPassword(academyId, uid, currentPassword);
+  await verifyMemberLoginPassword(academyId, uid, "teacher", currentPassword);
 
   await admin.auth().updateUser(uid, { password: newPassword });
   await admin.firestore().doc(`academies/${academyId}/teachers/${uid}/secrets/login`).set(
+    {
+      password: newPassword,
+      tempPassword: FieldValue.delete(),
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+
+  return { ok: true };
+});
+
+/** 학부모 — 비밀번호 변경 */
+export const updateParentPassword = onCall(async (request) => {
+  const { uid, academyId } = assertParentAuth(request);
+  const currentPassword =
+    typeof request.data?.currentPassword === "string"
+      ? request.data.currentPassword
+      : "";
+  const newPassword =
+    typeof request.data?.newPassword === "string" ? request.data.newPassword : "";
+  if (!currentPassword) {
+    throw new HttpsError("invalid-argument", "현재 비밀번호를 입력해 주세요.");
+  }
+  if (newPassword.length < 6) {
+    throw new HttpsError("invalid-argument", "새 비밀번호는 6자 이상이어야 합니다.");
+  }
+  if (currentPassword === newPassword) {
+    throw new HttpsError(
+      "invalid-argument",
+      "새 비밀번호는 현재 비밀번호와 달라야 합니다.",
+    );
+  }
+
+  const memberRef = admin.firestore().doc(`academies/${academyId}/parents/${uid}`);
+  const memberSnap = await memberRef.get();
+  if (!memberSnap.exists) {
+    throw new HttpsError("not-found", "학부모 정보를 찾을 수 없습니다.");
+  }
+  if (memberSnap.get("authProvider") === "google") {
+    throw new HttpsError(
+      "failed-precondition",
+      "Google 전용 계정은 비밀번호를 변경할 수 없습니다.",
+    );
+  }
+
+  await verifyMemberLoginPassword(academyId, uid, "parent", currentPassword);
+
+  await admin.auth().updateUser(uid, { password: newPassword });
+  await admin.firestore().doc(`academies/${academyId}/parents/${uid}/secrets/login`).set(
     {
       password: newPassword,
       tempPassword: FieldValue.delete(),

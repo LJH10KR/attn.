@@ -3,6 +3,7 @@ import {onCall, HttpsError} from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
+import { assertCanManageAcademy } from "./lib/academy-access";
 
 /**
  * `createCustomToken`용 IAM 서명 주체.
@@ -163,6 +164,58 @@ export const updateAcademyPortalPassword = onCall(async (request) => {
 });
 
 /**
+ * 학원 포털(또는 오너) — 현재 비밀번호 확인 후 포털 로그인 비밀번호 변경
+ */
+export const changeAcademyPortalPassword = onCall(async (request) => {
+  const auth = request.auth;
+  if (!auth?.uid) {
+    throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+  }
+  const uid = auth.uid;
+
+  const academyId = requireAcademyDocumentId(request.data?.academyId);
+  const currentPassword =
+    typeof request.data?.currentPassword === "string" ? request.data.currentPassword : "";
+  const newPassword =
+    typeof request.data?.newPassword === "string" ? request.data.newPassword : "";
+
+  if (!currentPassword) {
+    throw new HttpsError("invalid-argument", "현재 비밀번호를 입력해 주세요.");
+  }
+  if (newPassword.length < 6) {
+    throw new HttpsError("invalid-argument", "새 비밀번호는 6자 이상이어야 합니다.");
+  }
+  if (currentPassword === newPassword) {
+    throw new HttpsError(
+      "invalid-argument",
+      "새 비밀번호는 현재 비밀번호와 달라야 합니다.",
+    );
+  }
+
+  const db = admin.firestore();
+  await assertCanManageAcademy(db, academyId, uid, auth.token);
+
+  const secretRef = db.doc(`academies/${academyId}/secrets/login`);
+  const secretSnap = await secretRef.get();
+  if (!secretSnap.exists) {
+    throw new HttpsError("failed-precondition", "학원 로그인이 아직 설정되지 않았습니다.");
+  }
+  const portalPassword = secretSnap.get("portalPassword");
+  if (typeof portalPassword !== "string" || portalPassword.length === 0) {
+    throw new HttpsError("failed-precondition", "학원 로그인이 아직 설정되지 않았습니다.");
+  }
+  if (currentPassword !== portalPassword) {
+    throw new HttpsError("permission-denied", "현재 비밀번호가 올바르지 않습니다.");
+  }
+
+  await secretRef.set(
+    {portalPassword: newPassword, updatedAt: FieldValue.serverTimestamp()},
+    {merge: true},
+  );
+  return {ok: true};
+});
+
+/**
  * 오너 전용 — 학원 문서 + 포털 시크릿 문서 삭제
  */
 export const deleteOwnerAcademy = onCall(async (request) => {
@@ -317,6 +370,7 @@ export {
   checkTeacherAttnIdAvailable,
   updateTeacherAttnId,
   updateTeacherPassword,
+  updateParentPassword,
 } from "./member-profiles";
 export {
   onTeacherMembershipWritten,

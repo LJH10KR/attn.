@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
+import { OwnerPasswordSettingsCard } from "@/components/account/password-settings-cards";
 import { OwnerGoogleLinkCard } from "@/components/owner/owner-google-link-card";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { getFirebaseAuth } from "@/lib/firebase/client-app";
@@ -117,7 +118,7 @@ export default function OwnerSettingsPage() {
           affiliationLabel="오너 계정"
           menuIntro={
             <span className="text-neutral-600 dark:text-neutral-400">
-              Google 로그인 연동 등 계정을 관리합니다.
+              Google 연동, 비밀번호 등 계정을 관리합니다.
             </span>
           }
           showBack
@@ -142,6 +143,7 @@ export default function OwnerSettingsPage() {
         />
 
         <div className="mt-5 space-y-4">
+          <OwnerPasswordSettingsCard disabled={logoutBusy} />
           <OwnerGoogleLinkCard />
         </div>
       </div>

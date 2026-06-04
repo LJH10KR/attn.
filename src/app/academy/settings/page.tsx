@@ -15,6 +15,7 @@ import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { fetchIsOwner } from "@/lib/firebase/owner-profile";
 import { FirebaseError } from "firebase/app";
+import { AcademyPortalPasswordSettingsCard } from "@/components/account/password-settings-cards";
 import { SlideSwitch } from "@/components/ui/slide-switch";
 
 const glassCard = "glass-card";
@@ -178,6 +179,8 @@ function AcademySettingsInner() {
         {toast ? (
           <p className="text-sm text-center text-neutral-600 dark:text-neutral-400">{toast}</p>
         ) : null}
+
+        <AcademyPortalPasswordSettingsCard academyId={academyId} disabled={busy} />
 
         <section className={`p-5 ${glassCard}`}>
           <h2 className="text-sm font-semibold text-foreground">키오스크 종료 PIN</h2>
