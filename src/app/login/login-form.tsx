@@ -202,7 +202,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
     }, [router]);
   const showOwnerEmailAuth = role === "owner";
   const showMemberAttnAuth = role === "teacher" || role === "parent";
-  const showGoogle = role === "owner" || role === "parent";
+  const showGoogle = role === "owner" || role === "parent" || role === "teacher";
   const showAcademyFields = role === "academy";
   const hasSession = Boolean(sessionUser);
   const sessionBlocked = hasSession;
@@ -455,6 +455,33 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
         return;
       }
       if (role === "teacher") {
+        try {
+          const signInGoogle = httpsCallable(
+            getFirebaseFunctions(),
+            "signInTeacherGoogle",
+          );
+          await signInGoogle({});
+          await cred.user.getIdToken(true);
+        } catch (linkErr) {
+          await signOut(auth);
+          if (linkErr instanceof FirebaseError) {
+            if (linkErr.code === "functions/failed-precondition") {
+              setError(linkErr.message || "구글 로그인 연동 후 진행해 주세요.");
+              return;
+            }
+            if (linkErr.code === "functions/not-found") {
+              setError(
+                linkErr.message || "연결된 선생님 계정을 찾을 수 없습니다.",
+              );
+              return;
+            }
+            if (linkErr.code === "functions/unauthenticated") {
+              setError(linkErr.message || "Google 로그인 후 다시 시도해 주세요.");
+              return;
+            }
+          }
+          throw linkErr;
+        }
         const ok = await checkTeacherActivationOrRedirect();
         if (!ok) return;
       }
@@ -475,6 +502,9 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
               : "/",
       );
     } catch (err) {
+      if (role === "teacher" && getFirebaseAuth().currentUser) {
+        await signOut(getFirebaseAuth()).catch(() => undefined);
+      }
       const code = err instanceof FirebaseError ? err.code : "";
       setError(authErrorMessage(code, role));
     } finally {
@@ -828,7 +858,9 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
               className="flex w-full items-center justify-center gap-3 rounded-2xl border border-neutral-300/70 bg-white/60 dark:border-white/12 dark:bg-white/10 py-3.5 text-[15px] font-medium text-foreground shadow-sm backdrop-blur-md transition hover:bg-white/85 active:scale-[0.99] disabled:opacity-50"
             >
               <GoogleMark />
-              Google 계정으로 시작
+              {role === "teacher"
+                ? "Google 계정으로 로그인"
+                : "Google 계정으로 시작"}
             </button>
           </>
         ) : null}
@@ -861,7 +893,9 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
             <p className="text-xs text-neutral-500">
               {role === "parent"
                 ? "가입 시 설정한 로그인 ID와 비밀번호로 로그인합니다. 링크 가입 전에 학원이 발급한 로그인 번호가 있다면 그 번호로도 로그인할 수 있습니다."
-                : "로그인 번호와 임시 비밀번호는 학원에서 발급받으세요. 최초 로그인 후 비밀번호를 변경해야 이용할 수 있습니다."}
+                : role === "teacher"
+                  ? "로그인 번호·비밀번호는 학원에서 발급받습니다. Google 로그인은 사용자 설정에서 Google 연동을 완료한 뒤에만 사용할 수 있습니다."
+                  : "로그인 번호와 임시 비밀번호는 학원에서 발급받으세요. 최초 로그인 후 비밀번호를 변경해야 이용할 수 있습니다."}
             </p>
           ) : (
             <p className="text-xs text-neutral-500">

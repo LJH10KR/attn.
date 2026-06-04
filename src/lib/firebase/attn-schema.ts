@@ -193,6 +193,9 @@ export type AcademyTeacher = {
   phone?: string | null;
   academyId: string;
   status: TeacherRegistrationStatus;
+  authProvider?: "password" | "google";
+  googleLinked?: boolean;
+  googleEmail?: string;
   authUid?: string | null;
   invitedAt?: Timestamp | null;
   /** 초청 발송(또는 재발송) 시각 + 24시간 — 대시보드 카운트다운·서버 검증에 사용 */

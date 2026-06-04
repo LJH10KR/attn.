@@ -104,6 +104,59 @@ export const signInTeacher = onCall(async (request) => {
   return signInMember(attnId, password, "teacher");
 });
 
+/** 선생님 Google 로그인 — 설정에서 Google 연동(googleLinked)된 계정만 */
+export const TEACHER_GOOGLE_LINK_REQUIRED_MSG = "구글 로그인 연동 후 진행해 주세요.";
+
+function teacherAcademyIdFromMemberPath(path: string): string | null {
+  const m = path.match(/^academies\/([^/]+)\/teachers\//);
+  return m ? m[1] : null;
+}
+
+export const signInTeacherGoogle = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "Google 로그인 후 다시 시도해 주세요.");
+  }
+  const uid = request.auth.uid;
+
+  const user = await admin.auth().getUser(uid);
+  const hasGoogle = user.providerData.some((p) => p.providerId === "google.com");
+  if (!hasGoogle) {
+    throw new HttpsError("failed-precondition", "Google 로그인 후 다시 시도해 주세요.");
+  }
+
+  const db = admin.firestore();
+  const snaps = await db.collectionGroup("teachers").where("authUid", "==", uid).limit(25).get();
+  if (snaps.empty) {
+    throw new HttpsError("not-found", "연결된 선생님 계정을 찾을 수 없습니다.");
+  }
+
+  const linked = snaps.docs.filter((d) => d.get("googleLinked") === true);
+  if (linked.length === 0) {
+    throw new HttpsError("failed-precondition", TEACHER_GOOGLE_LINK_REQUIRED_MSG);
+  }
+
+  const activeLinked = linked.find((d) => d.get("status") === "active");
+  const memberDoc = activeLinked ?? linked[0]!;
+  const academyId = teacherAcademyIdFromMemberPath(memberDoc.ref.path);
+  if (!academyId) {
+    throw new HttpsError("failed-precondition", "학원 정보가 올바르지 않습니다.");
+  }
+  const membershipStatus =
+    typeof memberDoc.get("status") === "string" ? memberDoc.get("status") : "pending_setup";
+
+  await admin.auth().setCustomUserClaims(uid, {
+    role: "teacher",
+    academyId,
+    membershipStatus,
+  });
+
+  return {
+    academyId,
+    membershipStatus,
+    anyActive: membershipStatus === "active",
+  };
+});
+
 export const signInParent = onCall(async (request) => {
   const loginId =
     typeof request.data?.loginId === "string"

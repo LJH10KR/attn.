@@ -9,6 +9,11 @@ import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import {
+  TeacherAttnIdSettingsCard,
+  TeacherPasswordSettingsCard,
+} from "@/components/teacher/teacher-account-settings-cards";
+import { TeacherGoogleLinkCard } from "@/components/teacher/teacher-google-link-card";
+import {
   getFirebaseAuth,
   getFirebaseDb,
   getFirebaseFunctions,
@@ -29,6 +34,8 @@ export default function TeacherSettingsPage() {
   const [academyName, setAcademyName] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [attnId, setAttnId] = useState("");
+  const [googleLinked, setGoogleLinked] = useState(false);
+  const [googleEmail, setGoogleEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -67,6 +74,8 @@ export default function TeacherSettingsPage() {
         const d = snap.data();
         setDisplayName(typeof d?.displayName === "string" ? d.displayName : "");
         setAttnId(typeof d?.attnId === "string" ? d.attnId : "");
+        setGoogleLinked(d?.googleLinked === true);
+        setGoogleEmail(typeof d?.googleEmail === "string" ? d.googleEmail : "");
       },
     );
     const unsubAcademy = onSnapshot(doc(db, "academies", academyId), (snap) => {
@@ -79,7 +88,7 @@ export default function TeacherSettingsPage() {
     };
   }, [academyId]);
 
-  const onSave = useCallback(async () => {
+  const onSaveName = useCallback(async () => {
     setError(null);
     setSaved(false);
     setBusy(true);
@@ -104,6 +113,8 @@ export default function TeacherSettingsPage() {
     }
   }, [router]);
 
+  const formDisabled = busy || logoutBusy;
+
   return (
     <div className="min-h-[100dvh] bg-background px-4 pb-28">
       <div className="mx-auto max-w-lg">
@@ -113,6 +124,11 @@ export default function TeacherSettingsPage() {
             academyName,
             academyId ?? "",
           )}
+          menuIntro={
+            <span className="text-neutral-600 dark:text-neutral-400">
+              프로필, Google 연동, 로그인 번호·비밀번호를 관리합니다.
+            </span>
+          }
           showBack
           onBackAction={() => router.push("/teacher")}
           backAriaLabel="선생님 대시보드로 돌아가기"
@@ -134,46 +150,59 @@ export default function TeacherSettingsPage() {
           profile={authProfile}
         />
 
-        <section className={`mt-5 space-y-4 p-4 ${glassCard}`}>
-          <h2 className="text-sm font-semibold text-foreground">프로필</h2>
-          <p className="text-[11px] text-neutral-600">
-            로그인 번호는 변경할 수 없습니다. 대시보드에 표시되는 이름만
-            수정합니다.
-          </p>
-          <div>
-            <p className="text-xs font-medium text-neutral-500">로그인 번호</p>
-            <p className="mt-1 font-mono text-sm text-foreground">
-              {attnId || "—"}
-            </p>
-          </div>
-          <div>
-            <label
-              className="mb-1 block text-xs font-medium text-neutral-600"
-              htmlFor="t-dn"
+        <div className="mt-5 space-y-4">
+          <section className={`space-y-4 p-4 ${glassCard}`}>
+            <h2 className="text-sm font-semibold text-foreground">프로필</h2>
+            <div>
+              <label
+                className="mb-1 block text-xs font-medium text-neutral-600"
+                htmlFor="t-dn"
+              >
+                이름
+              </label>
+              <input
+                id="t-dn"
+                className={inputClass}
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                maxLength={60}
+                disabled={formDisabled}
+                autoComplete="name"
+              />
+            </div>
+            {error ? <p className="text-sm text-red-700">{error}</p> : null}
+            {saved ? (
+              <p className="text-sm text-emerald-800">저장되었습니다.</p>
+            ) : null}
+            <button
+              type="button"
+              disabled={formDisabled}
+              onClick={() => void onSaveName()}
+              className="w-full rounded-2xl bg-[#222] py-2.5 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-950 disabled:opacity-60"
             >
-              표시 이름
-            </label>
-            <input
-              id="t-dn"
-              className={inputClass}
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              maxLength={60}
+              {busy ? "저장 중…" : "이름 저장"}
+            </button>
+          </section>
+
+          {academyId && attnId ? (
+            <TeacherAttnIdSettingsCard
+              academyId={academyId}
+              currentAttnId={attnId}
+              disabled={formDisabled}
+              onSavedAction={setAttnId}
             />
-          </div>
-          {error ? <p className="text-sm text-red-700">{error}</p> : null}
-          {saved ? (
-            <p className="text-sm text-emerald-800">저장되었습니다.</p>
           ) : null}
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void onSave()}
-            className="w-full rounded-2xl bg-[#222] py-2.5 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-950 disabled:opacity-60"
-          >
-            {busy ? "저장 중…" : "이름 저장"}
-          </button>
-        </section>
+
+          <TeacherPasswordSettingsCard disabled={formDisabled} />
+
+          {academyId ? (
+            <TeacherGoogleLinkCard
+              attnId={attnId}
+              googleLinked={googleLinked}
+              googleEmail={googleEmail}
+            />
+          ) : null}
+        </div>
       </div>
       <DashboardBottomScrim />
     </div>

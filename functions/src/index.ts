@@ -296,6 +296,7 @@ export {
 } from "./academy-provision";
 export {
   signInTeacher,
+  signInTeacherGoogle,
   signInParent,
   completeMemberFirstLogin,
   regenerateMemberTempPassword,
@@ -312,6 +313,10 @@ export {
   updateTeacherProfile,
   updateParentProfile,
   syncParentGoogleLink,
+  syncTeacherGoogleLink,
+  checkTeacherAttnIdAvailable,
+  updateTeacherAttnId,
+  updateTeacherPassword,
 } from "./member-profiles";
 export {
   onTeacherMembershipWritten,
