@@ -1,3 +1,17 @@
+import { formatKrPhoneDisplay } from "@/lib/phone/kr-phone";
+
+/** 프로필 메뉴 2행 — 전화번호 우선, 없으면 이메일(내부 provision 주소 등) */
+export function menuProfileContactLine(
+  profile:
+    | { phone?: string | null; email?: string | null }
+    | null
+    | undefined,
+): string {
+  const phone = formatKrPhoneDisplay(profile?.phone);
+  if (phone) return phone;
+  return profile?.email?.trim() || "—";
+}
+
 /** 인사말에 쓸 짧은 이름(표시 이름 첫 토큰 또는 이메일 @ 앞) */
 export function greetingDisplayNameFromProfile(
   profile: { displayName?: string | null; email?: string | null } | null | undefined,

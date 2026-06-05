@@ -46,13 +46,13 @@ function linkGoogleErrorMessage(code: string): string {
 }
 
 export type TeacherGoogleLinkCardProps = {
-  attnId?: string;
+  loginId?: string;
   googleLinked?: boolean;
   googleEmail?: string;
 };
 
 export function TeacherGoogleLinkCard({
-  attnId,
+  loginId,
   googleLinked,
   googleEmail: googleEmailStored,
 }: TeacherGoogleLinkCardProps) {
@@ -178,7 +178,7 @@ export function TeacherGoogleLinkCard({
       <section className={`rounded-2xl p-5 ${glassCard}`} aria-label="Google 계정 연결">
         <h3 className="text-sm font-semibold text-foreground">Google 계정 연결</h3>
         <p className="mt-2 text-xs leading-relaxed text-neutral-600">
-          로그인 번호·비밀번호와 Google 로그인이 연결되어 있습니다. Google로도
+          로그인 ID·비밀번호와 Google 로그인이 연결되어 있습니다. Google로도
           로그인할 수 있습니다.
         </p>
         {displayGoogleEmail ? (
@@ -216,8 +216,8 @@ export function TeacherGoogleLinkCard({
     <section className={`rounded-2xl p-5 ${glassCard}`} aria-label="Google 계정 연결">
       <h3 className="text-sm font-semibold text-foreground">Google 계정 연결</h3>
       <p className="mt-2 text-xs leading-relaxed text-neutral-600">
-        Google 계정을 연결하면 로그인 번호(
-        {attnId ? <span className="font-mono text-[11px]">{attnId}</span> : "—"})·비밀번호
+        Google 계정을 연결하면 로그인 ID(
+        {loginId ? <span className="font-mono text-[11px]">{loginId}</span> : "—"})·비밀번호
         대신 Google로도 로그인할 수 있습니다. 연결 후에도 기존 로그인 방식은 그대로
         사용할 수 있습니다.
       </p>

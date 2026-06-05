@@ -6,7 +6,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot, Timestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   docToStudentRow,
   type StudentRowVM,
@@ -77,10 +77,12 @@ function studentRowFromCallablePayload(
 
 export default function TeacherDashboardPage() {
   const router = useRouter();
-  const authProfile = useAuthProfile();
+  const { profile: authProfile } = useAuthProfile();
   const [ready, setReady] = useState(false);
   const [academyId, setAcademyId] = useState<string | null>(null);
   const [academyName, setAcademyName] = useState<string | null>(null);
+  const [memberPhone, setMemberPhone] = useState<string | null>(null);
+  const [memberDisplayName, setMemberDisplayName] = useState<string | null>(null);
   const [students, setStudents] = useState<StudentRowVM[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
@@ -321,7 +323,8 @@ export default function TeacherDashboardPage() {
   useEffect(() => {
     if (!academyId) return;
     const db = getFirebaseDb();
-    const unsub = onSnapshot(
+    const uid = getFirebaseAuth().currentUser?.uid;
+    const unsubAcademy = onSnapshot(
       doc(db, "academies", academyId),
       (snap) => {
         const n = snap.data()?.name;
@@ -329,8 +332,30 @@ export default function TeacherDashboardPage() {
       },
       () => setAcademyName(null),
     );
-    return () => unsub();
+    const unsubMember = uid
+      ? onSnapshot(doc(db, "academies", academyId, "teachers", uid), (snap) => {
+          const d = snap.data();
+          setMemberDisplayName(
+            typeof d?.displayName === "string" ? d.displayName : null,
+          );
+          const rawPhone = typeof d?.phone === "string" ? d.phone.trim() : "";
+          setMemberPhone(rawPhone || null);
+        })
+      : () => {};
+    return () => {
+      unsubAcademy();
+      unsubMember();
+    };
   }, [academyId]);
+
+  const headerProfile = useMemo(() => {
+    if (!authProfile) return null;
+    return {
+      ...authProfile,
+      ...(memberDisplayName ? { displayName: memberDisplayName } : {}),
+      phone: memberPhone,
+    };
+  }, [authProfile, memberDisplayName, memberPhone]);
 
   if (!ready) {
     return (
@@ -380,14 +405,14 @@ export default function TeacherDashboardPage() {
               id: "home",
               label: "홈",
               showLabel: false,
-              icon: (active: boolean) => <AttnTabLogo active={active} />,
+              iconAction: (active: boolean) => <AttnTabLogo active={active} />,
               active: true,
-              onSelect: () => router.push("/"),
+              onSelectAction: () => router.push("/"),
             },
           ]}
           onLogoutAction={() => void onLogout()}
           logoutBusy={logoutBusy}
-          profile={authProfile}
+          profile={headerProfile}
         />
         {/* <p className="mb-6 mt-1 text-[11px] leading-relaxed text-neutral-500 dark:text-neutral-400">
           전담 학생 정보는 <span className="font-medium text-neutral-700 dark:text-neutral-300">조회만</span> 가능합니다.

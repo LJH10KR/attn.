@@ -2,13 +2,16 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { formatDashboardBellBadge } from "@/components/dashboard/dashboard-notifications-modal";
-import { greetingDisplayNameFromProfile } from "@/lib/ui/dashboard-greetings";
+import {
+  greetingDisplayNameFromProfile,
+  menuProfileContactLine,
+} from "@/lib/ui/dashboard-greetings";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 
 /** 계정 메뉴(프로필 버튼) 항목 */
 export type DashboardBottomNavMenuAction = {
   label: string;
-  onSelect: () => void;
+  onSelectAction: () => void;
   disabled?: boolean;
 };
 
@@ -17,9 +20,9 @@ export type DashboardBottomNavTab = {
   id: string;
   /** 접근성(aria-label 등)용 — `showLabel: false`일 때도 유지하는 것을 권장 */
   label: string;
-  icon: (active: boolean) => ReactNode;
+  iconAction: (active: boolean) => ReactNode;
   active: boolean;
-  onSelect: () => void;
+  onSelectAction: () => void;
   /** false이면 아래 한 줄 라벨을 렌더하지 않음(로고만 등) */
   showLabel?: boolean;
 };
@@ -32,13 +35,13 @@ export type DashboardBottomNavProps = {
   /** 계정 메뉴 상단 안내(선택) */
   menuIntro?: ReactNode;
   showBack: boolean;
-  onBack?: () => void;
+  onBackAction?: () => void;
   backAriaLabel?: string;
   /** 뒤로 버튼 옆 보조 문구 */
   backHint?: string;
   /** 탭이 없을 때 왼쪽 "attn." 텍스트 버튼 동작 */
-  onHomeClick?: () => void;
-  onBellClick?: () => void;
+  onHomeClickAction?: () => void;
+  onBellClickAction?: () => void;
   /** 탭 미사용 모드에서 캡슐 안에 알림 벨 표시 */
   showBellInBottomBar?: boolean;
   bellBadgeCount?: number;
@@ -53,6 +56,7 @@ export type DashboardBottomNavProps = {
     displayName?: string | null;
     email?: string | null;
     photoURL?: string | null;
+    phone?: string | null;
   } | null;
   className?: string;
 };
@@ -162,11 +166,11 @@ export function DashboardBottomNav({
   affiliationLabel,
   menuIntro,
   showBack,
-  onBack,
+  onBackAction,
   backAriaLabel = "뒤로 가기",
   backHint,
-  onHomeClick,
-  onBellClick,
+  onHomeClickAction,
+  onBellClickAction,
   showBellInBottomBar = true,
   bellBadgeCount = 0,
   bottomTabs,
@@ -226,7 +230,7 @@ export function DashboardBottomNav({
                     key={tab.id}
                     type="button"
                     role="tab"
-                    onClick={tab.onSelect}
+                    onClick={tab.onSelectAction}
                     className={`flex min-h-0 min-w-0 flex-col items-center justify-center gap-0 px-0.5 py-0 transition ${
                       tab.active
                         ? "m-[2px] rounded-full bg-[#cccccc]/70 text-neutral-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.35)]"
@@ -238,7 +242,7 @@ export function DashboardBottomNav({
                     <span
                       className={`flex items-center justify-center ${tab.id === "home" ? "h-7 w-[5rem] min-w-[5rem] shrink-0" : "h-7 w-7"}`}
                     >
-                      {tab.icon(tab.active)}
+                      {tab.iconAction(tab.active)}
                     </span>
                     {showLabel ? (
                       <span className="truncate text-[10px] font-medium">
@@ -265,7 +269,7 @@ export function DashboardBottomNav({
             <>
               <button
                 type="button"
-                onClick={() => onHomeClick?.()}
+                onClick={() => onHomeClickAction?.()}
                 className="rounded-2xl px-2 py-1 text-[17px] font-bold tracking-tight text-foreground transition hover:bg-black/[0.04] dark:hover:bg-white/10"
                 aria-label="홈으로 이동"
               >
@@ -274,7 +278,7 @@ export function DashboardBottomNav({
               {showBellInBottomBar ? (
                 <button
                   type="button"
-                  onClick={() => onBellClick?.()}
+                  onClick={() => onBellClickAction?.()}
                   className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-neutral-300/50 bg-white/45 text-neutral-700 shadow-sm backdrop-blur-md transition hover:bg-white/75 dark:border-white/12 dark:bg-white/10 dark:text-neutral-200 dark:hover:bg-white/15"
                   aria-label={
                     bellBadgeCount > 0 ? `알림 ${bellBadgeCount}건` : "알림"
@@ -351,7 +355,7 @@ export function DashboardBottomNav({
                     {menuProfileDisplayName(profile)}
                   </p>
                   <p className="truncate text-neutral-800 dark:text-neutral-200">
-                    {profile?.email?.trim() || "—"}
+                    {menuProfileContactLine(profile)}
                   </p>
                   <p className="truncate text-neutral-800 dark:text-neutral-200">
                     {affiliationLabel.trim() || "—"}
@@ -378,7 +382,7 @@ export function DashboardBottomNav({
                   className="flex w-full px-4 py-3 text-left text-sm font-medium text-foreground hover:bg-black/[0.04] disabled:opacity-45 dark:hover:bg-white/10"
                   onClick={() => {
                     if (a.disabled) return;
-                    a.onSelect();
+                    a.onSelectAction();
                     closeMenu();
                   }}
                 >
@@ -394,7 +398,7 @@ export function DashboardBottomNav({
         <div className="mb-2 flex items-center gap-2">
           <button
             type="button"
-            onClick={onBack}
+            onClick={onBackAction}
             className="flex h-10 w-11 shrink-0 items-center justify-center rounded-2xl border border-neutral-300/55 bg-white/55 text-foreground shadow-[0_4px_14px_-4px_rgba(0,0,0,0.12)] backdrop-blur-md transition hover:bg-white/85 active:scale-[0.98] dark:border-white/12 dark:bg-white/10 dark:hover:bg-white/15"
             aria-label={backAriaLabel}
           >

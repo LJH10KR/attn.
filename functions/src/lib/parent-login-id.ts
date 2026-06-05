@@ -1,36 +1,17 @@
 import * as admin from "firebase-admin";
 import { HttpsError } from "firebase-functions/v2/https";
 import { attnLoginIndexPath } from "./attn-id";
-
-/** 학부모 자가 설정 로그인 ID(별칭) — 전역 유일, 소문자 저장 */
-const PARENT_LOGIN_ID_RE = /^[a-z][a-z0-9_]{3,19}$/;
+import {
+  assertMemberLoginIdAvailable,
+  normalizeMemberLoginId,
+  validateMemberLoginIdFormat,
+} from "./member-login-id";
 
 /** Google 가입 시 로그인 ID = Gmail */
 const PARENT_LOGIN_EMAIL_RE = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
 
-const RESERVED = new Set([
-  "admin",
-  "owner",
-  "teacher",
-  "parent",
-  "academy",
-  "student",
-  "attn",
-  "login",
-  "signup",
-  "support",
-  "help",
-  "system",
-  "root",
-  "null",
-  "undefined",
-]);
-
-/** attn. 발급 번호와 혼동 방지 */
-const ATTN_LIKE_RE = /^\d{5}_\d{2}(_\d+)?$/;
-
 export function normalizeParentLoginId(raw: string): string {
-  return raw.trim().toLowerCase();
+  return normalizeMemberLoginId(raw);
 }
 
 export function isParentLoginEmail(loginId: string): boolean {
@@ -53,37 +34,23 @@ export function validateParentLoginIdFormat(loginId: string): void {
     validateParentLoginEmailFormat(loginId);
     return;
   }
-  const id = normalizeParentLoginId(loginId);
-  if (!PARENT_LOGIN_ID_RE.test(id)) {
-    throw new HttpsError(
-      "invalid-argument",
-      "로그인 ID는 영문 소문자로 시작하고, 4~20자의 영문·숫자·밑줄(_)만 사용할 수 있습니다.",
-    );
-  }
-  if (RESERVED.has(id)) {
-    throw new HttpsError("invalid-argument", "사용할 수 없는 로그인 ID입니다.");
-  }
-  if (ATTN_LIKE_RE.test(id)) {
-    throw new HttpsError(
-      "invalid-argument",
-      "시스템 발급 번호 형식은 로그인 ID로 사용할 수 없습니다.",
-    );
-  }
+  validateMemberLoginIdFormat(loginId);
 }
 
 export async function assertParentLoginIdAvailable(
   db: admin.firestore.Firestore,
   loginId: string,
 ): Promise<string> {
-  const normalized = isParentLoginEmail(loginId)
-    ? normalizeParentLoginEmail(loginId)
-    : normalizeParentLoginId(loginId);
-  validateParentLoginIdFormat(loginId);
-  const snap = await db.doc(attnLoginIndexPath(normalized)).get();
-  if (snap.exists) {
-    throw new HttpsError("already-exists", "이미 사용 중인 로그인 ID입니다.");
+  if (isParentLoginEmail(loginId)) {
+    const normalized = normalizeParentLoginEmail(loginId);
+    validateParentLoginEmailFormat(loginId);
+    const snap = await db.doc(attnLoginIndexPath(normalized)).get();
+    if (snap.exists) {
+      throw new HttpsError("already-exists", "이미 사용 중인 로그인 ID입니다.");
+    }
+    return normalized;
   }
-  return normalized;
+  return assertMemberLoginIdAvailable(db, loginId);
 }
 
 function assertGoogleAuthUser(user: admin.auth.UserRecord): string {

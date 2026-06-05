@@ -19,7 +19,7 @@ const glassCard = "glass-card";
 
 export default function OwnerSettingsPage() {
   const router = useRouter();
-  const authProfile = useAuthProfile();
+  const { profile: authProfile } = useAuthProfile();
   const [gate, setGate] = useState<"loading" | "auth" | "forbidden" | "ok">(
     "loading",
   );
@@ -126,9 +126,9 @@ export default function OwnerSettingsPage() {
               id: "home",
               label: "홈",
               showLabel: false,
-              icon: (active: boolean) => <AttnTabLogo active={active} />,
+              iconAction: (active: boolean) => <AttnTabLogo active={active} />,
               active: true,
-              onSelect: () => router.push("/"),
+              onSelectAction: () => router.push("/"),
             },
           ]}
           onLogoutAction={() => void onLogout()}

@@ -27,7 +27,7 @@ const glassCard = "glass-card";
 
 export default function ParentSettingsPage() {
   const router = useRouter();
-  const authProfile = useAuthProfile();
+  const { profile: authProfile, refreshProfile } = useAuthProfile();
   const [iosModalOpen, setIosModalOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const { logout: onLogout, logoutBusy, logoutModal } = useRoleLogout({
@@ -125,6 +125,7 @@ export default function ParentSettingsPage() {
     try {
       const fn = httpsCallable(getFirebaseFunctions(), "updateParentProfile");
       await fn({ displayName: displayName.trim() });
+      await refreshProfile();
       setProfileSaved(true);
     } catch (e) {
       setProfileError(
@@ -133,7 +134,7 @@ export default function ParentSettingsPage() {
     } finally {
       setProfileBusy(false);
     }
-  }, [displayName]);
+  }, [displayName, refreshProfile]);
 
   const affiliationLabel =
     primaryAcademyId === undefined
@@ -179,9 +180,9 @@ export default function ParentSettingsPage() {
               id: "home",
               label: "홈",
               showLabel: false,
-              icon: (active: boolean) => <AttnTabLogo active={active} />,
+              iconAction: (active: boolean) => <AttnTabLogo active={active} />,
               active: true,
-              onSelect: () => router.push("/"),
+              onSelectAction: () => router.push("/"),
             },
           ]}
           onLogoutAction={() => void onLogout()}

@@ -15,6 +15,14 @@ export function normalizeKrPhoneForStorage(raw: string): string {
   return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`;
 }
 
+/** 프로필 등 — 비어 있으면 null, 있으면 검증 후 저장 형식 반환 */
+export function parseOptionalKrPhone(raw: unknown): string | null {
+  if (typeof raw !== "string" || !raw.trim()) {
+    return null;
+  }
+  return assertKrPhoneRequired(raw);
+}
+
 /** 학부모 가입 등 — 휴대폰 번호 필수 */
 export function assertKrPhoneRequired(raw: unknown): string {
   if (typeof raw !== "string" || !raw.trim()) {

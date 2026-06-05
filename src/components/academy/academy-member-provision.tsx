@@ -6,7 +6,12 @@ import { useCallback, useState } from "react";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 
-type IssuedRow = { attnId: string; displayName: string; tempPassword: string };
+type IssuedRow = {
+  attnId: string;
+  loginId?: string;
+  displayName: string;
+  tempPassword: string;
+};
 
 type AcademyMemberProvisionProps = {
   academyId: string;
@@ -116,7 +121,11 @@ export function AcademyMemberProvisionModal({
             <p className="text-neutral-600">발급 완료 — 아래 정보는 이번에만 표시됩니다.</p>
             {issued.map((row) => (
               <p key={row.attnId} className="font-mono leading-relaxed">
-                {row.displayName} · {row.attnId} · {row.tempPassword}
+                {row.displayName} ·{" "}
+                {kind === "teacher" && row.loginId
+                  ? `${row.loginId} (attn: ${row.attnId})`
+                  : row.attnId}{" "}
+                · {row.tempPassword}
               </p>
             ))}
             {studentLines.map((line) => (
@@ -212,7 +221,10 @@ export function AcademyMemberCredentialActions({
   return (
     <div className="mt-1 space-y-1 text-[11px]">
       <p className="font-mono text-neutral-600">
-        {role === "parent" && loginId ? "로그인 ID" : "로그인 번호"}: {credentialLogin}
+        {(role === "parent" || role === "teacher") && loginId
+          ? "로그인 ID"
+          : "로그인 번호"}
+        : {credentialLogin}
         <button
           type="button"
           className="ml-2 text-[#4a90e2] underline"
@@ -221,7 +233,10 @@ export function AcademyMemberCredentialActions({
           복사
         </button>
       </p>
-      {role === "parent" && loginId && attnId && loginId !== attnId ? (
+      {(role === "parent" || role === "teacher") &&
+      loginId &&
+      attnId &&
+      loginId !== attnId ? (
         <p className="text-neutral-500">관리 번호(attn): {attnId}</p>
       ) : null}
       {status === "pending_setup" ? (

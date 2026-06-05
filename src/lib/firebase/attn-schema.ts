@@ -187,6 +187,8 @@ export type ParentRegistrationStatus = TeacherRegistrationStatus;
 
 export type AcademyTeacher = {
   attnId?: string;
+  /** 로그인용 별칭 — attnLoginIndex 키 (관리 번호와 분리) */
+  loginId?: string;
   email: string;
   displayName: string;
   subject?: string | null;

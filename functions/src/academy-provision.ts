@@ -194,7 +194,8 @@ async function runProvisionTemplateTeachers(request: {
   return {
     teachers: members.map((m) => ({
       attnId: m.attnId,
-      displayName: m.attnId,
+      loginId: m.loginId,
+      displayName: m.displayName,
       tempPassword: m.tempPassword,
       authUid: m.authUid,
     })),

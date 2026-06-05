@@ -4,12 +4,14 @@ import { FirebaseError } from "firebase/app";
 import { onAuthStateChanged } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { KrPhoneInput } from "@/components/ui/kr-phone-input";
+import { formatKrPhoneDisplay } from "@/lib/phone/kr-phone";
 import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import {
-  TeacherAttnIdSettingsCard,
+  TeacherLoginIdSettingsCard,
   TeacherPasswordSettingsCard,
 } from "@/components/teacher/teacher-account-settings-cards";
 import { TeacherGoogleLinkCard } from "@/components/teacher/teacher-google-link-card";
@@ -30,11 +32,13 @@ const inputClass =
 
 export default function TeacherSettingsPage() {
   const router = useRouter();
-  const authProfile = useAuthProfile();
+  const { profile: authProfile, refreshProfile } = useAuthProfile();
   const [academyId, setAcademyId] = useState<string | null>(null);
   const [academyName, setAcademyName] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState("");
+  const [phone, setPhone] = useState("");
   const [attnId, setAttnId] = useState("");
+  const [loginId, setLoginId] = useState("");
   const [googleLinked, setGoogleLinked] = useState(false);
   const [googleEmail, setGoogleEmail] = useState("");
   const [busy, setBusy] = useState(false);
@@ -77,7 +81,9 @@ export default function TeacherSettingsPage() {
       (snap) => {
         const d = snap.data();
         setDisplayName(typeof d?.displayName === "string" ? d.displayName : "");
+        setPhone(formatKrPhoneDisplay(typeof d?.phone === "string" ? d.phone : ""));
         setAttnId(typeof d?.attnId === "string" ? d.attnId : "");
+        setLoginId(typeof d?.loginId === "string" ? d.loginId : "");
         setGoogleLinked(d?.googleLinked === true);
         setGoogleEmail(typeof d?.googleEmail === "string" ? d.googleEmail : "");
       },
@@ -92,20 +98,35 @@ export default function TeacherSettingsPage() {
     };
   }, [academyId]);
 
-  const onSaveName = useCallback(async () => {
+  const onSaveProfile = useCallback(async () => {
     setError(null);
     setSaved(false);
     setBusy(true);
     try {
       const fn = httpsCallable(getFirebaseFunctions(), "updateTeacherProfile");
-      await fn({ displayName: displayName.trim() });
+      await fn({
+        displayName: displayName.trim(),
+        phone: phone.trim(),
+      });
+      await refreshProfile();
       setSaved(true);
     } catch (e) {
       setError(e instanceof FirebaseError ? e.message : "저장에 실패했습니다.");
     } finally {
       setBusy(false);
     }
-  }, [displayName]);
+  }, [displayName, phone, refreshProfile]);
+
+  const headerProfile = useMemo(() => {
+    if (!authProfile) return null;
+    const name = displayName.trim();
+    const formattedPhone = phone.trim() || null;
+    return {
+      ...authProfile,
+      ...(name ? { displayName: name } : {}),
+      phone: formattedPhone,
+    };
+  }, [authProfile, displayName, phone]);
 
   const formDisabled = busy || logoutBusy;
 
@@ -120,7 +141,7 @@ export default function TeacherSettingsPage() {
           )}
           menuIntro={
             <span className="text-neutral-600 dark:text-neutral-400">
-              프로필, Google 연동, 로그인 번호·비밀번호를 관리합니다.
+              프로필, Google 연동, 로그인 ID·비밀번호를 관리합니다.
             </span>
           }
           showBack
@@ -134,14 +155,14 @@ export default function TeacherSettingsPage() {
               id: "home",
               label: "홈",
               showLabel: false,
-              icon: (active: boolean) => <AttnTabLogo active={active} />,
+              iconAction: (active: boolean) => <AttnTabLogo active={active} />,
               active: true,
-              onSelect: () => router.push("/"),
+              onSelectAction: () => router.push("/"),
             },
           ]}
           onLogoutAction={() => void onLogout()}
           logoutBusy={logoutBusy}
-          profile={authProfile}
+          profile={headerProfile}
         />
 
         <div className="mt-5 space-y-4">
@@ -164,6 +185,21 @@ export default function TeacherSettingsPage() {
                 autoComplete="name"
               />
             </div>
+            <div>
+              <label
+                className="mb-1 block text-xs font-medium text-neutral-600"
+                htmlFor="t-phone"
+              >
+                전화번호
+              </label>
+              <KrPhoneInput
+                id="t-phone"
+                className={inputClass}
+                value={phone}
+                onChange={setPhone}
+                disabled={formDisabled}
+              />
+            </div>
             {error ? <p className="text-sm text-red-700">{error}</p> : null}
             {saved ? (
               <p className="text-sm text-emerald-800">저장되었습니다.</p>
@@ -171,19 +207,19 @@ export default function TeacherSettingsPage() {
             <button
               type="button"
               disabled={formDisabled}
-              onClick={() => void onSaveName()}
+              onClick={() => void onSaveProfile()}
               className="w-full rounded-2xl bg-[#222] py-2.5 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-950 disabled:opacity-60"
             >
-              {busy ? "저장 중…" : "이름 저장"}
+              {busy ? "저장 중…" : "프로필 저장"}
             </button>
           </section>
 
-          {academyId && attnId ? (
-            <TeacherAttnIdSettingsCard
-              academyId={academyId}
-              currentAttnId={attnId}
+          {academyId ? (
+            <TeacherLoginIdSettingsCard
+              attnId={attnId}
+              currentLoginId={loginId}
               disabled={formDisabled}
-              onSavedAction={setAttnId}
+              onSavedAction={setLoginId}
             />
           ) : null}
 
@@ -191,7 +227,7 @@ export default function TeacherSettingsPage() {
 
           {academyId ? (
             <TeacherGoogleLinkCard
-              attnId={attnId}
+              loginId={loginId || attnId}
               googleLinked={googleLinked}
               googleEmail={googleEmail}
             />

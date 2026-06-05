@@ -267,7 +267,7 @@ export function AcademyDashboard() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const configured = isFirebaseConfigured();
-  const authProfile = useAuthProfile();
+  const { profile: authProfile } = useAuthProfile();
 
   const [gate, setGate] = useState<"loading" | "ready" | "forbidden" | "auth">(
     "loading",
@@ -807,37 +807,37 @@ export function AcademyDashboard() {
             id: "home",
             label: "요약",
             showLabel: false,
-            icon: (active: boolean) => <AttnTabLogo active={active} />,
+            iconAction: (active: boolean) => <AttnTabLogo active={active} />,
             active: section === "home",
-            onSelect: () => navigateSection("home"),
+            onSelectAction: () => navigateSection("home"),
           },
           {
             id: "teachers",
             label: "선생님",
-            icon: (active: boolean) => <IconMonitor active={active} />,
+            iconAction: (active: boolean) => <IconMonitor active={active} />,
             active: section === "teachers",
-            onSelect: () => navigateSection("teachers"),
+            onSelectAction: () => navigateSection("teachers"),
           },
           {
             id: "parents",
             label: "학부모",
-            icon: (active: boolean) => <IconPerson active={active} />,
+            iconAction: (active: boolean) => <IconPerson active={active} />,
             active: section === "parents",
-            onSelect: () => navigateSection("parents"),
+            onSelectAction: () => navigateSection("parents"),
           },
           {
             id: "students",
             label: "학생",
-            icon: (active: boolean) => <IconBackpack active={active} />,
+            iconAction: (active: boolean) => <IconBackpack active={active} />,
             active: section === "students",
-            onSelect: () => navigateSection("students"),
+            onSelectAction: () => navigateSection("students"),
           },
           {
             id: "notifications",
             label: "알림 기록",
-            icon: (active: boolean) => <IconBellMini active={active} />,
+            iconAction: (active: boolean) => <IconBellMini active={active} />,
             active: section === "notifications",
-            onSelect: () => navigateSection("notifications"),
+            onSelectAction: () => navigateSection("notifications"),
           },
         ]}
         onLogoutAction={() => void onDashboardLogout()}

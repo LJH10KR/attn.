@@ -3,6 +3,7 @@ import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { attnLoginIndexPath, formatStudentAttnId } from "./attn-id";
 import { pickTemplateDisplayNameUnique } from "./korean-template-names";
+import { allocateTeacherLoginId } from "./teacher-login-id";
 
 export type MemberKind = "teacher" | "parent";
 
@@ -11,6 +12,8 @@ export type MemberStatus = "pending_setup" | "active" | "inactive";
 export type ProvisionedMember = {
   authUid: string;
   attnId: string;
+  /** 선생님 로그인용 별칭 — attnLoginIndex 키 */
+  loginId: string;
   displayName: string;
   tempPassword: string;
   role: MemberKind;
@@ -42,9 +45,12 @@ export async function provisionMemberAccount(params: {
   const tempPassword = params.tempPassword ?? randomTempPassword();
   const email = internalEmailForAttnId(attnId);
 
-  const existingIndex = await db.doc(attnLoginIndexPath(attnId)).get();
+  const loginId =
+    role === "teacher" ? await allocateTeacherLoginId(db) : attnId;
+
+  const existingIndex = await db.doc(attnLoginIndexPath(loginId)).get();
   if (existingIndex.exists) {
-    throw new Error("ATTN_ID_EXISTS");
+    throw new Error("LOGIN_ID_EXISTS");
   }
 
   let userRecord: admin.auth.UserRecord;
@@ -78,6 +84,9 @@ export async function provisionMemberAccount(params: {
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   };
+  if (role === "teacher") {
+    memberData.loginId = loginId;
+  }
   if (role === "parent") {
     memberData.childrenCount = 0;
     memberData.nextStudentSeq = 1;
@@ -89,7 +98,8 @@ export async function provisionMemberAccount(params: {
     tempPassword,
     updatedAt: FieldValue.serverTimestamp(),
   });
-  batch.set(db.doc(attnLoginIndexPath(attnId)), {
+  batch.set(db.doc(attnLoginIndexPath(loginId)), {
+    loginId,
     attnId,
     academyId,
     authUid,
@@ -104,7 +114,7 @@ export async function provisionMemberAccount(params: {
     membershipStatus: "pending_setup",
   });
 
-  return { authUid, attnId, displayName, tempPassword, role };
+  return { authUid, attnId, loginId, displayName, tempPassword, role };
 }
 
 export async function provisionTemplateStudentsForParent(params: {

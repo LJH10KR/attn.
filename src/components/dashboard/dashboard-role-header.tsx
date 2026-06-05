@@ -93,7 +93,7 @@ export function DashboardRoleHeader({
   }, [configured]);
 
   if (includeSettingsAction && onSettingsAction) {
-    menuActions.push({ label: settingsLabel, onSelect: onSettingsAction });
+    menuActions.push({ label: settingsLabel, onSelectAction: onSettingsAction });
   }
   if (extraMenuActions.length > 0) {
     menuActions.push(...extraMenuActions);
@@ -101,12 +101,12 @@ export function DashboardRoleHeader({
   if (isAdmin) {
     menuActions.push({
       label: "관리자 페이지로",
-      onSelect: () => router.push("/admin"),
+      onSelectAction: () => router.push("/admin"),
     });
   }
   menuActions.push({
     label: logoutBusy ? "처리 중…" : logoutLabel,
-    onSelect: onLogoutAction,
+    onSelectAction: onLogoutAction,
     disabled: logoutBusy,
   });
 
@@ -133,8 +133,8 @@ export function DashboardRoleHeader({
           title={title}
           affiliationLabel={affiliationLabel}
           showBack={false}
-          onHomeClick={onHomeAction}
-          onBellClick={onBellClickAction}
+          onHomeClickAction={onHomeAction}
+          onBellClickAction={onBellClickAction}
           showBellInBottomBar={showBellInBottomBar}
           bellBadgeCount={bellBadgeCount}
           bottomTabs={bottomTabs}

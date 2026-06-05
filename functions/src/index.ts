@@ -367,8 +367,8 @@ export {
   updateParentProfile,
   syncParentGoogleLink,
   syncTeacherGoogleLink,
-  checkTeacherAttnIdAvailable,
-  updateTeacherAttnId,
+  checkTeacherLoginIdAvailable,
+  updateTeacherLoginId,
   updateTeacherPassword,
   updateParentPassword,
 } from "./member-profiles";

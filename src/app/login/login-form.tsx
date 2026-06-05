@@ -293,11 +293,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
       }
       const id = attnId.trim();
       if (!id || !password) {
-        setError(
-          role === "parent"
-            ? "로그인 ID와 비밀번호를 입력해 주세요."
-            : "로그인 번호와 비밀번호를 입력해 주세요.",
-        );
+        setError("로그인 ID와 비밀번호를 입력해 주세요.");
         return;
       }
       if (getFirebaseAuth().currentUser) {
@@ -310,9 +306,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
         const functions = getFirebaseFunctions();
         const fnName = role === "teacher" ? "signInTeacher" : "signInParent";
         const signIn = httpsCallable(functions, fnName);
-        const result = await signIn(
-          role === "parent" ? { loginId: id, password } : { attnId: id, password },
-        );
+        const result = await signIn({ loginId: id, password });
         const data = result.data as {
           customToken?: string;
           membershipStatus?: string;
@@ -339,9 +333,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
           setError(
             err.code === "functions/permission-denied" ||
               err.code === "functions/not-found"
-              ? role === "parent"
-                ? "로그인 ID 또는 비밀번호가 올바르지 않습니다."
-                : "로그인 번호 또는 비밀번호가 올바르지 않습니다."
+              ? "로그인 ID 또는 비밀번호가 올바르지 않습니다."
               : functionsErrorMessage(err),
           );
         } else {
@@ -753,7 +745,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
                 className="mb-1.5 block text-xs font-medium text-neutral-600"
                 htmlFor="attn-id"
               >
-                {role === "parent" ? "로그인 ID" : "로그인 번호"}
+                로그인 ID
               </label>
               <input
                 id="attn-id"
@@ -765,7 +757,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
                 placeholder={
                   role === "parent"
                     ? "가입 시 설정한 로그인 ID"
-                    : "학원에서 발급한 로그인 번호"
+                    : "학원에서 발급한 로그인 ID (예: 용감한코끼리)"
                 }
               />
             </div>
@@ -894,7 +886,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
               {role === "parent"
                 ? "가입 시 설정한 로그인 ID와 비밀번호로 로그인합니다. 링크 가입 전에 학원이 발급한 로그인 번호가 있다면 그 번호로도 로그인할 수 있습니다."
                 : role === "teacher"
-                  ? "로그인 번호·비밀번호는 학원에서 발급받습니다. Google 로그인은 사용자 설정에서 Google 연동을 완료한 뒤에만 사용할 수 있습니다."
+                  ? "로그인 ID·비밀번호는 학원에서 발급받습니다. 기존 관리 번호로도 로그인할 수 있습니다. Google 로그인은 설정에서 연동을 완료한 뒤에만 사용할 수 있습니다."
                   : "로그인 번호와 임시 비밀번호는 학원에서 발급받으세요. 최초 로그인 후 비밀번호를 변경해야 이용할 수 있습니다."}
             </p>
           ) : (

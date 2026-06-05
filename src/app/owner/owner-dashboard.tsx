@@ -71,7 +71,7 @@ function ownerFirebaseErrorMessage(err: FirebaseError): string {
 
 export function OwnerDashboard() {
   const router = useRouter();
-  const authProfile = useAuthProfile();
+  const { profile: authProfile } = useAuthProfile();
   const { logout: onLogout, logoutBusy, logoutModal } = useRoleLogout({
     redirectTo: "/login/owner",
     role: "owner",
@@ -392,9 +392,9 @@ export function OwnerDashboard() {
             id: "home",
             label: "홈",
             showLabel: false,
-            icon: (active: boolean) => <AttnTabLogo active={active} />,
+            iconAction: (active: boolean) => <AttnTabLogo active={active} />,
             active: true,
-            onSelect: () => router.push("/"),
+            onSelectAction: () => router.push("/"),
           },
         ]}
         onLogoutAction={() => void onLogout()}

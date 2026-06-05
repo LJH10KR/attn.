@@ -2,6 +2,7 @@ import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { attnLoginIndexPath } from "./lib/attn-id";
+import { normalizeMemberLoginId } from "./lib/member-login-id";
 import { normalizeParentLoginId } from "./lib/parent-login-id";
 import { randomTempPassword, type MemberKind } from "./lib/member-credentials";
 import { assertCanManageAcademy } from "./lib/academy-access";
@@ -25,7 +26,7 @@ async function verifyMemberPassword(
     (typeof stored === "string" && stored === password) ||
     (typeof current === "string" && current === password);
   if (!ok) {
-    throw new HttpsError("permission-denied", "로그인 번호 또는 비밀번호가 올바르지 않습니다.");
+    throw new HttpsError("permission-denied", "로그인 ID 또는 비밀번호가 올바르지 않습니다.");
   }
   const memberSnap = await admin
     .firestore()
@@ -38,6 +39,7 @@ async function verifyMemberPassword(
 }
 
 const PARENT_ATTN_ID_RE = /^\d{5}_\d{2}_\d{4}$/;
+const TEACHER_ATTN_ID_RE = /^\d{5}_\d{2}_\d{3}$/;
 
 async function resolveParentLoginIndex(loginKey: string) {
   const db = admin.firestore();
@@ -59,13 +61,46 @@ async function resolveParentLoginIndex(loginKey: string) {
   return null;
 }
 
+async function resolveTeacherLoginIndex(loginKey: string) {
+  const db = admin.firestore();
+  const trimmed = loginKey.trim();
+  const normalized = normalizeMemberLoginId(trimmed);
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  const push = (key: string) => {
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      candidates.push(key);
+    }
+  };
+  push(trimmed);
+  push(normalized);
+  if (TEACHER_ATTN_ID_RE.test(trimmed)) {
+    push(trimmed);
+  }
+  for (const key of candidates) {
+    const snap = await db.doc(attnLoginIndexPath(key)).get();
+    if (snap.exists) {
+      return snap;
+    }
+  }
+  return null;
+}
+
 async function signInMember(loginKey: string, password: string, role: MemberKind) {
   const indexSnap =
     role === "parent"
       ? await resolveParentLoginIndex(loginKey)
-      : await admin.firestore().doc(attnLoginIndexPath(loginKey.trim())).get();
+      : role === "teacher"
+        ? await resolveTeacherLoginIndex(loginKey)
+        : await admin.firestore().doc(attnLoginIndexPath(loginKey.trim())).get();
   if (!indexSnap?.exists) {
-    throw new HttpsError("not-found", "로그인 번호 또는 비밀번호가 올바르지 않습니다.");
+    throw new HttpsError(
+      "not-found",
+      role === "teacher" || role === "parent"
+        ? "로그인 ID 또는 비밀번호가 올바르지 않습니다."
+        : "로그인 번호 또는 비밀번호가 올바르지 않습니다.",
+    );
   }
   const academyId = indexSnap.get("academyId");
   const authUid = indexSnap.get("authUid");
@@ -96,12 +131,16 @@ async function signInMember(loginKey: string, password: string, role: MemberKind
 }
 
 export const signInTeacher = onCall(async (request) => {
-  const attnId = typeof request.data?.attnId === "string" ? request.data.attnId.trim() : "";
+  const loginId =
+    typeof request.data?.loginId === "string" ? request.data.loginId.trim() : "";
+  const legacyAttnId =
+    typeof request.data?.attnId === "string" ? request.data.attnId.trim() : "";
+  const loginKey = loginId || legacyAttnId;
   const password = typeof request.data?.password === "string" ? request.data.password : "";
-  if (!attnId || !password) {
-    throw new HttpsError("invalid-argument", "로그인 번호와 비밀번호를 입력해 주세요.");
+  if (!loginKey || !password) {
+    throw new HttpsError("invalid-argument", "로그인 ID와 비밀번호를 입력해 주세요.");
   }
-  return signInMember(attnId, password, "teacher");
+  return signInMember(loginKey, password, "teacher");
 });
 
 /** 선생님 Google 로그인 — 설정에서 Google 연동(googleLinked)된 계정만 */

@@ -1,18 +1,14 @@
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { attnLoginIndexPath } from "./lib/attn-id";
 import {
-  assertValidTeacherAttnId,
-  attnLoginIndexPath,
-} from "./lib/attn-id";
+  assertMemberLoginIdAvailable,
+  normalizeMemberLoginId,
+  validateMemberLoginIdFormat,
+} from "./lib/member-login-id";
+import { parseOptionalKrPhone } from "./lib/kr-phone";
 import { normalizeParentLoginEmail } from "./lib/parent-login-id";
-
-const PROVISION_EMAIL_DOMAIN = "@provision.attndot.internal";
-
-function internalEmailForAttnId(attnId: string): string {
-  const safe = attnId.replace(/[^a-zA-Z0-9._-]/g, "_");
-  return `attn+${safe}${PROVISION_EMAIL_DOMAIN}`;
-}
 
 function assertTeacherAuth(request: {
   auth?: { uid: string; token: Record<string, unknown> };
@@ -96,23 +92,33 @@ export const updateTeacherProfile = onCall(async (request) => {
   }
 
   const displayName = assertDisplayName(request.data?.displayName);
+  const hasPhoneField = request.data != null && "phone" in request.data;
+  const phone = hasPhoneField ? parseOptionalKrPhone(request.data?.phone) : undefined;
   const ref = admin.firestore().doc(`academies/${academyId}/teachers/${uid}`);
   const snap = await ref.get();
   if (!snap.exists) {
     throw new HttpsError("not-found", "선생님 정보를 찾을 수 없습니다.");
   }
 
-  await ref.update({
+  const patch: Record<string, unknown> = {
     displayName,
     updatedAt: FieldValue.serverTimestamp(),
-  });
+  };
+  if (phone !== undefined) {
+    patch.phone = phone;
+  }
+  await ref.update(patch);
   try {
     await admin.auth().updateUser(uid, { displayName });
   } catch {
     /* Auth displayName은 부가 정보 */
   }
 
-  return { ok: true, displayName };
+  return {
+    ok: true,
+    displayName,
+    ...(phone !== undefined ? { phone } : {}),
+  };
 });
 
 /** 학부모 — 본인 표시 이름 변경 */
@@ -245,75 +251,53 @@ export const syncTeacherGoogleLink = onCall(async (request) => {
   return { ok: true, googleEmail };
 });
 
-/** 공개 — 선생님 로그인 번호(attnId) 변경 가능 여부 */
-export const checkTeacherAttnIdAvailable = onCall(async (request) => {
+/** 공개 — 선생님 로그인 ID(별칭) 변경 가능 여부 */
+export const checkTeacherLoginIdAvailable = onCall(async (request) => {
   const { uid, academyId } = assertTeacherAuth(request);
   const raw =
-    typeof request.data?.attnId === "string" ? request.data.attnId.trim() : "";
+    typeof request.data?.loginId === "string" ? request.data.loginId.trim() : "";
   if (!raw) {
-    throw new HttpsError("invalid-argument", "로그인 번호를 입력해 주세요.");
+    throw new HttpsError("invalid-argument", "로그인 ID를 입력해 주세요.");
   }
   try {
-    assertValidTeacherAttnId(raw);
-  } catch {
-    throw new HttpsError(
-      "invalid-argument",
-      "로그인 번호 형식이 올바르지 않습니다. (예: 00001_01_001)",
-    );
-  }
-  if (!raw.startsWith(`${academyId}_`)) {
-    throw new HttpsError(
-      "invalid-argument",
-      "이 학원에 속한 로그인 번호만 사용할 수 있습니다.",
-    );
+    validateMemberLoginIdFormat(raw);
+  } catch (e) {
+    if (e instanceof HttpsError) throw e;
+    throw new HttpsError("invalid-argument", "로그인 ID 형식이 올바르지 않습니다.");
   }
 
   const memberSnap = await admin
     .firestore()
     .doc(`academies/${academyId}/teachers/${uid}`)
     .get();
-  const current =
-    typeof memberSnap.get("attnId") === "string" ? memberSnap.get("attnId") : "";
-  if (raw === current) {
-    return { available: true, attnId: raw, sameAsCurrent: true };
+  const currentLoginId =
+    typeof memberSnap.get("loginId") === "string" ? memberSnap.get("loginId") : "";
+  const normalized = normalizeMemberLoginId(raw);
+  if (normalized === currentLoginId) {
+    return { available: true, loginId: normalized, sameAsCurrent: true };
   }
 
-  const indexSnap = await admin.firestore().doc(attnLoginIndexPath(raw)).get();
+  const indexSnap = await admin.firestore().doc(attnLoginIndexPath(normalized)).get();
   if (indexSnap.exists && indexSnap.get("authUid") !== uid) {
-    throw new HttpsError("already-exists", "이미 사용 중인 로그인 번호입니다.");
+    throw new HttpsError("already-exists", "이미 사용 중인 로그인 ID입니다.");
   }
-  return { available: true, attnId: raw };
+  return { available: true, loginId: normalized };
 });
 
-/** 선생님 — 로그인 번호(attnId) 변경 */
-export const updateTeacherAttnId = onCall(async (request) => {
+/** 선생님 — 로그인 ID(별칭) 변경 — attnId(관리 번호)는 유지 */
+export const updateTeacherLoginId = onCall(async (request) => {
   const { uid, academyId } = assertTeacherAuth(request);
-  const newAttnId =
-    typeof request.data?.attnId === "string" ? request.data.attnId.trim() : "";
+  const newLoginIdRaw =
+    typeof request.data?.loginId === "string" ? request.data.loginId.trim() : "";
   const currentPassword =
     typeof request.data?.currentPassword === "string"
       ? request.data.currentPassword
       : "";
-  if (!newAttnId) {
-    throw new HttpsError("invalid-argument", "새 로그인 번호를 입력해 주세요.");
+  if (!newLoginIdRaw) {
+    throw new HttpsError("invalid-argument", "새 로그인 ID를 입력해 주세요.");
   }
   if (!currentPassword) {
     throw new HttpsError("invalid-argument", "현재 비밀번호를 입력해 주세요.");
-  }
-
-  try {
-    assertValidTeacherAttnId(newAttnId);
-  } catch {
-    throw new HttpsError(
-      "invalid-argument",
-      "로그인 번호 형식이 올바르지 않습니다. (예: 00001_01_001)",
-    );
-  }
-  if (!newAttnId.startsWith(`${academyId}_`)) {
-    throw new HttpsError(
-      "invalid-argument",
-      "이 학원에 속한 로그인 번호만 사용할 수 있습니다.",
-    );
   }
 
   await verifyMemberLoginPassword(academyId, uid, "teacher", currentPassword);
@@ -324,33 +308,40 @@ export const updateTeacherAttnId = onCall(async (request) => {
   if (!memberSnap.exists) {
     throw new HttpsError("not-found", "선생님 정보를 찾을 수 없습니다.");
   }
-  const oldAttnId =
-    typeof memberSnap.get("attnId") === "string" ? memberSnap.get("attnId") : "";
-  if (newAttnId === oldAttnId) {
-    return { ok: true, attnId: newAttnId };
+  const oldLoginId =
+    typeof memberSnap.get("loginId") === "string" ? memberSnap.get("loginId") : "";
+
+  const newLoginId = await assertMemberLoginIdAvailable(db, newLoginIdRaw, uid);
+  if (newLoginId === oldLoginId) {
+    return { ok: true, loginId: newLoginId };
   }
 
-  const newIndexRef = db.doc(attnLoginIndexPath(newAttnId));
+  const newIndexRef = db.doc(attnLoginIndexPath(newLoginId));
+
   await db.runTransaction(async (tx) => {
     const freshMember = await tx.get(memberRef);
-    const oldId =
+    const prevLoginId =
+      typeof freshMember.get("loginId") === "string" ? freshMember.get("loginId") : "";
+    const memberAttnId =
       typeof freshMember.get("attnId") === "string" ? freshMember.get("attnId") : "";
-    if (newAttnId === oldId) {
+    if (newLoginId === prevLoginId) {
       return;
     }
     const newIndexSnap = await tx.get(newIndexRef);
     if (newIndexSnap.exists && newIndexSnap.get("authUid") !== uid) {
-      throw new HttpsError("already-exists", "이미 사용 중인 로그인 번호입니다.");
+      throw new HttpsError("already-exists", "이미 사용 중인 로그인 ID입니다.");
     }
-    if (oldId) {
-      const oldIndexRef = db.doc(attnLoginIndexPath(oldId));
+    const prevIndexKey = prevLoginId || memberAttnId;
+    if (prevIndexKey && prevIndexKey !== newLoginId) {
+      const oldIndexRef = db.doc(attnLoginIndexPath(prevIndexKey));
       const oldIndexSnap = await tx.get(oldIndexRef);
       if (oldIndexSnap.exists && oldIndexSnap.get("authUid") === uid) {
         tx.delete(oldIndexRef);
       }
     }
     tx.set(newIndexRef, {
-      attnId: newAttnId,
+      loginId: newLoginId,
+      attnId: memberAttnId,
       academyId,
       authUid: uid,
       role: "teacher",
@@ -358,22 +349,12 @@ export const updateTeacherAttnId = onCall(async (request) => {
       ...(newIndexSnap.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
     });
     tx.update(memberRef, {
-      attnId: newAttnId,
+      loginId: newLoginId,
       updatedAt: FieldValue.serverTimestamp(),
     });
   });
 
-  try {
-    const user = await admin.auth().getUser(uid);
-    const email = user.email ?? "";
-    if (email.includes(PROVISION_EMAIL_DOMAIN)) {
-      await admin.auth().updateUser(uid, { email: internalEmailForAttnId(newAttnId) });
-    }
-  } catch {
-    /* optional */
-  }
-
-  return { ok: true, attnId: newAttnId };
+  return { ok: true, loginId: newLoginId };
 });
 
 /** 선생님 — 비밀번호 변경 */

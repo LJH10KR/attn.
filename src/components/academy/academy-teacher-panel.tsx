@@ -28,6 +28,7 @@ const inputClass =
 export type TeacherRowVM = {
   id: string;
   attnId: string;
+  loginId: string;
   name: string;
   email: string;
   status: TeacherRegistrationStatus;
@@ -445,6 +446,7 @@ function docToRow(id: string, data: Record<string, unknown>): TeacherRowVM {
   return {
     id,
     attnId: typeof data.attnId === "string" ? data.attnId : "",
+    loginId: typeof data.loginId === "string" ? data.loginId : "",
     name: typeof data.displayName === "string" ? data.displayName : "",
     email: typeof data.email === "string" ? data.email : "",
     status,
@@ -689,6 +691,7 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
                       authUid={t.id}
                       role="teacher"
                       attnId={t.attnId}
+                      loginId={t.loginId || undefined}
                       status={t.status}
                     />
                     <TeacherRowActions

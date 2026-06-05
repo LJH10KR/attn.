@@ -28,7 +28,7 @@ function callableMessage(err: unknown, fallback: string): string {
 function AcademySettingsInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const authProfile = useAuthProfile();
+  const { profile: authProfile } = useAuthProfile();
   const academyId = searchParams.get("id")?.trim() ?? "";
   const [gate, setGate] = useState<"loading" | "auth" | "forbidden" | "ok">("loading");
   const [settings, setSettings] = useState<AcademyKioskSettingsPublic | null>(null);
@@ -165,9 +165,9 @@ function AcademySettingsInner() {
             id: "home",
             label: "요약",
             showLabel: false,
-            icon: (active: boolean) => <AttnTabLogo active={active} />,
+            iconAction: (active: boolean) => <AttnTabLogo active={active} />,
             active: true,
-            onSelect: () => router.push(backHref),
+            onSelectAction: () => router.push(backHref),
           },
         ]}
       />
