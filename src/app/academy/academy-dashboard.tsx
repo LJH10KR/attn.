@@ -15,7 +15,6 @@ import {
   COLLECTIONS,
   type Academy,
 } from "@/lib/firebase/attn-schema";
-import { signOut } from "firebase/auth";
 import { getFirebaseAuth, getFirebaseDb } from "@/lib/firebase/client-app";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import {
@@ -34,6 +33,7 @@ import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
+import { useRoleLogout } from "@/lib/auth/use-role-logout";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { useAcademyDashboardBell } from "@/lib/firebase/use-academy-dashboard-bell";
 import {
@@ -277,7 +277,11 @@ export function AcademyDashboard() {
   const [showBack, setShowBack] = useState(false);
   /** 학원 ID·비밀번호 포털 로그인(커스텀 토큰) 세션 ? 오너 대시보드에서 연 경로와 구분 */
   const [isAcademyPortalSession, setIsAcademyPortalSession] = useState(false);
-  const [logoutBusy, setLogoutBusy] = useState(false);
+  const { logout: onDashboardLogout, logoutBusy, logoutModal } = useRoleLogout({
+    redirectTo: isAcademyPortalSession ? "/login/academy" : "/login",
+    role: isAcademyPortalSession ? "academy" : "generic",
+    extraBadgeUserIds: academyId ? [`academy:${academyId}`] : [],
+  });
   const [summaryCounts, setSummaryCounts] =
     useState<AcademySummaryCounts | null>(null);
   const [summaryCountsError, setSummaryCountsError] = useState<string | null>(
@@ -560,26 +564,6 @@ export function AcademyDashboard() {
     router.replace("/owner");
   }, [configured, fromOwner, queryAcademyId, router]);
 
-  const onPortalLogout = useCallback(async () => {
-    setLogoutBusy(true);
-    try {
-      await signOut(getFirebaseAuth());
-    } finally {
-      setLogoutBusy(false);
-      router.replace("/login/academy");
-    }
-  }, [router]);
-
-  const onHeaderLogout = useCallback(async () => {
-    setLogoutBusy(true);
-    try {
-      await signOut(getFirebaseAuth());
-    } finally {
-      setLogoutBusy(false);
-      router.replace("/login");
-    }
-  }, [router]);
-
   const onBackToOwner = useCallback(() => {
     // 오너 대시보드에서 진입한 경우엔 히스토리 복귀가 가장 저부하.
     if (typeof window !== "undefined" && window.history.length > 1) {
@@ -856,11 +840,7 @@ export function AcademyDashboard() {
             onSelect: () => navigateSection("notifications"),
           },
         ]}
-        onLogoutAction={
-          isAcademyPortalSession
-            ? () => void onPortalLogout()
-            : () => void onHeaderLogout()
-        }
+        onLogoutAction={() => void onDashboardLogout()}
         logoutBusy={logoutBusy}
         profile={authProfile}
       />
@@ -1056,6 +1036,7 @@ export function AcademyDashboard() {
       />
 
       <DashboardBottomScrim />
+      {logoutModal}
     </div>
   );
 }

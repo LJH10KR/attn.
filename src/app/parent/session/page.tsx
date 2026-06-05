@@ -1,15 +1,15 @@
 "use client";
 
-import { signOut } from "firebase/auth";
-import { useCallback, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { getFirebaseAuth } from "@/lib/firebase/client-app";
-import { tearDownParentWebPushForLogout } from "@/lib/firebase/web-push";
+import { useMemo } from "react";
+import { useSearchParams } from "next/navigation";
+import { useRoleLogout } from "@/lib/auth/use-role-logout";
 
 export default function ParentSessionPage() {
-  const router = useRouter();
   const searchParams = useSearchParams();
-  const [busy, setBusy] = useState(false);
+  const { logout: onLogout, logoutBusy, logoutModal } = useRoleLogout({
+    redirectTo: "/login/parent",
+    role: "parent",
+  });
 
   const state = searchParams.get("state") ?? "";
   const academyId = searchParams.get("academyId") ?? "";
@@ -29,17 +29,6 @@ export default function ParentSessionPage() {
     }
   }, [state]);
 
-  const onLogout = useCallback(async () => {
-    setBusy(true);
-    try {
-      await tearDownParentWebPushForLogout();
-      await signOut(getFirebaseAuth());
-    } finally {
-      setBusy(false);
-      router.replace("/login/parent");
-    }
-  }, [router]);
-
   return (
     <div className="min-h-[100dvh] bg-background px-4 py-10 flex flex-col items-center justify-center">
       <div className="glass-card-hero w-full max-w-[520px] p-8">
@@ -49,12 +38,13 @@ export default function ParentSessionPage() {
         <button
           type="button"
           onClick={() => void onLogout()}
-          disabled={busy}
+          disabled={logoutBusy}
           className="mt-6 w-full rounded-2xl bg-[#222] dark:bg-neutral-100 py-3 text-sm font-medium text-white dark:text-neutral-950 disabled:opacity-60"
         >
-          {busy ? "처리 중…" : "로그아웃하고 로그인 화면으로"}
+          {logoutBusy ? "처리 중…" : "로그아웃하고 로그인 화면으로"}
         </button>
       </div>
+      {logoutModal}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { FirebaseError } from "firebase/app";
-import { onAuthStateChanged, signOut } from "firebase/auth";
+import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot, setDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
@@ -21,7 +21,7 @@ import {
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
-import { tearDownParentWebPushForLogout } from "@/lib/firebase/web-push";
+import { useRoleLogout } from "@/lib/auth/use-role-logout";
 
 const glassCard = "glass-card";
 
@@ -30,7 +30,10 @@ export default function ParentSettingsPage() {
   const authProfile = useAuthProfile();
   const [iosModalOpen, setIosModalOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [logoutBusy, setLogoutBusy] = useState(false);
+  const { logout: onLogout, logoutBusy, logoutModal } = useRoleLogout({
+    redirectTo: "/login/parent",
+    role: "parent",
+  });
   const [displayName, setDisplayName] = useState("");
   const [loginId, setLoginId] = useState("");
   const [attnId, setAttnId] = useState("");
@@ -138,17 +141,6 @@ export default function ParentSettingsPage() {
       : primaryAcademyId === null
         ? "연결된 학원 없음"
         : academyLabelForGreeting(academyName, primaryAcademyId);
-
-  const onLogout = useCallback(async () => {
-    setLogoutBusy(true);
-    try {
-      await tearDownParentWebPushForLogout();
-      await signOut(getFirebaseAuth());
-    } finally {
-      setLogoutBusy(false);
-      router.replace("/login/parent");
-    }
-  }, [router]);
 
   const openIosHint = () => {
     if (!isLikelyIos()) {
@@ -296,6 +288,7 @@ export default function ParentSettingsPage() {
       </div>
 
       <DashboardBottomScrim />
+      {logoutModal}
     </div>
   );
 }

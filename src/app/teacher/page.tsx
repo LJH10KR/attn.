@@ -2,7 +2,7 @@
 
 import { FirebaseError } from "firebase/app";
 import { formatKrPhoneDisplay } from "@/lib/phone/kr-phone";
-import { onAuthStateChanged, signOut } from "firebase/auth";
+import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot, Timestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
@@ -25,6 +25,7 @@ import {
 import { useAttendanceNotificationLog } from "@/lib/firebase/use-attendance-notification-log";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { resolveTeacherActivationState } from "@/lib/firebase/resolve-session-dashboard";
+import { useRoleLogout } from "@/lib/auth/use-role-logout";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 
 const glassCard = "glass-card";
@@ -83,7 +84,10 @@ export default function TeacherDashboardPage() {
   const [students, setStudents] = useState<StudentRowVM[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
-  const [logoutBusy, setLogoutBusy] = useState(false);
+  const { logout: onLogout, logoutBusy, logoutModal } = useRoleLogout({
+    redirectTo: "/login/teacher",
+    role: "teacher",
+  });
   const [listRefreshBusy, setListRefreshBusy] = useState(false);
   const [notifyMessage, setNotifyMessage] = useState<string | null>(null);
   const [notifyBusyKey, setNotifyBusyKey] = useState<string | null>(null);
@@ -328,17 +332,6 @@ export default function TeacherDashboardPage() {
     return () => unsub();
   }, [academyId]);
 
-  const onLogout = useCallback(async () => {
-    setLogoutBusy(true);
-    try {
-      teacherListLoadedUidRef.current = null;
-      await signOut(getFirebaseAuth());
-    } finally {
-      setLogoutBusy(false);
-      router.replace("/login/teacher");
-    }
-  }, [router]);
-
   if (!ready) {
     return (
       <RoleDashboardBootShell
@@ -499,6 +492,7 @@ export default function TeacherDashboardPage() {
       />
 
       <DashboardBottomScrim />
+      {logoutModal}
     </div>
   );
 }

@@ -102,3 +102,31 @@ body {
   -webkit-backdrop-filter: blur(28px) saturate(1.25);
   backdrop-filter: blur(28px) saturate(1.25);
 }
+
+@keyframes attn-process-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes attn-process-card-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.attn-process-overlay-in {
+  animation: attn-process-overlay-in 0.22s ease-out forwards;
+}
+
+.attn-process-card-in {
+  animation: attn-process-card-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}

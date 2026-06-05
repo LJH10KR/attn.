@@ -19,6 +19,23 @@ function syncBadgeCountToServiceWorker(count: number, badgeUserId?: string): voi
   })();
 }
 
+/** 로그아웃 등 — 앱 아이콘 badge 제거 (알림 권한 없어도 clear 시도) */
+export function clearAppIconBadge(options?: AppBadgeSyncOptions): void {
+  try {
+    if (typeof navigator !== "undefined") {
+      const navAny = navigator as unknown as {
+        clearAppBadge?: () => Promise<void> | void;
+      };
+      if (typeof navAny.clearAppBadge === "function") {
+        void navAny.clearAppBadge();
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  syncBadgeCountToServiceWorker(0, options?.badgeUserId);
+}
+
 export function setAppIconBadgeCount(count: number, options?: AppBadgeSyncOptions): void {
   const n = Math.max(0, Math.floor(count || 0));
   try {

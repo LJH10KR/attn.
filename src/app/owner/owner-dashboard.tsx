@@ -12,13 +12,13 @@ import {
   where,
   type Timestamp,
 } from "firebase/firestore";
-import { signOut } from "firebase/auth";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
+import { useRoleLogout } from "@/lib/auth/use-role-logout";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import {
@@ -72,6 +72,10 @@ function ownerFirebaseErrorMessage(err: FirebaseError): string {
 export function OwnerDashboard() {
   const router = useRouter();
   const authProfile = useAuthProfile();
+  const { logout: onLogout, logoutBusy, logoutModal } = useRoleLogout({
+    redirectTo: "/login/owner",
+    role: "owner",
+  });
   const [gate, setGate] = useState<"loading" | "auth" | "forbidden" | "ok">(
     "loading",
   );
@@ -313,12 +317,6 @@ export function OwnerDashboard() {
     }
   }, [closeModal, deleteTarget]);
 
-  const onLogout = useCallback(async () => {
-    const auth = getFirebaseAuth();
-    await signOut(auth);
-    router.replace("/login");
-  }, [router]);
-
   if (!configured) {
     return (
       <div className="min-h-[100dvh] bg-background flex items-center justify-center px-4">
@@ -400,6 +398,7 @@ export function OwnerDashboard() {
           },
         ]}
         onLogoutAction={() => void onLogout()}
+        logoutBusy={logoutBusy}
         profile={authProfile}
       />
 
@@ -662,6 +661,7 @@ export function OwnerDashboard() {
           </div>
         </div>
       ) : null}
+      {logoutModal}
     </div>
   );
 }

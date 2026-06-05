@@ -5,7 +5,12 @@ import { httpsCallable } from "firebase/functions";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
+import { PasswordInput } from "@/components/ui/password-input";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { resolvePasswordConfirmHint } from "@/lib/ui/password-confirm-hint";
+
+const inputClass =
+  "w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3 text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50";
 
 type MemberFirstLoginFormProps = {
   role: "teacher" | "parent";
@@ -26,8 +31,13 @@ export function MemberFirstLoginForm({ role }: MemberFirstLoginFormProps) {
   const router = useRouter();
   const [password, setPassword] = useState("");
   const [password2, setPassword2] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showPassword2, setShowPassword2] = useState(false);
+  const [confirmBlurred, setConfirmBlurred] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const passwordConfirmHint = resolvePasswordConfirmHint(password, password2, confirmBlurred);
 
   const onSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -72,32 +82,44 @@ export function MemberFirstLoginForm({ role }: MemberFirstLoginFormProps) {
           {error}
         </p>
       ) : null}
-      <div>
-        <label className="mb-1.5 block text-xs font-medium text-neutral-600" htmlFor="new-pw">
-          새 비밀번호
-        </label>
-        <input
-          id="new-pw"
-          type="password"
-          autoComplete="new-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 px-4 py-3 text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50"
-        />
-      </div>
-      <div>
-        <label className="mb-1.5 block text-xs font-medium text-neutral-600" htmlFor="new-pw2">
-          새 비밀번호 확인
-        </label>
-        <input
-          id="new-pw2"
-          type="password"
-          autoComplete="new-password"
-          value={password2}
-          onChange={(e) => setPassword2(e.target.value)}
-          className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 px-4 py-3 text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50"
-        />
-      </div>
+      <PasswordInput
+        id={`${role}-setup-pw`}
+        label={
+          <>
+            새 비밀번호 <span className="text-red-600">*</span>
+          </>
+        }
+        value={password}
+        onChangeAction={setPassword}
+        visible={showPassword}
+        onToggleVisibleAction={() => setShowPassword((v) => !v)}
+        inputClassName={inputClass}
+        labelClassName="mb-1.5 block text-xs font-medium text-neutral-600"
+        disabled={busy}
+        required
+        minLength={6}
+        autoComplete="new-password"
+      />
+      <PasswordInput
+        id={`${role}-setup-pw2`}
+        label={
+          <>
+            새 비밀번호 확인 <span className="text-red-600">*</span>
+          </>
+        }
+        value={password2}
+        onChangeAction={setPassword2}
+        onBlurAction={() => setConfirmBlurred(true)}
+        visible={showPassword2}
+        onToggleVisibleAction={() => setShowPassword2((v) => !v)}
+        confirmHint={passwordConfirmHint}
+        inputClassName={inputClass}
+        labelClassName="mb-1.5 block text-xs font-medium text-neutral-600"
+        disabled={busy}
+        required
+        minLength={6}
+        autoComplete="new-password"
+      />
       <button
         type="submit"
         disabled={busy}

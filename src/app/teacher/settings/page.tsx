@@ -1,7 +1,7 @@
 "use client";
 
 import { FirebaseError } from "firebase/app";
-import { onAuthStateChanged, signOut } from "firebase/auth";
+import { onAuthStateChanged } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -20,6 +20,7 @@ import {
 } from "@/lib/firebase/client-app";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { resolveTeacherActivationState } from "@/lib/firebase/resolve-session-dashboard";
+import { useRoleLogout } from "@/lib/auth/use-role-logout";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { doc, onSnapshot } from "firebase/firestore";
 
@@ -39,7 +40,10 @@ export default function TeacherSettingsPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  const [logoutBusy, setLogoutBusy] = useState(false);
+  const { logout: onLogout, logoutBusy, logoutModal } = useRoleLogout({
+    redirectTo: "/login/teacher",
+    role: "teacher",
+  });
 
   useEffect(() => {
     const auth = getFirebaseAuth();
@@ -102,16 +106,6 @@ export default function TeacherSettingsPage() {
       setBusy(false);
     }
   }, [displayName]);
-
-  const onLogout = useCallback(async () => {
-    setLogoutBusy(true);
-    try {
-      await signOut(getFirebaseAuth());
-      router.replace("/login/teacher");
-    } finally {
-      setLogoutBusy(false);
-    }
-  }, [router]);
 
   const formDisabled = busy || logoutBusy;
 
@@ -205,6 +199,7 @@ export default function TeacherSettingsPage() {
         </div>
       </div>
       <DashboardBottomScrim />
+      {logoutModal}
     </div>
   );
 }

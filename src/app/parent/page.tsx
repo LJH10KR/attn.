@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { onAuthStateChanged, signOut } from "firebase/auth";
+import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot, setDoc, Timestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
@@ -25,9 +25,7 @@ import {
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { useParentDashboardBell } from "@/lib/firebase/use-parent-dashboard-bell";
 import { resolveParentActivationState } from "@/lib/firebase/resolve-session-dashboard";
-import {
-  tearDownParentWebPushForLogout,
-} from "@/lib/firebase/web-push";
+import { useRoleLogout } from "@/lib/auth/use-role-logout";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
 import { FirebaseError } from "firebase/app";
@@ -95,7 +93,10 @@ export default function ParentDashboardPage() {
   const [students, setStudents] = useState<StudentRowVM[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
-  const [logoutBusy, setLogoutBusy] = useState(false);
+  const { logout: onLogout, logoutBusy, logoutModal } = useRoleLogout({
+    redirectTo: "/login/parent",
+    role: "parent",
+  });
   const [listRefreshBusy, setListRefreshBusy] = useState(false);
   const [authUid, setAuthUid] = useState<string | null>(null);
   const [hideIosPwaHint, setHideIosPwaHint] = useState<boolean | null>(null);
@@ -358,18 +359,6 @@ export default function ParentDashboardPage() {
     return () => unsub();
   }, [academyId]);
 
-  const onLogout = useCallback(async () => {
-    setLogoutBusy(true);
-    try {
-      parentListLoadedUidRef.current = null;
-      await tearDownParentWebPushForLogout();
-      await signOut(getFirebaseAuth());
-    } finally {
-      setLogoutBusy(false);
-      router.replace("/login/parent");
-    }
-  }, [router]);
-
   if (!ready) {
     return (
       <RoleDashboardBootShell
@@ -525,6 +514,7 @@ export default function ParentDashboardPage() {
       </div>
 
       <DashboardBottomScrim />
+      {logoutModal}
     </div>
   );
 }

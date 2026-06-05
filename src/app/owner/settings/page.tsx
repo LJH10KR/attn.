@@ -1,9 +1,9 @@
 "use client";
 
-import { onAuthStateChanged, signOut } from "firebase/auth";
+import { onAuthStateChanged } from "firebase/auth";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
@@ -11,6 +11,7 @@ import { OwnerPasswordSettingsCard } from "@/components/account/password-setting
 import { OwnerGoogleLinkCard } from "@/components/owner/owner-google-link-card";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { getFirebaseAuth } from "@/lib/firebase/client-app";
+import { useRoleLogout } from "@/lib/auth/use-role-logout";
 import { fetchIsOwner } from "@/lib/firebase/owner-profile";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 
@@ -22,7 +23,10 @@ export default function OwnerSettingsPage() {
   const [gate, setGate] = useState<"loading" | "auth" | "forbidden" | "ok">(
     "loading",
   );
-  const [logoutBusy, setLogoutBusy] = useState(false);
+  const { logout: onLogout, logoutBusy, logoutModal } = useRoleLogout({
+    redirectTo: "/login/owner",
+    role: "owner",
+  });
   const configured = isFirebaseConfigured();
 
   useEffect(() => {
@@ -46,16 +50,6 @@ export default function OwnerSettingsPage() {
     if (!configured || gate !== "auth") return;
     router.replace("/login/owner");
   }, [configured, gate, router]);
-
-  const onLogout = useCallback(async () => {
-    setLogoutBusy(true);
-    try {
-      await signOut(getFirebaseAuth());
-    } finally {
-      setLogoutBusy(false);
-      router.replace("/login/owner");
-    }
-  }, [router]);
 
   if (!configured) {
     return (
@@ -149,6 +143,7 @@ export default function OwnerSettingsPage() {
       </div>
 
       <DashboardBottomScrim />
+      {logoutModal}
     </div>
   );
 }
