@@ -12,6 +12,7 @@ import {
   signOut,
 } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
+import { EmailVerificationCodeModal } from "@/components/auth/email-verification-code-modal";
 import { GoogleMark } from "@/components/auth/google-mark";
 import {
   LOGIN_ROLE_OPTIONS,
@@ -91,6 +92,9 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
   const [banner, setBanner] = useState<string | null>(null);
   const [sessionUser, setSessionUser] = useState<User | null>(null);
   const [logoutBusy, setLogoutBusy] = useState(false);
+  const [otpModalOpen, setOtpModalOpen] = useState(false);
+  const [otpPurpose, setOtpPurpose] = useState<"owner" | "parent">("owner");
+  const [otpEmailHint, setOtpEmailHint] = useState<string | null>(null);
 
   const configured = isFirebaseConfigured();
 
@@ -194,6 +198,13 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
         return false;
       }
 
+      if (state === "pending_email_verification") {
+        setOtpPurpose("parent");
+        setOtpEmailHint(getFirebaseAuth().currentUser?.email ?? null);
+        setOtpModalOpen(true);
+        return false;
+      }
+
       const q = new URLSearchParams();
       q.set("state", state);
       if (aid) q.set("academyId", aid);
@@ -245,7 +256,9 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
     setBusy(true);
     try {
       if (showOwnerEmailAuth && !u.emailVerified) {
-        router.replace("/verify-email");
+        setOtpPurpose("owner");
+        setOtpEmailHint(u.email);
+        setOtpModalOpen(true);
         return;
       }
       if (role === "owner") {
@@ -316,6 +329,12 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
           return;
         }
         await signInWithCustomToken(auth, data.customToken);
+        if (role === "parent" && data.membershipStatus === "pending_email_verification") {
+          setOtpPurpose("parent");
+          setOtpEmailHint(null);
+          setOtpModalOpen(true);
+          return;
+        }
         if (data.membershipStatus === "pending_setup") {
           router.replace(role === "teacher" ? "/teacher/setup" : "/parent/setup");
           return;
@@ -382,7 +401,9 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
           password,
         );
         if (showOwnerEmailAuth && !cred.user.emailVerified) {
-          router.replace("/verify-email");
+          setOtpPurpose("owner");
+          setOtpEmailHint(cred.user.email);
+          setOtpModalOpen(true);
           return;
         }
         if (role === "teacher") {
@@ -423,6 +444,33 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
       showOwnerEmailAuth,
     ],
   );
+
+  const onEmailOtpVerified = useCallback(async () => {
+    setOtpModalOpen(false);
+    setBusy(true);
+    try {
+      const auth = getFirebaseAuth();
+      const user = auth.currentUser;
+      if (!user) {
+        setError("로그인 세션이 없습니다. 다시 로그인해 주세요.");
+        return;
+      }
+      await user.reload();
+      await user.getIdToken(true);
+      if (otpPurpose === "owner") {
+        await upsertOwnerProfile(auth.currentUser!);
+        router.replace("/owner");
+        return;
+      }
+      const ok = await checkParentActivationOrRedirect();
+      if (ok) router.replace("/parent");
+    } catch (err) {
+      const code = err instanceof FirebaseError ? err.code : "";
+      setError(code ? authErrorMessage(code, role) : "인증 후 이동에 실패했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  }, [checkParentActivationOrRedirect, otpPurpose, role, router]);
 
   const onGoogleLogin = useCallback(async () => {
     setError(null);
@@ -902,6 +950,17 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
           홈으로
         </Link>
       </p> */}
+
+      <EmailVerificationCodeModal
+        open={otpModalOpen}
+        purpose={otpPurpose}
+        emailHint={otpEmailHint}
+        onVerifiedAction={onEmailOtpVerified}
+        onCloseAction={() => {
+          setOtpModalOpen(false);
+          void signOut(getFirebaseAuth()).catch(() => undefined);
+        }}
+      />
     </div>
   );
 }

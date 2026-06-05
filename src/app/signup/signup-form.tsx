@@ -13,6 +13,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 import { GoogleMark } from "@/components/auth/google-mark";
+import { SignupCompleteModal } from "@/components/auth/signup-complete-modal";
 import { PasswordInput } from "@/components/ui/password-input";
 import { ProcessStatusModal } from "@/components/ui/process-status-modal";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
@@ -69,6 +70,7 @@ export function SignupForm() {
     title: string;
     description?: string;
   } | null>(null);
+  const [signupCompleteOpen, setSignupCompleteOpen] = useState(false);
 
   const configured = isFirebaseConfigured();
   const passwordConfirmHint = resolvePasswordConfirmHint(password, password2, confirmBlurred);
@@ -119,9 +121,10 @@ export function SignupForm() {
           displayName: trimmedName,
           phone: formattedPhone,
         });
-        const fn = httpsCallable(getFirebaseFunctions(), "sendOwnerSignupVerificationEmail");
-        await fn({});
-        router.replace("/verify-email");
+        setSignupCompleteOpen(true);
+        void httpsCallable(getFirebaseFunctions(), "issueEmailVerificationOtp")({ purpose: "owner" }).catch(
+          () => {},
+        );
       } catch (err) {
         const code = err instanceof FirebaseError ? err.code : "";
         setError(signupErrorMessage(code));
@@ -129,7 +132,7 @@ export function SignupForm() {
         setBusy(false);
       }
     },
-    [configured, displayName, email, password, password2, phone, router],
+    [configured, displayName, email, password, password2, phone],
   );
 
   const onGoogleSignup = useCallback(async () => {
@@ -243,6 +246,17 @@ export function SignupForm() {
         open={loadingModal !== null}
         title={loadingModal?.title ?? ""}
         description={loadingModal?.description}
+      />
+      <SignupCompleteModal
+        open={signupCompleteOpen}
+        title="회원가입 완료!"
+        description="회원님의 이메일 주소로 인증 코드를 발송했어요! 다음 로그인 시 인증 코드를 입력해 주세요."
+        onConfirmAction={() => {
+          setSignupCompleteOpen(false);
+          void signOut(getFirebaseAuth()).finally(() => {
+            router.replace("/login/owner");
+          });
+        }}
       />
 
       {!configured ? (

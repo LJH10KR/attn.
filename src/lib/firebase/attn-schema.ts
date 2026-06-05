@@ -173,6 +173,7 @@ export type TeacherRegistrationStatus =
   | "invitation_needed"
   | "invitation_sent"
   | "pending_registration"
+  | "pending_email_verification"
   | "active"
   | "inactive";
 
@@ -214,6 +215,9 @@ export type AcademyTeacher = {
  */
 export type AcademyParent = {
   attnId?: string;
+  /** 인증 코드 수신용 연락 이메일 (자가 가입) */
+  contactEmail?: string;
+  contactEmailVerified?: boolean;
   email: string;
   displayName: string;
   nextStudentSeq?: number;

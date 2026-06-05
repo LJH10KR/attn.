@@ -1,18 +1,14 @@
 "use client";
 
 import { FirebaseError } from "firebase/app";
-import {
-  GoogleAuthProvider,
-  signInWithCustomToken,
-  signInWithPopup,
-  signOut,
-} from "firebase/auth";
+import { GoogleAuthProvider, signInWithPopup, signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { GoogleMark } from "@/components/auth/google-mark";
+import { SignupCompleteModal } from "@/components/auth/signup-complete-modal";
 import { ProcessStatusModal } from "@/components/ui/process-status-modal";
 import { resolvePasswordConfirmHint } from "@/lib/ui/password-confirm-hint";
 import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
@@ -62,6 +58,7 @@ function ParentJoinForm() {
   const [academyName, setAcademyName] = useState<string | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [loginId, setLoginId] = useState("");
   const [loginIdStatus, setLoginIdStatus] = useState<
@@ -84,6 +81,7 @@ function ParentJoinForm() {
     title: string;
     description?: string;
   } | null>(null);
+  const [signupCompleteOpen, setSignupCompleteOpen] = useState(false);
 
   useEffect(() => {
     if (!academyId || !isFirebaseConfigured()) {
@@ -301,6 +299,11 @@ function ParentJoinForm() {
         setError(phoneErr);
         return;
       }
+      const em = contactEmail.trim().toLowerCase();
+      if (!em || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
+        setError("이메일 형식을 확인해 주세요.");
+        return;
+      }
       if (!loginId.trim()) {
         setError("로그인 ID를 입력해 주세요.");
         return;
@@ -340,26 +343,21 @@ function ParentJoinForm() {
           academyId,
           loginId: normalizeParentLoginId(loginId),
           displayName: displayName.trim(),
+          contactEmail: em,
           phone: formatKrPhoneInput(phone),
           password,
           agreeTerms: true,
         });
-        const data = res.data as { customToken?: string; loginId?: string; attnId?: string };
-        if (data.customToken) {
-          setLoadingModal({
-            title: "2단계 · 로그인 연결 중",
-            description: "가입한 계정으로 자동 로그인하고 있어요.",
-          });
-          await signInWithCustomToken(getFirebaseAuth(), data.customToken);
-        }
+        const data = res.data as { loginId?: string };
         setLoadingModal(null);
         setDoneLoginId(data.loginId ?? normalizeParentLoginId(loginId));
+        setSignupCompleteOpen(true);
       } catch (err) {
         setLoadingModal(null);
         setError(err instanceof FirebaseError ? err.message : "가입에 실패했습니다.");
       }
     },
-    [academyId, agree, displayName, loginId, loginIdStatus, password, password2, phone],
+    [academyId, agree, contactEmail, displayName, loginId, loginIdStatus, password, password2, phone],
   );
 
   if (!isFirebaseConfigured()) {
@@ -372,6 +370,17 @@ function ParentJoinForm() {
         open={loadingModal !== null}
         title={loadingModal?.title ?? ""}
         description={loadingModal?.description}
+      />
+      <SignupCompleteModal
+        open={signupCompleteOpen}
+        title="회원가입 완료!"
+        description="회원님의 이메일 주소로 인증 코드를 발송했어요! 다음 로그인 시 인증 코드를 입력해 주세요."
+        onConfirmAction={() => {
+          setSignupCompleteOpen(false);
+          const id = doneLoginId ?? normalizeParentLoginId(loginId);
+          const q = id ? `?loginId=${encodeURIComponent(id)}` : "";
+          router.replace(`/login/parent${q}`);
+        }}
       />
 
       {loadErr ? (
@@ -529,6 +538,25 @@ function ParentJoinForm() {
               required
               disabled={loadingModal !== null}
             />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-neutral-600" htmlFor="pj-email">
+              이메일 <span className="text-red-600">*</span>
+            </label>
+            <input
+              id="pj-email"
+              type="email"
+              className={inputClass}
+              value={contactEmail}
+              onChange={(e) => setContactEmail(e.target.value)}
+              autoComplete="email"
+              required
+              disabled={loadingModal !== null}
+              placeholder="name@example.com"
+            />
+            <p className="mt-1 text-[11px] text-neutral-500">
+              가입 확인용 인증 코드가 발송됩니다.
+            </p>
           </div>
           <div>
             <label className="mb-1.5 block text-xs font-medium text-neutral-600" htmlFor="pj-phone">

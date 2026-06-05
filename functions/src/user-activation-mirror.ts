@@ -11,7 +11,9 @@ type TeacherStatus =
   | "active"
   | "inactive";
 
-type ParentStatus = TeacherStatus;
+type ParentStatus =
+  | TeacherStatus
+  | "pending_email_verification";
 
 const TEACHER_STATUS_PRIORITY: TeacherStatus[] = [
   "pending_setup",
@@ -22,6 +24,7 @@ const TEACHER_STATUS_PRIORITY: TeacherStatus[] = [
 ];
 
 const PARENT_STATUS_PRIORITY: ParentStatus[] = [
+  "pending_email_verification",
   "pending_setup",
   "pending_registration",
   "invitation_sent",

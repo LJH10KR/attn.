@@ -9,6 +9,10 @@ import {
 } from "./lib/attn-id";
 import { assertKrPhoneRequired } from "./lib/kr-phone";
 import {
+  assertContactEmail,
+  issueEmailVerificationOtpForUid,
+} from "./lib/email-verification-otp";
+import {
   assertParentLoginIdAvailable,
   normalizeParentLoginId,
   resolveParentGoogleLoginId,
@@ -265,6 +269,7 @@ export const registerParentSelfSignup = onCall(async (request) => {
     throw new HttpsError("invalid-argument", "이름은 60자 이하로 입력해 주세요.");
   }
   const phone = assertKrPhoneRequired(request.data?.phone);
+  const contactEmail = assertContactEmail(request.data?.contactEmail);
   if (!password) {
     throw new HttpsError("invalid-argument", "비밀번호를 입력해 주세요.");
   }
@@ -313,8 +318,10 @@ export const registerParentSelfSignup = onCall(async (request) => {
     displayName,
     phone,
     email: "",
+    contactEmail,
+    contactEmailVerified: false,
     academyId,
-    status: "active",
+    status: "pending_email_verification",
     authUid,
     childrenCount: 0,
     nextStudentSeq: 1,
@@ -322,7 +329,6 @@ export const registerParentSelfSignup = onCall(async (request) => {
     signupSource: "parent_link",
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
-    activatedAt: FieldValue.serverTimestamp(),
   });
   batch.set(db.doc(`academies/${academyId}/parents/${authUid}/secrets/login`), {
     authProvider: "password",
@@ -343,20 +349,25 @@ export const registerParentSelfSignup = onCall(async (request) => {
   await admin.auth().setCustomUserClaims(authUid, {
     role: "parent",
     academyId,
-    membershipStatus: "active",
+    membershipStatus: "pending_email_verification",
   });
 
-  const customToken = await admin.auth().createCustomToken(authUid, {
-    role: "parent",
-    academyId,
-    membershipStatus: "active",
-  });
+  try {
+    await issueEmailVerificationOtpForUid({
+      uid: authUid,
+      email: contactEmail,
+      displayName,
+      purpose: "parent",
+    });
+  } catch {
+    /* 가입은 완료 — 로그인 화면에서 재발송 가능 */
+  }
 
   return {
     attnId,
     loginId: normalizedLoginId,
     academyId,
-    customToken,
-    membershipStatus: "active" as const,
+    membershipStatus: "pending_email_verification" as const,
+    contactEmail,
   };
 });

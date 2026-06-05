@@ -339,6 +339,7 @@ export {
 } from "./kiosk";
 export { openShortAuthLink } from "./auth-short-links";
 export { sendOwnerSignupVerificationEmail } from "./owner-auth-mail";
+export { issueEmailVerificationOtp, verifyEmailVerificationOtp } from "./email-verification-otp";
 export {
   createAcademyEasy,
   provisionTemplateTeachers,

@@ -162,8 +162,10 @@ async function resolveKnownSessionDashboardPath(user: User): Promise<string | nu
       return "/academy";
     }
 
-    if (!user.emailVerified) {
-      return "/verify-email";
+    const authEmail = user.email ?? "";
+    const isProvisionInternalEmail = authEmail.includes("@provision.attndot.internal");
+    if (!user.emailVerified && !isProvisionInternalEmail) {
+      return "/login/owner";
     }
 
     /**
