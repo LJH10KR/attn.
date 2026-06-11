@@ -32,6 +32,10 @@ export function getAppOrigin(): string {
 function defaultShortLinkBaseUrl(): string {
   const explicit = process.env.SHORT_LINK_BASE_URL?.trim();
   if (explicit) return normalizeBaseUrl(explicit);
+  const appOrigin = process.env.APP_ORIGIN?.trim();
+  if (appOrigin) {
+    return `${normalizeBaseUrl(appOrigin)}/v`;
+  }
   const projectId = getProjectId();
   const region = getRegion();
   if (!projectId) {

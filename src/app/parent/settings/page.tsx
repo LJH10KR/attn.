@@ -10,7 +10,10 @@ import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
-import { MemberPasswordSettingsCard } from "@/components/account/password-settings-cards";
+import {
+  ParentLoginIdSettingsCard,
+  ParentPasswordSettingsCard,
+} from "@/components/parent/parent-account-settings-cards";
 import { ParentGoogleLinkCard } from "@/components/parent/parent-google-link-card";
 import { ParentPushNotificationsCard } from "@/components/parent/parent-push-notifications-card";
 import {
@@ -199,16 +202,6 @@ export default function ParentSettingsPage() {
         <div className="space-y-4 mt-5">
           <section className={`p-4 ${glassCard}`}>
             <h2 className="text-sm font-semibold text-foreground">프로필</h2>
-            <p className="mt-2 text-[11px] text-neutral-600">
-              로그인 ID는 변경할 수 없습니다.
-            </p>
-            <p className="mt-3 text-xs font-medium text-neutral-500">로그인 ID</p>
-            <p className="font-mono text-sm text-foreground">{loginId || attnId || "—"}</p>
-            {loginId && attnId && loginId !== attnId ? (
-              <p className="mt-2 text-[11px] text-neutral-500">
-                관리 번호(attn): <span className="font-mono">{attnId}</span>
-              </p>
-            ) : null}
             <label
               className="mt-4 mb-1 block text-xs font-medium text-neutral-600"
               htmlFor="p-dn"
@@ -237,12 +230,19 @@ export default function ParentSettingsPage() {
               {profileBusy ? "저장 중…" : "이름 저장"}
             </button>
           </section>
-          {primaryAcademyId && authProvider !== "google" ? (
-            <MemberPasswordSettingsCard
-              callableName="updateParentPassword"
-              idPrefix="parent"
-              description="로그인 ID와 함께 쓰는 비밀번호를 변경합니다. Google 연결 시 본인 확인에도 사용됩니다."
+          {primaryAcademyId ? (
+            <ParentLoginIdSettingsCard
+              attnId={attnId}
+              currentLoginId={loginId || attnId}
+              requirePassword={authProvider !== "google"}
               disabled={profileBusy || logoutBusy}
+              onSavedAction={setLoginId}
+            />
+          ) : null}
+          {primaryAcademyId ? (
+            <ParentPasswordSettingsCard
+              disabled={profileBusy || logoutBusy}
+              registerMode={authProvider === "google"}
             />
           ) : null}
           {primaryAcademyId ? (

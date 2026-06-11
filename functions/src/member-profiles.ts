@@ -8,7 +8,7 @@ import {
   validateMemberLoginIdFormat,
 } from "./lib/member-login-id";
 import { parseOptionalKrPhone } from "./lib/kr-phone";
-import { normalizeParentLoginEmail } from "./lib/parent-login-id";
+import { isParentLoginEmail, normalizeParentLoginEmail } from "./lib/parent-login-id";
 
 function teacherAcademyIdFromMemberPath(path: string): string | null {
   const m = path.match(/^academies\/([^/]+)\/teachers\//);
@@ -85,6 +85,20 @@ async function verifyMemberLoginPassword(
   if (!ok) {
     throw new HttpsError("permission-denied", "현재 비밀번호가 올바르지 않습니다.");
   }
+}
+
+async function parentHasStoredPassword(academyId: string, uid: string): Promise<boolean> {
+  const secretSnap = await admin
+    .firestore()
+    .doc(`academies/${academyId}/parents/${uid}/secrets/login`)
+    .get();
+  if (!secretSnap.exists) return false;
+  const stored = secretSnap.get("tempPassword");
+  const current = secretSnap.get("password");
+  return (
+    (typeof stored === "string" && stored.length > 0) ||
+    (typeof current === "string" && current.length > 0)
+  );
 }
 
 function assertDisplayName(raw: unknown): string {
@@ -375,6 +389,134 @@ export const updateTeacherLoginId = onCall(async (request) => {
   return { ok: true, loginId: newLoginId };
 });
 
+/** 학부모 — 로그인 ID(별칭) 변경 가능 여부 */
+export const checkParentLoginIdForUpdate = onCall(async (request) => {
+  const { uid, academyId } = assertParentAuth(request);
+  const raw =
+    typeof request.data?.loginId === "string" ? request.data.loginId.trim() : "";
+  if (!raw) {
+    throw new HttpsError("invalid-argument", "로그인 ID를 입력해 주세요.");
+  }
+  if (isParentLoginEmail(raw)) {
+    throw new HttpsError(
+      "invalid-argument",
+      "로그인 ID는 한글 또는 영문 별칭만 사용할 수 있습니다.",
+    );
+  }
+  try {
+    validateMemberLoginIdFormat(raw);
+  } catch (e) {
+    if (e instanceof HttpsError) throw e;
+    throw new HttpsError("invalid-argument", "로그인 ID 형식이 올바르지 않습니다.");
+  }
+
+  const memberSnap = await admin
+    .firestore()
+    .doc(`academies/${academyId}/parents/${uid}`)
+    .get();
+  const currentLoginId =
+    typeof memberSnap.get("loginId") === "string" ? memberSnap.get("loginId") : "";
+  const normalized = normalizeMemberLoginId(raw);
+  if (normalized === currentLoginId) {
+    return { available: true, loginId: normalized, sameAsCurrent: true };
+  }
+
+  const indexSnap = await admin.firestore().doc(attnLoginIndexPath(normalized)).get();
+  if (indexSnap.exists && indexSnap.get("authUid") !== uid) {
+    throw new HttpsError("already-exists", "이미 사용 중인 로그인 ID입니다.");
+  }
+  return { available: true, loginId: normalized };
+});
+
+/** 학부모 — 로그인 ID(별칭) 변경 — attnId(관리 번호)는 유지 */
+export const updateParentLoginId = onCall(async (request) => {
+  const { uid, academyId } = assertParentAuth(request);
+  const newLoginIdRaw =
+    typeof request.data?.loginId === "string" ? request.data.loginId.trim() : "";
+  const currentPassword =
+    typeof request.data?.currentPassword === "string"
+      ? request.data.currentPassword
+      : "";
+  if (!newLoginIdRaw) {
+    throw new HttpsError("invalid-argument", "새 로그인 ID를 입력해 주세요.");
+  }
+  if (isParentLoginEmail(newLoginIdRaw)) {
+    throw new HttpsError(
+      "invalid-argument",
+      "로그인 ID는 한글 또는 영문 별칭만 사용할 수 있습니다.",
+    );
+  }
+
+  const db = admin.firestore();
+  const memberRef = db.doc(`academies/${academyId}/parents/${uid}`);
+  const memberSnap = await memberRef.get();
+  if (!memberSnap.exists) {
+    throw new HttpsError("not-found", "학부모 정보를 찾을 수 없습니다.");
+  }
+
+  const hasPassword = await parentHasStoredPassword(academyId, uid);
+  const authProvider = memberSnap.get("authProvider");
+  if (hasPassword || authProvider !== "google") {
+    if (!currentPassword) {
+      throw new HttpsError("invalid-argument", "현재 비밀번호를 입력해 주세요.");
+    }
+    await verifyMemberLoginPassword(academyId, uid, "parent", currentPassword);
+  }
+
+  const oldLoginId =
+    typeof memberSnap.get("loginId") === "string" ? memberSnap.get("loginId") : "";
+  const newLoginId = await assertMemberLoginIdAvailable(db, newLoginIdRaw, uid);
+  if (newLoginId === oldLoginId) {
+    return { ok: true, loginId: newLoginId };
+  }
+
+  const memberAttnId =
+    typeof memberSnap.get("attnId") === "string" ? memberSnap.get("attnId") : "";
+  const newIndexRef = db.doc(attnLoginIndexPath(newLoginId));
+
+  await db.runTransaction(async (tx) => {
+    const freshMember = await tx.get(memberRef);
+    const prevLoginId =
+      typeof freshMember.get("loginId") === "string" ? freshMember.get("loginId") : "";
+    if (newLoginId === prevLoginId) {
+      return;
+    }
+    const newIndexSnap = await tx.get(newIndexRef);
+    if (newIndexSnap.exists && newIndexSnap.get("authUid") !== uid) {
+      throw new HttpsError("already-exists", "이미 사용 중인 로그인 ID입니다.");
+    }
+    const prevKeys = new Set<string>();
+    if (prevLoginId) prevKeys.add(prevLoginId);
+    if (memberAttnId) prevKeys.add(memberAttnId);
+    for (const key of prevKeys) {
+      if (key === newLoginId) continue;
+      const oldIndexRef = db.doc(attnLoginIndexPath(key));
+      const oldIndexSnap = await tx.get(oldIndexRef);
+      if (oldIndexSnap.exists && oldIndexSnap.get("authUid") === uid) {
+        tx.delete(oldIndexRef);
+      }
+    }
+    const indexAuthProvider =
+      freshMember.get("authProvider") === "google" && !hasPassword ? "google" : "password";
+    tx.set(newIndexRef, {
+      loginId: newLoginId,
+      attnId: memberAttnId,
+      academyId,
+      authUid: uid,
+      role: "parent",
+      authProvider: indexAuthProvider,
+      updatedAt: FieldValue.serverTimestamp(),
+      ...(newIndexSnap.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
+    });
+    tx.update(memberRef, {
+      loginId: newLoginId,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+
+  return { ok: true, loginId: newLoginId };
+});
+
 /** 선생님 — 비밀번호 변경 */
 export const updateTeacherPassword = onCall(async (request) => {
   const { uid, academyId, memberDocId } = await assertTeacherAuth(request);
@@ -415,26 +557,18 @@ export const updateTeacherPassword = onCall(async (request) => {
   return { ok: true };
 });
 
-/** 학부모 — 비밀번호 변경 */
+/** 학부모 — 비밀번호 등록·변경 (Google 연동 후에도 가능) */
 export const updateParentPassword = onCall(async (request) => {
   const { uid, academyId } = assertParentAuth(request);
+  const register = request.data?.register === true;
   const currentPassword =
     typeof request.data?.currentPassword === "string"
       ? request.data.currentPassword
       : "";
   const newPassword =
     typeof request.data?.newPassword === "string" ? request.data.newPassword : "";
-  if (!currentPassword) {
-    throw new HttpsError("invalid-argument", "현재 비밀번호를 입력해 주세요.");
-  }
   if (newPassword.length < 6) {
     throw new HttpsError("invalid-argument", "새 비밀번호는 6자 이상이어야 합니다.");
-  }
-  if (currentPassword === newPassword) {
-    throw new HttpsError(
-      "invalid-argument",
-      "새 비밀번호는 현재 비밀번호와 달라야 합니다.",
-    );
   }
 
   const memberRef = admin.firestore().doc(`academies/${academyId}/parents/${uid}`);
@@ -442,14 +576,31 @@ export const updateParentPassword = onCall(async (request) => {
   if (!memberSnap.exists) {
     throw new HttpsError("not-found", "학부모 정보를 찾을 수 없습니다.");
   }
-  if (memberSnap.get("authProvider") === "google") {
-    throw new HttpsError(
-      "failed-precondition",
-      "Google 전용 계정은 비밀번호를 변경할 수 없습니다.",
-    );
-  }
 
-  await verifyMemberLoginPassword(academyId, uid, "parent", currentPassword);
+  const hasPassword = await parentHasStoredPassword(academyId, uid);
+  const isRegister = register || (!hasPassword && memberSnap.get("authProvider") === "google");
+
+  if (isRegister) {
+    const user = await admin.auth().getUser(uid);
+    const hasGoogle = user.providerData.some((p) => p.providerId === "google.com");
+    if (!hasGoogle) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Google 계정으로 로그인한 뒤 비밀번호를 등록해 주세요.",
+      );
+    }
+  } else {
+    if (!currentPassword) {
+      throw new HttpsError("invalid-argument", "현재 비밀번호를 입력해 주세요.");
+    }
+    if (currentPassword === newPassword) {
+      throw new HttpsError(
+        "invalid-argument",
+        "새 비밀번호는 현재 비밀번호와 달라야 합니다.",
+      );
+    }
+    await verifyMemberLoginPassword(academyId, uid, "parent", currentPassword);
+  }
 
   await admin.auth().updateUser(uid, { password: newPassword });
   await admin.firestore().doc(`academies/${academyId}/parents/${uid}/secrets/login`).set(
@@ -461,5 +612,26 @@ export const updateParentPassword = onCall(async (request) => {
     { merge: true },
   );
 
-  return { ok: true };
+  const loginId =
+    typeof memberSnap.get("loginId") === "string" ? memberSnap.get("loginId") : "";
+  const patch: Record<string, unknown> = { updatedAt: FieldValue.serverTimestamp() };
+  if (isRegister) {
+    patch.authProvider = "password";
+  }
+  await memberRef.update(patch);
+
+  if (loginId) {
+    await admin
+      .firestore()
+      .doc(attnLoginIndexPath(loginId))
+      .set(
+        {
+          authProvider: "password",
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+  }
+
+  return { ok: true, registered: isRegister };
 });

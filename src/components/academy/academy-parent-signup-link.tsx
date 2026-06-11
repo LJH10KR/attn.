@@ -1,15 +1,15 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { getPublicAppOrigin } from "@/lib/firebase/config";
 
 export function AcademyParentSignupLink({ academyId }: { academyId: string }) {
   const [copied, setCopied] = useState(false);
 
   const signupUrl = useMemo(() => {
-    if (typeof window === "undefined") {
-      return `/join/parent?academyId=${encodeURIComponent(academyId)}`;
-    }
-    return `${window.location.origin}/join/parent?academyId=${encodeURIComponent(academyId)}`;
+    const path = `/join/parent?academyId=${encodeURIComponent(academyId)}`;
+    const origin = getPublicAppOrigin();
+    return origin ? `${origin}${path}` : path;
   }, [academyId]);
 
   const onCopy = useCallback(async () => {

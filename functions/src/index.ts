@@ -370,6 +370,8 @@ export {
   syncTeacherGoogleLink,
   checkTeacherLoginIdAvailable,
   updateTeacherLoginId,
+  checkParentLoginIdForUpdate,
+  updateParentLoginId,
   updateTeacherPassword,
   updateParentPassword,
 } from "./member-profiles";

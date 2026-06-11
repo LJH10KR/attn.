@@ -44,6 +44,21 @@ export function isWebPushConfigured(): boolean {
  * - `NEXT_PUBLIC_API_BASE_URL`이 있으면 최우선.
  * - 에뮬레이터 모드면 `http://127.0.0.1:5001/{projectId}/{region}` 기본값.
  */
+/**
+ * 공개 앱 URL — 학부모 가입 링크 복사 등.
+ * `NEXT_PUBLIC_APP_ORIGIN`이 있으면 hosted.app 대신 커스텀 도메인을 사용합니다.
+ */
+export function getPublicAppOrigin(): string {
+  const explicit = process.env.NEXT_PUBLIC_APP_ORIGIN?.trim();
+  if (explicit) {
+    return explicit.replace(/\/+$/, "");
+  }
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return window.location.origin;
+  }
+  return "";
+}
+
 export function getApiBaseUrl(): string {
   const explicit = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
   if (explicit) {

@@ -3,8 +3,11 @@
 import { FirebaseError } from "firebase/app";
 import {
   EmailAuthProvider,
+  GoogleAuthProvider,
+  linkWithCredential,
   onAuthStateChanged,
   reauthenticateWithCredential,
+  reauthenticateWithPopup,
   updatePassword,
   type User,
 } from "firebase/auth";
@@ -28,6 +31,8 @@ export type MemberPasswordSettingsCardProps = {
   idPrefix: string;
   disabled?: boolean;
   minLength?: number;
+  /** Google 전용 등 — 비밀번호 최초 등록 */
+  registerMode?: boolean;
 };
 
 /** 선생님·학부모 — Callable로 비밀번호 변경 */
@@ -37,6 +42,7 @@ export function MemberPasswordSettingsCard({
   idPrefix,
   disabled,
   minLength = 6,
+  registerMode = false,
 }: MemberPasswordSettingsCardProps) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -58,7 +64,7 @@ export function MemberPasswordSettingsCard({
   const onSave = useCallback(async () => {
     setError(null);
     setSaved(false);
-    if (!currentPassword) {
+    if (!registerMode && !currentPassword) {
       setError("현재 비밀번호를 입력해 주세요.");
       return;
     }
@@ -70,14 +76,18 @@ export function MemberPasswordSettingsCard({
       setError("새 비밀번호가 서로 일치하지 않습니다.");
       return;
     }
-    if (currentPassword === newPassword) {
+    if (!registerMode && currentPassword === newPassword) {
       setError("새 비밀번호는 현재 비밀번호와 달라야 합니다.");
       return;
     }
     setBusy(true);
     try {
       const fn = httpsCallable(getFirebaseFunctions(), callableName);
-      await fn({ currentPassword, newPassword });
+      if (registerMode) {
+        await fn({ newPassword, register: true });
+      } else {
+        await fn({ currentPassword, newPassword });
+      }
       setSaved(true);
       setCurrentPassword("");
       setNewPassword("");
@@ -88,30 +98,34 @@ export function MemberPasswordSettingsCard({
     } finally {
       setBusy(false);
     }
-  }, [callableName, currentPassword, minLength, newPassword, newPassword2]);
+  }, [callableName, currentPassword, minLength, newPassword, newPassword2, registerMode]);
 
   const formDisabled = disabled || busy;
 
   return (
     <section className="glass-card space-y-4 p-4">
-      <h2 className="text-sm font-semibold text-foreground">비밀번호 변경</h2>
+      <h2 className="text-sm font-semibold text-foreground">
+        {registerMode ? "비밀번호 등록" : "비밀번호 변경"}
+      </h2>
       <p className="text-[11px] leading-relaxed text-neutral-600">{description}</p>
-      <PasswordInput
-        id={`${idPrefix}-cur-pw`}
-        label={
-          <>
-            현재 비밀번호 <span className="text-red-600">*</span>
-          </>
-        }
-        value={currentPassword}
-        onChangeAction={setCurrentPassword}
-        visible={showCurrent}
-        onToggleVisibleAction={() => setShowCurrent((v) => !v)}
-        inputClassName={inputClass}
-        labelClassName="mb-1 block text-xs font-medium text-neutral-600"
-        disabled={formDisabled}
-        autoComplete="current-password"
-      />
+      {!registerMode ? (
+        <PasswordInput
+          id={`${idPrefix}-cur-pw`}
+          label={
+            <>
+              현재 비밀번호 <span className="text-red-600">*</span>
+            </>
+          }
+          value={currentPassword}
+          onChangeAction={setCurrentPassword}
+          visible={showCurrent}
+          onToggleVisibleAction={() => setShowCurrent((v) => !v)}
+          inputClassName={inputClass}
+          labelClassName="mb-1 block text-xs font-medium text-neutral-600"
+          disabled={formDisabled}
+          autoComplete="current-password"
+        />
+      ) : null}
       <PasswordInput
         id={`${idPrefix}-new-pw`}
         label={
@@ -156,7 +170,7 @@ export function MemberPasswordSettingsCard({
         onClick={() => void onSave()}
         className="w-full rounded-2xl bg-[#222] py-2.5 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-950 disabled:opacity-60"
       >
-        {busy ? "변경 중…" : "비밀번호 저장"}
+        {busy ? "저장 중…" : registerMode ? "비밀번호 등록" : "비밀번호 저장"}
       </button>
     </section>
   );
@@ -183,10 +197,16 @@ export function OwnerPasswordSettingsCard({ disabled }: { disabled?: boolean }) 
     return onAuthStateChanged(getFirebaseAuth(), setUser);
   }, [configured]);
 
-  const canChangePassword = useMemo(
-    () => Boolean(user && hasPasswordProvider(user) && user.email),
+  const hasPassword = useMemo(
+    () => Boolean(user && hasPasswordProvider(user)),
     [user],
   );
+  const hasGoogle = useMemo(
+    () => Boolean(user?.providerData.some((p) => p.providerId === "google.com")),
+    [user],
+  );
+  const registerMode = Boolean(user?.email && !hasPassword && hasGoogle);
+  const canChangePassword = Boolean(user?.email && (hasPassword || registerMode));
 
   const passwordConfirmHint = resolvePasswordConfirmHint(
     newPassword,
@@ -202,7 +222,7 @@ export function OwnerPasswordSettingsCard({ disabled }: { disabled?: boolean }) 
       setError("비밀번호를 변경할 수 없는 계정입니다.");
       return;
     }
-    if (!currentPassword) {
+    if (!registerMode && !currentPassword) {
       setError("현재 비밀번호를 입력해 주세요.");
       return;
     }
@@ -214,15 +234,32 @@ export function OwnerPasswordSettingsCard({ disabled }: { disabled?: boolean }) 
       setError("새 비밀번호가 서로 일치하지 않습니다.");
       return;
     }
-    if (currentPassword === newPassword) {
+    if (!registerMode && currentPassword === newPassword) {
       setError("새 비밀번호는 현재 비밀번호와 달라야 합니다.");
       return;
     }
     setBusy(true);
     try {
-      const cred = EmailAuthProvider.credential(u.email, currentPassword);
-      await reauthenticateWithCredential(u, cred);
-      await updatePassword(u, newPassword);
+      if (registerMode) {
+        const cred = EmailAuthProvider.credential(u.email, newPassword);
+        try {
+          await linkWithCredential(u, cred);
+        } catch (linkErr) {
+          if (
+            linkErr instanceof FirebaseError &&
+            linkErr.code === "auth/requires-recent-login"
+          ) {
+            await reauthenticateWithPopup(u, new GoogleAuthProvider());
+            await linkWithCredential(getFirebaseAuth().currentUser!, cred);
+          } else {
+            throw linkErr;
+          }
+        }
+      } else {
+        const cred = EmailAuthProvider.credential(u.email, currentPassword);
+        await reauthenticateWithCredential(u, cred);
+        await updatePassword(u, newPassword);
+      }
       setSaved(true);
       setCurrentPassword("");
       setNewPassword("");
@@ -250,7 +287,7 @@ export function OwnerPasswordSettingsCard({ disabled }: { disabled?: boolean }) 
     } finally {
       setBusy(false);
     }
-  }, [currentPassword, newPassword, newPassword2]);
+  }, [currentPassword, newPassword, newPassword2, registerMode]);
 
   const formDisabled = disabled || busy;
 
@@ -259,10 +296,9 @@ export function OwnerPasswordSettingsCard({ disabled }: { disabled?: boolean }) 
   if (!canChangePassword) {
     return (
       <section className="glass-card space-y-3 p-4">
-        <h2 className="text-sm font-semibold text-foreground">비밀번호 변경</h2>
+        <h2 className="text-sm font-semibold text-foreground">비밀번호</h2>
         <p className="text-[11px] leading-relaxed text-neutral-600">
-          Google 계정만으로 가입·로그인 중인 경우 여기서 비밀번호를 바꿀 수 없습니다.
-          이메일·비밀번호 로그인을 쓰려면 로그인 화면의 비밀번호 재설정을 이용해 주세요.
+          이메일이 확인된 계정에서만 비밀번호를 등록하거나 변경할 수 있습니다.
         </p>
       </section>
     );
@@ -270,27 +306,32 @@ export function OwnerPasswordSettingsCard({ disabled }: { disabled?: boolean }) 
 
   return (
     <section className="glass-card space-y-4 p-4">
-      <h2 className="text-sm font-semibold text-foreground">비밀번호 변경</h2>
+      <h2 className="text-sm font-semibold text-foreground">
+        {registerMode ? "비밀번호 등록" : "비밀번호 변경"}
+      </h2>
       <p className="text-[11px] leading-relaxed text-neutral-600">
-        오너 로그인에 사용하는 이메일·비밀번호를 변경합니다. Google 연동 본인 확인에도
-        사용됩니다.
+        {registerMode
+          ? "Google 로그인과 함께 이메일·비밀번호 로그인도 사용할 수 있도록 비밀번호를 등록합니다."
+          : "오너 로그인에 사용하는 이메일·비밀번호를 변경합니다. Google 연동 본인 확인에도 사용됩니다."}
       </p>
-      <PasswordInput
-        id="owner-cur-pw"
-        label={
-          <>
-            현재 비밀번호 <span className="text-red-600">*</span>
-          </>
-        }
-        value={currentPassword}
-        onChangeAction={setCurrentPassword}
-        visible={showCurrent}
-        onToggleVisibleAction={() => setShowCurrent((v) => !v)}
-        inputClassName={inputClass}
-        labelClassName="mb-1 block text-xs font-medium text-neutral-600"
-        disabled={formDisabled}
-        autoComplete="current-password"
-      />
+      {!registerMode ? (
+        <PasswordInput
+          id="owner-cur-pw"
+          label={
+            <>
+              현재 비밀번호 <span className="text-red-600">*</span>
+            </>
+          }
+          value={currentPassword}
+          onChangeAction={setCurrentPassword}
+          visible={showCurrent}
+          onToggleVisibleAction={() => setShowCurrent((v) => !v)}
+          inputClassName={inputClass}
+          labelClassName="mb-1 block text-xs font-medium text-neutral-600"
+          disabled={formDisabled}
+          autoComplete="current-password"
+        />
+      ) : null}
       <PasswordInput
         id="owner-new-pw"
         label={
@@ -335,7 +376,7 @@ export function OwnerPasswordSettingsCard({ disabled }: { disabled?: boolean }) 
         onClick={() => void onSave()}
         className="w-full rounded-2xl bg-[#222] py-2.5 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-950 disabled:opacity-60"
       >
-        {busy ? "변경 중…" : "비밀번호 저장"}
+        {busy ? "저장 중…" : registerMode ? "비밀번호 등록" : "비밀번호 저장"}
       </button>
     </section>
   );
