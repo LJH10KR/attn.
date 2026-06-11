@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { FirebaseError } from "firebase/app";
 import { onAuthStateChanged } from "firebase/auth";

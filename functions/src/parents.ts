@@ -7,6 +7,12 @@ import * as nodemailer from "nodemailer";
 import { createShortAuthLink, getAppOrigin } from "./auth-short-links";
 import { reconcileUserActivationMirror } from "./user-activation-mirror";
 import { getRequireStudentCheckInPin } from "./kiosk";
+import {
+  deleteAttnLoginIndexForMember,
+  deleteMemberLoginSecrets,
+  deleteStudentDocs,
+  purgeUserFirestoreData,
+} from "./lib/firestore-cleanup";
 
 type ParentStatus =
   | "invitation_needed"
@@ -680,7 +686,21 @@ export const deleteParentInvite = onCall(async (request) => {
   }
 
   const authUid = (snap.get("authUid") as string | undefined) || parentId;
+  const data = snap.data() ?? {};
 
+  const studentsSnap = await db.collection(`academies/${academyId}/students`).get();
+  const studentIds = studentsSnap.docs
+    .filter((s) => {
+      const pid = s.get("parentUserId");
+      return pid === parentId || pid === authUid;
+    })
+    .map((s) => s.id);
+  if (studentIds.length > 0) {
+    await deleteStudentDocs(db, academyId, studentIds);
+  }
+
+  await deleteMemberLoginSecrets(db, academyId, "parent", parentId);
+  await deleteAttnLoginIndexForMember(db, data, authUid);
   await ref.delete();
 
   if (st === "active" || st === "invitation_sent" || st === "inactive") {
@@ -689,7 +709,35 @@ export const deleteParentInvite = onCall(async (request) => {
     } catch (e) {
       logger.warn("deleteParentInvite: auth delete skipped", { authUid, e });
     }
+    await purgeUserFirestoreData(db, authUid);
   }
 
+  return { ok: true };
+});
+
+/** 학원·오너 — 학생 삭제(문서 + serverSecrets) */
+export const deleteAcademyStudent = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+  }
+  const { uid: callerUid, token } = request.auth;
+  const academyId =
+    typeof request.data?.academyId === "string" ? request.data.academyId.trim() : "";
+  const studentId =
+    typeof request.data?.studentId === "string" ? request.data.studentId.trim() : "";
+  if (!academyId || !studentId) {
+    throw new HttpsError("invalid-argument", "요청이 올바르지 않습니다.");
+  }
+
+  const db = admin.firestore();
+  await assertCanManageAcademy(db, academyId, callerUid, token);
+
+  const ref = db.doc(`academies/${academyId}/students/${studentId}`);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    throw new HttpsError("not-found", "학생 정보를 찾을 수 없습니다.");
+  }
+
+  await deleteStudentDocs(db, academyId, [studentId]);
   return { ok: true };
 });

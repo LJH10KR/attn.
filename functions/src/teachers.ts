@@ -6,6 +6,12 @@ import * as logger from "firebase-functions/logger";
 import * as nodemailer from "nodemailer";
 import { createShortAuthLink, getAppOrigin } from "./auth-short-links";
 import { reconcileUserActivationMirror } from "./user-activation-mirror";
+import {
+  deleteAttnLoginIndexForMember,
+  deleteMemberLoginSecrets,
+  purgeUserFirestoreData,
+  stripTeacherFromStudents,
+} from "./lib/firestore-cleanup";
 
 type TeacherStatus =
   | "invitation_needed"
@@ -635,7 +641,11 @@ export const deleteTeacherInvite = onCall(async (request) => {
   }
 
   const authUid = (snap.get("authUid") as string | undefined) || teacherId;
+  const data = snap.data() ?? {};
 
+  await stripTeacherFromStudents(db, academyId, authUid);
+  await deleteMemberLoginSecrets(db, academyId, "teacher", teacherId);
+  await deleteAttnLoginIndexForMember(db, data, authUid);
   await ref.delete();
 
   if (st === "active" || st === "invitation_sent" || st === "inactive") {
@@ -644,6 +654,7 @@ export const deleteTeacherInvite = onCall(async (request) => {
     } catch (e) {
       logger.warn("deleteTeacherInvite: auth delete skipped", { authUid, e });
     }
+    await purgeUserFirestoreData(db, authUid);
   }
 
   return { ok: true };

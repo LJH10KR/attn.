@@ -4,7 +4,6 @@ import { FirebaseError } from "firebase/app";
 import { httpsCallable } from "firebase/functions";
 import {
   collection,
-  deleteDoc,
   deleteField,
   doc,
   getDocs,
@@ -629,8 +628,8 @@ export function AcademyParentStudentList({
     if (!deleteTarget) return;
     setDelBusy(true);
     try {
-      const db = getFirebaseDb();
-      await deleteDoc(doc(db, "academies", academyId, "students", deleteTarget.id));
+      const fn = httpsCallable(getFirebaseFunctions(), "deleteAcademyStudent");
+      await fn({ academyId, studentId: deleteTarget.id });
       setNoticeAction("학생을 삭제했습니다.");
       setDeleteTarget(null);
       refreshParentChildren();
@@ -946,8 +945,8 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
     if (!deleteTarget) return;
     setDelBusy(true);
     try {
-      const db = getFirebaseDb();
-      await deleteDoc(doc(db, "academies", academyId, "students", deleteTarget.id));
+      const fn = httpsCallable(getFirebaseFunctions(), "deleteAcademyStudent");
+      await fn({ academyId, studentId: deleteTarget.id });
       setNotice("학생을 삭제했습니다.");
       setDeleteTarget(null);
       refreshStudentPanel();

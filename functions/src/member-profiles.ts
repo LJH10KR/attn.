@@ -8,7 +8,9 @@ import {
   validateMemberLoginIdFormat,
 } from "./lib/member-login-id";
 import { parseOptionalKrPhone } from "./lib/kr-phone";
+import type { DocumentReference } from "firebase-admin/firestore";
 import { isParentLoginEmail, normalizeParentLoginEmail } from "./lib/parent-login-id";
+import { syncUserAdminProfile } from "./lib/firestore-cleanup";
 
 function teacherAcademyIdFromMemberPath(path: string): string | null {
   const m = path.match(/^academies\/([^/]+)\/teachers\//);
@@ -143,6 +145,7 @@ export const updateTeacherProfile = onCall(async (request) => {
     academyId,
     membershipStatus,
   });
+  await syncUserAdminProfile(admin.firestore(), uid);
 
   return {
     ok: true,
@@ -182,6 +185,7 @@ export const updateParentProfile = onCall(async (request) => {
   } catch {
     /* optional */
   }
+  await syncUserAdminProfile(admin.firestore(), uid);
 
   return { ok: true, displayName };
 });
@@ -363,13 +367,20 @@ export const updateTeacherLoginId = onCall(async (request) => {
     if (newIndexSnap.exists && newIndexSnap.get("authUid") !== uid) {
       throw new HttpsError("already-exists", "이미 사용 중인 로그인 ID입니다.");
     }
-    const prevIndexKey = prevLoginId || memberAttnId;
-    if (prevIndexKey && prevIndexKey !== newLoginId) {
-      const oldIndexRef = db.doc(attnLoginIndexPath(prevIndexKey));
+    const prevKeys = new Set<string>();
+    if (prevLoginId) prevKeys.add(prevLoginId);
+    if (memberAttnId) prevKeys.add(memberAttnId);
+    const indexDeletes: DocumentReference[] = [];
+    for (const key of prevKeys) {
+      if (!key || key === newLoginId) continue;
+      const oldIndexRef = db.doc(attnLoginIndexPath(key));
       const oldIndexSnap = await tx.get(oldIndexRef);
       if (oldIndexSnap.exists && oldIndexSnap.get("authUid") === uid) {
-        tx.delete(oldIndexRef);
+        indexDeletes.push(oldIndexRef);
       }
+    }
+    for (const oldIndexRef of indexDeletes) {
+      tx.delete(oldIndexRef);
     }
     tx.set(newIndexRef, {
       loginId: newLoginId,
@@ -470,14 +481,14 @@ export const updateParentLoginId = onCall(async (request) => {
     return { ok: true, loginId: newLoginId };
   }
 
-  const memberAttnId =
-    typeof memberSnap.get("attnId") === "string" ? memberSnap.get("attnId") : "";
   const newIndexRef = db.doc(attnLoginIndexPath(newLoginId));
 
   await db.runTransaction(async (tx) => {
     const freshMember = await tx.get(memberRef);
     const prevLoginId =
       typeof freshMember.get("loginId") === "string" ? freshMember.get("loginId") : "";
+    const memberAttnId =
+      typeof freshMember.get("attnId") === "string" ? freshMember.get("attnId") : "";
     if (newLoginId === prevLoginId) {
       return;
     }
@@ -485,19 +496,29 @@ export const updateParentLoginId = onCall(async (request) => {
     if (newIndexSnap.exists && newIndexSnap.get("authUid") !== uid) {
       throw new HttpsError("already-exists", "이미 사용 중인 로그인 ID입니다.");
     }
+
     const prevKeys = new Set<string>();
     if (prevLoginId) prevKeys.add(prevLoginId);
     if (memberAttnId) prevKeys.add(memberAttnId);
+    if (prevLoginId.includes("@")) {
+      prevKeys.add(normalizeParentLoginEmail(prevLoginId));
+    }
+
+    const indexDeletes: DocumentReference[] = [];
     for (const key of prevKeys) {
-      if (key === newLoginId) continue;
+      if (!key || key === newLoginId) continue;
       const oldIndexRef = db.doc(attnLoginIndexPath(key));
       const oldIndexSnap = await tx.get(oldIndexRef);
       if (oldIndexSnap.exists && oldIndexSnap.get("authUid") === uid) {
-        tx.delete(oldIndexRef);
+        indexDeletes.push(oldIndexRef);
       }
     }
+
     const indexAuthProvider =
       freshMember.get("authProvider") === "google" && !hasPassword ? "google" : "password";
+    for (const oldIndexRef of indexDeletes) {
+      tx.delete(oldIndexRef);
+    }
     tx.set(newIndexRef, {
       loginId: newLoginId,
       attnId: memberAttnId,

@@ -292,6 +292,7 @@ export { retryAttendancePushDelivery } from "./attendance-push-delivery";
 export {
   activateParent,
   deactivateParent,
+  deleteAcademyStudent,
   deleteParentInvite,
   finalizeParentOnboarding,
   getParentActivationState,

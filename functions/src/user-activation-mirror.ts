@@ -2,6 +2,7 @@ import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import * as logger from "firebase-functions/logger";
+import { purgeUserFirestoreData, syncUserAdminProfile } from "./lib/firestore-cleanup";
 
 type TeacherStatus =
   | "pending_setup"
@@ -136,6 +137,15 @@ export async function computeParentActivationForUid(
   };
 }
 
+async function authUserExists(authUid: string): Promise<boolean> {
+  try {
+    await admin.auth().getUser(authUid);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Callable·트리거에서 동일 스냅샷을 `users/{uid}/serverMirror/activation`에 기록 */
 export async function reconcileUserActivationMirror(
   db: admin.firestore.Firestore,
@@ -146,6 +156,24 @@ export async function reconcileUserActivationMirror(
     computeTeacherActivationForUid(db, authUid),
     computeParentActivationForUid(db, authUid),
   ]);
+
+  if (!(await authUserExists(authUid))) {
+    await purgeUserFirestoreData(db, authUid);
+    return { teacher, parent };
+  }
+
+  const noMembership = teacher.primaryStatus === null && parent.primaryStatus === null;
+  if (noMembership) {
+    const ownsAcademy = await db
+      .collection("academies")
+      .where("ownerUid", "==", authUid)
+      .limit(1)
+      .get();
+    if (ownsAcademy.empty) {
+      await purgeUserFirestoreData(db, authUid);
+    }
+    return { teacher, parent };
+  }
 
   const ref = db.doc(`users/${authUid}/serverMirror/activation`);
   await ref.set(
@@ -158,6 +186,7 @@ export async function reconcileUserActivationMirror(
     },
     { merge: true },
   );
+  await syncUserAdminProfile(db, authUid);
 
   return { teacher, parent };
 }
