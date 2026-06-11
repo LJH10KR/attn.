@@ -1,7 +1,7 @@
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { attnLoginIndexPath } from "./lib/attn-id";
+import { attnLoginIndexPath, PARENT_ATTN_ID_RE, TEACHER_ATTN_ID_RE } from "./lib/attn-id";
 import { normalizeMemberLoginId } from "./lib/member-login-id";
 import { normalizeParentLoginId } from "./lib/parent-login-id";
 import { randomTempPassword, type MemberKind } from "./lib/member-credentials";
@@ -44,9 +44,6 @@ async function verifyMemberPassword(
       : undefined;
   return { status, contactEmail };
 }
-
-const PARENT_ATTN_ID_RE = /^\d{5}_\d{2}_\d{4}$/;
-const TEACHER_ATTN_ID_RE = /^\d{5}_\d{2}_\d{3}$/;
 
 async function resolveParentLoginIndex(loginKey: string) {
   const db = admin.firestore();

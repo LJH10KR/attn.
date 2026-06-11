@@ -4,6 +4,7 @@ import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { assertCanManageAcademy } from "./lib/academy-access";
+import { ACADEMY_ATTN_ID_RE } from "./lib/attn-id";
 
 /**
  * `createCustomToken`용 IAM 서명 주체.
@@ -58,10 +59,10 @@ function requireAcademyDocumentId(raw: unknown): string {
   return id;
 }
 
-/** attnId 학원(00001_03) 또는 구 슬러그 ID */
+/** attnId 학원(o1_a3) 또는 구 슬러그 ID */
 function resolveAcademyLoginId(raw: unknown): string {
   const id = requireAcademyDocumentId(raw);
-  if (/^\d{5}_\d{2}$/.test(id)) {
+  if (ACADEMY_ATTN_ID_RE.test(id)) {
     return id;
   }
   return id.toLowerCase();

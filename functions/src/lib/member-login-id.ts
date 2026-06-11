@@ -1,6 +1,6 @@
 import * as admin from "firebase-admin";
 import { HttpsError } from "firebase-functions/v2/https";
-import { attnLoginIndexPath } from "./attn-id";
+import { attnLoginIndexPath, isAttnIdLike } from "./attn-id";
 
 /** 영문 별칭 — 학부모 수동 설정·레거시 */
 export const MEMBER_LOGIN_ID_ASCII_RE = /^[a-z][a-z0-9_]{3,19}$/;
@@ -26,8 +26,10 @@ export const RESERVED_MEMBER_LOGIN_IDS = new Set([
   "undefined",
 ]);
 
-/** attn. 발급 번호와 혼동 방지 */
-export const ATTN_LIKE_LOGIN_RE = /^\d{5}_\d{2}(_\d+)?$/;
+/** attn. 발급 번호와 혼동 방지 — `isAttnIdLike` 사용 권장 */
+export function isAttnLikeLoginId(loginId: string): boolean {
+  return isAttnIdLike(loginId);
+}
 
 export function isHangulMemberLoginId(loginId: string): boolean {
   return MEMBER_LOGIN_ID_HANGUL_RE.test(loginId);
@@ -54,7 +56,7 @@ export function validateMemberLoginIdFormat(loginId: string): void {
   if (!hangulOk && RESERVED_MEMBER_LOGIN_IDS.has(id)) {
     throw new HttpsError("invalid-argument", "사용할 수 없는 로그인 ID입니다.");
   }
-  if (ATTN_LIKE_LOGIN_RE.test(id)) {
+  if (isAttnIdLike(id)) {
     throw new HttpsError(
       "invalid-argument",
       "시스템 발급 번호 형식은 로그인 ID로 사용할 수 없습니다.",

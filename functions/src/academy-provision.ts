@@ -5,9 +5,9 @@ import {
   ATTN_ID_GLOBAL_META,
   academySeqMetaPath,
   formatAcademyAttnId,
+  formatOwnerAttnId,
   formatParentAttnId,
   formatTeacherAttnId,
-  pad5,
 } from "./lib/attn-id";
 import { assertCanManageAcademy } from "./lib/academy-access";
 import {
@@ -39,7 +39,7 @@ async function ensureOwnerAttnSeq(
     }
     const globalSnap = await tx.get(globalRef);
     const nextOwner = (globalSnap.get("nextOwnerSeq") as number) || 1;
-    const ownerAttnSeq = pad5(nextOwner);
+    const ownerAttnSeq = formatOwnerAttnId(nextOwner);
     tx.set(globalRef, { nextOwnerSeq: nextOwner + 1 }, { merge: true });
     tx.set(
       userRef,

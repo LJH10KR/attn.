@@ -792,7 +792,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
                 value={academyId}
                 onChange={(e) => setAcademyId(e.target.value)}
                 className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 font-mono text-foreground shadow-inner shadow-white/40 outline-none ring-0 transition placeholder:text-neutral-400 focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]"
-                placeholder="학원 로그인 번호 (예: 00001_03)"
+                placeholder="학원 로그인 번호 (예: o1_a1)"
               />
             </div>
             <LoginPasswordField

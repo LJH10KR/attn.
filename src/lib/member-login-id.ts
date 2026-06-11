@@ -1,5 +1,7 @@
 /** 선생님·학부모 로그인 ID — 클라이언트 형식 검사(서버와 동일 규칙) */
 
+import { isAttnIdLike } from "@/lib/firebase/attn-id";
+
 const MEMBER_LOGIN_ID_ASCII_RE = /^[a-z][a-z0-9_]{3,19}$/;
 const MEMBER_LOGIN_ID_HANGUL_RE = /^[가-힣]{4,12}$/;
 
@@ -18,8 +20,6 @@ const RESERVED = new Set([
   "system",
   "root",
 ]);
-
-const ATTN_LIKE_RE = /^\d{5}_\d{2}(_\d+)?$/;
 
 export function normalizeMemberLoginId(raw: string): string {
   const trimmed = raw.trim();
@@ -43,7 +43,7 @@ export function getMemberLoginIdFormatError(loginId: string): string | null {
   if (!hangulOk && RESERVED.has(id)) {
     return "사용할 수 없는 로그인 ID입니다.";
   }
-  if (ATTN_LIKE_RE.test(id)) {
+  if (isAttnIdLike(id)) {
     return "시스템 발급 번호 형식은 사용할 수 없습니다.";
   }
   return null;

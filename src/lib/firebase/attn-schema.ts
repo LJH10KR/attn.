@@ -149,7 +149,8 @@ export type UserProfile = {
 };
 
 /**
- * 학원 문서 — Firestore 문서 ID가 곧 포털 로그인용 학원 ID(오너가 `createAcademyWithPortal`으로 지정).
+ * 학원 문서 — `createAcademyEasy` 시 Firestore 문서 ID가 attn 학원 번호(예: `o00001_a03`).
+ * `createAcademyWithPortal`은 오너가 슬러그 ID를 직접 지정할 수 있음.
  * owner 한 명이 여러 학원을 가질 수 있음.
  */
 export type Academy = {

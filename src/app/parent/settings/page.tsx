@@ -33,7 +33,11 @@ export default function ParentSettingsPage() {
   const { profile: authProfile, refreshProfile } = useAuthProfile();
   const [iosModalOpen, setIosModalOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const { logout: onLogout, logoutBusy, logoutModal } = useRoleLogout({
+  const {
+    logout: onLogout,
+    logoutBusy,
+    logoutModal,
+  } = useRoleLogout({
     redirectTo: "/login/parent",
     role: "parent",
   });
@@ -109,8 +113,12 @@ export default function ParentSettingsPage() {
             );
             setLoginId(typeof d?.loginId === "string" ? d.loginId : "");
             setAttnId(typeof d?.attnId === "string" ? d.attnId : "");
-            setAuthProvider(typeof d?.authProvider === "string" ? d.authProvider : "");
-            setGoogleEmail(typeof d?.googleEmail === "string" ? d.googleEmail : "");
+            setAuthProvider(
+              typeof d?.authProvider === "string" ? d.authProvider : "",
+            );
+            setGoogleEmail(
+              typeof d?.googleEmail === "string" ? d.googleEmail : "",
+            );
             setGoogleLinked(d?.googleLinked === true);
           },
         )
