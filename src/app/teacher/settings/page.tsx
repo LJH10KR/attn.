@@ -1,10 +1,10 @@
 "use client";
 
 import { FirebaseError } from "firebase/app";
-import { onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged, signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { KrPhoneInput } from "@/components/ui/kr-phone-input";
 import { formatKrPhoneDisplay } from "@/lib/phone/kr-phone";
 import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
@@ -32,7 +32,9 @@ const inputClass =
 
 export default function TeacherSettingsPage() {
   const router = useRouter();
-  const { profile: authProfile, refreshProfile } = useAuthProfile();
+  const { profile: authProfile } = useAuthProfile();
+  const savingRef = useRef(false);
+  const authReadyRef = useRef(false);
   const [academyId, setAcademyId] = useState<string | null>(null);
   const [academyName, setAcademyName] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState("");
@@ -53,9 +55,13 @@ export default function TeacherSettingsPage() {
     const auth = getFirebaseAuth();
     return onAuthStateChanged(auth, async (user) => {
       if (!user) {
-        router.replace("/login/teacher");
+        if (authReadyRef.current && !savingRef.current) {
+          router.replace("/login/teacher");
+        }
         return;
       }
+      if (savingRef.current) return;
+      authReadyRef.current = true;
       const state = await resolveTeacherActivationState(user, {
         bypassCache: true,
       });
@@ -102,20 +108,45 @@ export default function TeacherSettingsPage() {
     setError(null);
     setSaved(false);
     setBusy(true);
+    savingRef.current = true;
+    const auth = getFirebaseAuth();
     try {
+      const user = auth.currentUser;
+      if (!user) {
+        setError("로그인이 필요합니다.");
+        return;
+      }
       const fn = httpsCallable(getFirebaseFunctions(), "updateTeacherProfile");
       await fn({
         displayName: displayName.trim(),
         phone: phone.trim(),
       });
-      await refreshProfile();
       setSaved(true);
     } catch (e) {
-      setError(e instanceof FirebaseError ? e.message : "저장에 실패했습니다.");
+      if (e instanceof FirebaseError) {
+        if (e.code === "functions/unauthenticated") {
+          setError("로그인이 만료되었습니다. 다시 로그인해 주세요.");
+          authReadyRef.current = false;
+          await signOut(auth);
+          router.replace("/login/teacher");
+          return;
+        }
+        if (e.code === "functions/permission-denied") {
+          setError("권한이 없습니다. 다시 로그인한 뒤 시도해 주세요.");
+          return;
+        }
+        setError(e.message || "저장에 실패했습니다.");
+      } else {
+        setError("저장에 실패했습니다.");
+      }
     } finally {
+      savingRef.current = false;
       setBusy(false);
+      if (!auth.currentUser && authReadyRef.current) {
+        router.replace("/login/teacher");
+      }
     }
-  }, [displayName, phone, refreshProfile]);
+  }, [displayName, phone, router]);
 
   const headerProfile = useMemo(() => {
     if (!authProfile) return null;

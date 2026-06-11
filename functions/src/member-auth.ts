@@ -12,7 +12,7 @@ async function verifyMemberPassword(
   authUid: string,
   role: MemberKind,
   password: string,
-): Promise<{ status: string }> {
+): Promise<{ status: string; contactEmail?: string }> {
   const secretSnap = await admin
     .firestore()
     .doc(`academies/${academyId}/${role}s/${authUid}/secrets/login`)
@@ -35,7 +35,14 @@ async function verifyMemberPassword(
   if (!memberSnap.exists) {
     throw new HttpsError("not-found", "계정을 찾을 수 없습니다.");
   }
-  return { status: (memberSnap.get("status") as string) || "pending_setup" };
+  const status = (memberSnap.get("status") as string) || "pending_setup";
+  const contactEmail =
+    role === "parent" && status === "pending_email_verification"
+      ? typeof memberSnap.get("contactEmail") === "string"
+        ? memberSnap.get("contactEmail")
+        : undefined
+      : undefined;
+  return { status, contactEmail };
 }
 
 const PARENT_ATTN_ID_RE = /^\d{5}_\d{2}_\d{4}$/;
@@ -119,7 +126,19 @@ async function signInMember(loginKey: string, password: string, role: MemberKind
     );
   }
 
-  const { status } = await verifyMemberPassword(academyId, authUid, role, password);
+  const { status, contactEmail } = await verifyMemberPassword(
+    academyId,
+    authUid,
+    role,
+    password,
+  );
+
+  // 커스텀 토큰 클레임은 세션 한정 — 갱신 시 서버에 저장된 클레임이 필요합니다.
+  await admin.auth().setCustomUserClaims(authUid, {
+    role,
+    academyId,
+    membershipStatus: status,
+  });
 
   const customToken = await admin.auth().createCustomToken(authUid, {
     role,
@@ -127,7 +146,13 @@ async function signInMember(loginKey: string, password: string, role: MemberKind
     membershipStatus: status,
   });
 
-  return { customToken, academyId, authUid, membershipStatus: status };
+  return {
+    customToken,
+    academyId,
+    authUid,
+    membershipStatus: status,
+    ...(contactEmail ? { contactEmail } : {}),
+  };
 }
 
 export const signInTeacher = onCall(async (request) => {

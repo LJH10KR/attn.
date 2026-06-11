@@ -117,6 +117,9 @@ function activationPathFromState(
     const qs = p.toString();
     return `/${role}/complete${qs ? `?${qs}` : ""}`;
   }
+  if (state.primaryStatus === "pending_email_verification") {
+    return `/login/${role}`;
+  }
   const q = new URLSearchParams();
   q.set("state", state.primaryStatus);
   if (state.primaryAcademyId) q.set("academyId", state.primaryAcademyId);
@@ -160,6 +163,9 @@ async function resolveKnownSessionDashboardPath(user: User): Promise<string | nu
     const { claims } = await user.getIdTokenResult();
     if (claims.role === "academy") {
       return "/academy";
+    }
+    if (claims.membershipStatus === "pending_email_verification") {
+      return claims.role === "parent" ? "/login/parent" : null;
     }
 
     const authEmail = user.email ?? "";

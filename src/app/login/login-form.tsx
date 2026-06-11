@@ -13,6 +13,7 @@ import {
 } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
 import { EmailVerificationCodeModal } from "@/components/auth/email-verification-code-modal";
+import { LoginPasswordField } from "@/components/auth/login-password-field";
 import { GoogleMark } from "@/components/auth/google-mark";
 import {
   LOGIN_ROLE_OPTIONS,
@@ -20,7 +21,7 @@ import {
 } from "@/lib/auth/login-routes";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import {
   getFirebaseAuth,
@@ -95,8 +96,12 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
   const [otpModalOpen, setOtpModalOpen] = useState(false);
   const [otpPurpose, setOtpPurpose] = useState<"owner" | "parent">("owner");
   const [otpEmailHint, setOtpEmailHint] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const otpFlowRef = useRef(false);
 
   const configured = isFirebaseConfigured();
+  const loginPasswordInputClass =
+    "w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]";
 
   useEffect(() => {
     if (!configured) {
@@ -127,7 +132,33 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
     } else {
       setBanner(null);
     }
+    const presetLoginId = searchParams.get("loginId");
+    if (presetLoginId) {
+      setAttnId(presetLoginId);
+    }
   }, [searchParams, fixedRole]);
+
+  useEffect(() => {
+    if (!configured || (role !== "parent" && role !== "owner")) return;
+    const auth = getFirebaseAuth();
+    return onAuthStateChanged(auth, async (user) => {
+      if (!user || otpFlowRef.current) return;
+      try {
+        const token = await user.getIdTokenResult();
+        if (
+          role === "parent" &&
+          token.claims.membershipStatus === "pending_email_verification"
+        ) {
+          otpFlowRef.current = true;
+          setOtpPurpose("parent");
+          setOtpEmailHint(null);
+          setOtpModalOpen(true);
+        }
+      } catch {
+        /* ignore */
+      }
+    });
+  }, [configured, role]);
 
   const checkTeacherActivationOrRedirect =
     useCallback(async (): Promise<boolean> => {
@@ -323,15 +354,18 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
         const data = result.data as {
           customToken?: string;
           membershipStatus?: string;
+          contactEmail?: string;
         };
         if (!data?.customToken) {
           setError("로그인 응답이 올바르지 않습니다.");
           return;
         }
         await signInWithCustomToken(auth, data.customToken);
+        await auth.currentUser?.getIdToken(true);
         if (role === "parent" && data.membershipStatus === "pending_email_verification") {
+          otpFlowRef.current = true;
           setOtpPurpose("parent");
-          setOtpEmailHint(null);
+          setOtpEmailHint(data.contactEmail ?? null);
           setOtpModalOpen(true);
           return;
         }
@@ -446,6 +480,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
   );
 
   const onEmailOtpVerified = useCallback(async () => {
+    otpFlowRef.current = false;
     setOtpModalOpen(false);
     setBusy(true);
     try {
@@ -760,24 +795,16 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
                 placeholder="학원 로그인 번호 (예: 00001_03)"
               />
             </div>
-            <div>
-              <label
-                className="mb-1.5 block text-xs font-medium text-neutral-600"
-                htmlFor="academy-password"
-              >
-                비밀번호
-              </label>
-              <input
-                id="academy-password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 text-foreground shadow-inner shadow-white/40 outline-none focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]"
-                placeholder="포털 비밀번호"
-              />
-            </div>
+            <LoginPasswordField
+              id="academy-password"
+              label="비밀번호"
+              value={password}
+              onChangeAction={setPassword}
+              visible={showPassword}
+              onToggleVisibleAction={() => setShowPassword((v) => !v)}
+              disabled={busy || !configured || sessionBlocked}
+              inputClassName={loginPasswordInputClass}
+            />
             <button
               type="submit"
               disabled={busy || !configured || sessionBlocked}
@@ -809,24 +836,16 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
                 }
               />
             </div>
-            <div>
-              <label
-                className="mb-1.5 block text-xs font-medium text-neutral-600"
-                htmlFor="member-password"
-              >
-                비밀번호
-              </label>
-              <input
-                id="member-password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]"
-                placeholder="임시 또는 설정한 비밀번호"
-              />
-            </div>
+            <LoginPasswordField
+              id="member-password"
+              label="비밀번호"
+              value={password}
+              onChangeAction={setPassword}
+              visible={showPassword}
+              onToggleVisibleAction={() => setShowPassword((v) => !v)}
+              disabled={busy || !configured || sessionBlocked}
+              inputClassName={loginPasswordInputClass}
+            />
             <button
               type="submit"
               disabled={busy || !configured || sessionBlocked}
@@ -855,23 +874,16 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
                 placeholder="name@example.com"
               />
             </div>
-            <div>
-              <label
-                className="mb-1.5 block text-xs font-medium text-neutral-600"
-                htmlFor="password"
-              >
-                비밀번호
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 text-foreground shadow-inner shadow-white/40 outline-none focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]"
-              />
-            </div>
+            <LoginPasswordField
+              id="password"
+              label="비밀번호"
+              value={password}
+              onChangeAction={setPassword}
+              visible={showPassword}
+              onToggleVisibleAction={() => setShowPassword((v) => !v)}
+              disabled={busy || !configured || sessionBlocked}
+              inputClassName={loginPasswordInputClass}
+            />
             <button
               type="submit"
               disabled={busy || !configured || sessionBlocked}
@@ -957,6 +969,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
         emailHint={otpEmailHint}
         onVerifiedAction={onEmailOtpVerified}
         onCloseAction={() => {
+          otpFlowRef.current = false;
           setOtpModalOpen(false);
           void signOut(getFirebaseAuth()).catch(() => undefined);
         }}
