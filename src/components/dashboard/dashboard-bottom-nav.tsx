@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { formatDashboardBellBadge } from "@/components/dashboard/dashboard-notifications-modal";
 import {
   greetingDisplayNameFromProfile,
-  menuProfileContactLine,
+  menuProfileContactLines,
 } from "@/lib/ui/dashboard-greetings";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 
@@ -57,6 +57,8 @@ export type DashboardBottomNavProps = {
     email?: string | null;
     photoURL?: string | null;
     phone?: string | null;
+    googleLinked?: boolean;
+    googleEmail?: string | null;
   } | null;
   className?: string;
 };
@@ -354,9 +356,14 @@ export function DashboardBottomNav({
                   <p className="truncate font-semibold text-foreground">
                     {menuProfileDisplayName(profile)}
                   </p>
-                  <p className="truncate text-neutral-800 dark:text-neutral-200">
-                    {menuProfileContactLine(profile)}
-                  </p>
+                  {menuProfileContactLines(profile).map((line) => (
+                    <p
+                      key={line}
+                      className="truncate text-neutral-800 dark:text-neutral-200"
+                    >
+                      {line}
+                    </p>
+                  ))}
                   <p className="truncate text-neutral-800 dark:text-neutral-200">
                     {affiliationLabel.trim() || "—"}
                   </p>

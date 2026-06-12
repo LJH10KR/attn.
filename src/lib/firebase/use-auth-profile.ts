@@ -10,6 +10,8 @@ export type AuthProfilePayload = {
   photoURL: string | null;
   /** Firestore 회원 문서 등 — 프로필 메뉴 연락처 표시용 */
   phone?: string | null;
+  googleLinked?: boolean;
+  googleEmail?: string | null;
 };
 
 function profileFromCurrentUser(): AuthProfilePayload | null {

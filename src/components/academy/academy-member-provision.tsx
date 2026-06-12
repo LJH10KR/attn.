@@ -84,9 +84,7 @@ export function AcademyMemberProvisionModal({
         const data = res.data as {
           students?: Array<{ attnId: string; name: string }>;
         };
-        setStudentLines(
-          (data.students ?? []).map((s) => `${s.name} · ${s.attnId}`),
-        );
+        setStudentLines((data.students ?? []).map((s) => s.attnId));
       }
       onDoneAction?.();
     } catch (e) {

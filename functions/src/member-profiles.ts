@@ -170,16 +170,22 @@ export const updateParentProfile = onCall(async (request) => {
   }
 
   const displayName = assertDisplayName(request.data?.displayName);
+  const hasPhoneField = request.data != null && "phone" in request.data;
+  const phone = hasPhoneField ? parseOptionalKrPhone(request.data?.phone) : undefined;
   const ref = admin.firestore().doc(`academies/${academyId}/parents/${uid}`);
   const snap = await ref.get();
   if (!snap.exists) {
     throw new HttpsError("not-found", "학부모 정보를 찾을 수 없습니다.");
   }
 
-  await ref.update({
+  const patch: Record<string, unknown> = {
     displayName,
     updatedAt: FieldValue.serverTimestamp(),
-  });
+  };
+  if (phone !== undefined) {
+    patch.phone = phone;
+  }
+  await ref.update(patch);
   try {
     await admin.auth().updateUser(uid, { displayName });
   } catch {
@@ -187,7 +193,11 @@ export const updateParentProfile = onCall(async (request) => {
   }
   await syncUserAdminProfile(admin.firestore(), uid);
 
-  return { ok: true, displayName };
+  return {
+    ok: true,
+    displayName,
+    ...(phone !== undefined ? { phone } : {}),
+  };
 });
 
 function googleEmailFromUser(user: admin.auth.UserRecord): string {

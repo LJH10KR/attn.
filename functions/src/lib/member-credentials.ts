@@ -2,7 +2,6 @@ import * as crypto from "node:crypto";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { attnLoginIndexPath, formatStudentAttnId } from "./attn-id";
-import { pickTemplateDisplayNameUnique } from "./korean-template-names";
 import { allocateTeacherLoginId } from "./teacher-login-id";
 
 export type MemberKind = "teacher" | "parent";
@@ -123,9 +122,8 @@ export async function provisionTemplateStudentsForParent(params: {
   parentAuthUid: string;
   parentAttnId: string;
   count: number;
-  usedNames: Set<string>;
 }): Promise<Array<{ studentId: string; attnId: string; name: string }>> {
-  const { db, academyId, parentAuthUid, parentAttnId, count, usedNames } = params;
+  const { db, academyId, parentAuthUid, parentAttnId, count } = params;
   const parentRef = db.doc(`academies/${academyId}/parents/${parentAuthUid}`);
   const parentSnap = await parentRef.get();
   if (!parentSnap.exists) {
@@ -143,7 +141,7 @@ export async function provisionTemplateStudentsForParent(params: {
       const studentSeq = nextSeq;
       nextSeq += 1;
       const attnId = formatStudentAttnId(parentAttnId, studentSeq);
-      const name = pickTemplateDisplayNameUnique(usedNames);
+      const name = attnId;
       const studentRef = db.collection(`academies/${academyId}/students`).doc();
       batchWrites.push(() => {
         tx.set(studentRef, {

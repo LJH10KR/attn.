@@ -14,7 +14,7 @@ import {
 } from "firebase/firestore";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
@@ -31,6 +31,7 @@ import { COLLECTIONS, type Academy } from "@/lib/firebase/attn-schema";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 import { AcademyRegistrationOverlay } from "@/components/owner/academy-registration-overlay";
 import { attnIdSortKey, compareAttnIdAsc } from "@/lib/attn-id-sort";
+import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
 
 type AcademyRow = Academy & { id: string };
 
@@ -98,6 +99,8 @@ export function OwnerDashboard() {
   const ownerInitGenerationRef = useRef(0);
   const ownerListLoadedUidRef = useRef<string | null>(null);
   const autoRegistrationPromptedRef = useRef(false);
+  const [ownerDisplayName, setOwnerDisplayName] = useState<string | null>(null);
+  const [ownerPhone, setOwnerPhone] = useState<string | null>(null);
 
   useBodyScrollLock(modal !== null);
 
@@ -110,6 +113,7 @@ export function OwnerDashboard() {
     }
     const auth = getFirebaseAuth();
     let unsubAcademies: (() => void) | undefined;
+    let unsubUser: (() => void) | undefined;
 
     const unsubAuth = auth.onAuthStateChanged(async (user) => {
       if (!user) {
@@ -117,8 +121,11 @@ export function OwnerDashboard() {
         ownerListLoadedUidRef.current = null;
         setGate("auth");
         unsubAcademies?.();
+        unsubUser?.();
         setAcademies([]);
         setAcademiesListReady(false);
+        setOwnerDisplayName(null);
+        setOwnerPhone(null);
         autoRegistrationPromptedRef.current = false;
         return;
       }
@@ -138,12 +145,22 @@ export function OwnerDashboard() {
       if (!isOwner) {
         setGate("forbidden");
         unsubAcademies?.();
+        unsubUser?.();
         setAcademies([]);
         setAcademiesListReady(false);
         return;
       }
       setGate("ok");
       const db = getFirebaseDb();
+      unsubUser?.();
+      unsubUser = onSnapshot(doc(db, COLLECTIONS.users, uid), (snap) => {
+        const d = snap.data();
+        setOwnerDisplayName(
+          typeof d?.displayName === "string" ? d.displayName : null,
+        );
+        const rawPhone = typeof d?.phone === "string" ? d.phone.trim() : "";
+        setOwnerPhone(rawPhone || null);
+      });
       const q = query(
         collection(db, COLLECTIONS.academies),
         where("ownerUid", "==", uid),
@@ -186,8 +203,18 @@ export function OwnerDashboard() {
       autoRegistrationPromptedRef.current = false;
       unsubAuth();
       unsubAcademies?.();
+      unsubUser?.();
     };
   }, [configured]);
+
+  const headerProfile = useMemo(
+    () =>
+      buildDashboardHeaderProfile(authProfile, {
+        displayName: ownerDisplayName,
+        phone: ownerPhone,
+      }),
+    [authProfile, ownerDisplayName, ownerPhone],
+  );
 
   useEffect(() => {
     if (gate === "auth" && configured) {
@@ -399,7 +426,7 @@ export function OwnerDashboard() {
         ]}
         onLogoutAction={() => void onLogout()}
         logoutBusy={logoutBusy}
-        profile={authProfile}
+        profile={headerProfile}
       />
 
       <main className="mx-auto max-w-lg px-4 pt-5">

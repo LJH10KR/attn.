@@ -3,14 +3,17 @@
 import { onAuthStateChanged } from "firebase/auth";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { doc, onSnapshot } from "firebase/firestore";
+import { useEffect, useMemo, useState } from "react";
 import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { OwnerPasswordSettingsCard } from "@/components/account/password-settings-cards";
 import { OwnerGoogleLinkCard } from "@/components/owner/owner-google-link-card";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
-import { getFirebaseAuth } from "@/lib/firebase/client-app";
+import { COLLECTIONS } from "@/lib/firebase/attn-schema";
+import { getFirebaseAuth, getFirebaseDb } from "@/lib/firebase/client-app";
+import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
 import { useRoleLogout } from "@/lib/auth/use-role-logout";
 import { fetchIsOwner } from "@/lib/firebase/owner-profile";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
@@ -28,6 +31,8 @@ export default function OwnerSettingsPage() {
     role: "owner",
   });
   const configured = isFirebaseConfigured();
+  const [ownerDisplayName, setOwnerDisplayName] = useState<string | null>(null);
+  const [ownerPhone, setOwnerPhone] = useState<string | null>(null);
 
   useEffect(() => {
     if (!configured) {
@@ -50,6 +55,28 @@ export default function OwnerSettingsPage() {
     if (!configured || gate !== "auth") return;
     router.replace("/login/owner");
   }, [configured, gate, router]);
+
+  useEffect(() => {
+    if (!configured || gate !== "ok") return;
+    const uid = getFirebaseAuth().currentUser?.uid;
+    if (!uid) return;
+    const db = getFirebaseDb();
+    return onSnapshot(doc(db, COLLECTIONS.users, uid), (snap) => {
+      const d = snap.data();
+      setOwnerDisplayName(typeof d?.displayName === "string" ? d.displayName : null);
+      const rawPhone = typeof d?.phone === "string" ? d.phone.trim() : "";
+      setOwnerPhone(rawPhone || null);
+    });
+  }, [configured, gate]);
+
+  const headerProfile = useMemo(
+    () =>
+      buildDashboardHeaderProfile(authProfile, {
+        displayName: ownerDisplayName,
+        phone: ownerPhone,
+      }),
+    [authProfile, ownerDisplayName, ownerPhone],
+  );
 
   if (!configured) {
     return (
@@ -133,7 +160,7 @@ export default function OwnerSettingsPage() {
           ]}
           onLogoutAction={() => void onLogout()}
           logoutBusy={logoutBusy}
-          profile={authProfile}
+          profile={headerProfile}
         />
 
         <div className="mt-5 space-y-4">

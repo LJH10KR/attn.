@@ -23,6 +23,7 @@ import {
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { resolveTeacherActivationState } from "@/lib/firebase/resolve-session-dashboard";
 import { useRoleLogout } from "@/lib/auth/use-role-logout";
+import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { doc, onSnapshot } from "firebase/firestore";
 
@@ -148,16 +149,16 @@ export default function TeacherSettingsPage() {
     }
   }, [displayName, phone, router]);
 
-  const headerProfile = useMemo(() => {
-    if (!authProfile) return null;
-    const name = displayName.trim();
-    const formattedPhone = phone.trim() || null;
-    return {
-      ...authProfile,
-      ...(name ? { displayName: name } : {}),
-      phone: formattedPhone,
-    };
-  }, [authProfile, displayName, phone]);
+  const headerProfile = useMemo(
+    () =>
+      buildDashboardHeaderProfile(authProfile, {
+        displayName: displayName.trim() || null,
+        phone: phone.trim() || null,
+        googleLinked,
+        googleEmail: googleEmail.trim() || null,
+      }),
+    [authProfile, displayName, googleEmail, googleLinked, phone],
+  );
 
   const formDisabled = busy || logoutBusy;
 

@@ -5,7 +5,8 @@ import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot, setDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { KrPhoneInput } from "@/components/ui/kr-phone-input";
 import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
@@ -22,11 +23,15 @@ import {
   getFirebaseFunctions,
 } from "@/lib/firebase/client-app";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
+import { formatKrPhoneDisplay } from "@/lib/phone/kr-phone";
+import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
 import { useRoleLogout } from "@/lib/auth/use-role-logout";
 
 const glassCard = "glass-card";
+const inputClass =
+  "w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3 text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50";
 
 export default function ParentSettingsPage() {
   const router = useRouter();
@@ -42,6 +47,7 @@ export default function ParentSettingsPage() {
     role: "parent",
   });
   const [displayName, setDisplayName] = useState("");
+  const [phone, setPhone] = useState("");
   const [loginId, setLoginId] = useState("");
   const [attnId, setAttnId] = useState("");
   const [authProvider, setAuthProvider] = useState<string>("");
@@ -111,6 +117,7 @@ export default function ParentSettingsPage() {
             setDisplayName(
               typeof d?.displayName === "string" ? d.displayName : "",
             );
+            setPhone(formatKrPhoneDisplay(typeof d?.phone === "string" ? d.phone : ""));
             setLoginId(typeof d?.loginId === "string" ? d.loginId : "");
             setAttnId(typeof d?.attnId === "string" ? d.attnId : "");
             setAuthProvider(
@@ -135,7 +142,10 @@ export default function ParentSettingsPage() {
     setProfileBusy(true);
     try {
       const fn = httpsCallable(getFirebaseFunctions(), "updateParentProfile");
-      await fn({ displayName: displayName.trim() });
+      await fn({
+        displayName: displayName.trim(),
+        phone: phone.trim(),
+      });
       await refreshProfile();
       setProfileSaved(true);
     } catch (e) {
@@ -145,7 +155,7 @@ export default function ParentSettingsPage() {
     } finally {
       setProfileBusy(false);
     }
-  }, [displayName, refreshProfile]);
+  }, [displayName, phone, refreshProfile]);
 
   const affiliationLabel =
     primaryAcademyId === undefined
@@ -153,6 +163,17 @@ export default function ParentSettingsPage() {
       : primaryAcademyId === null
         ? "연결된 학원 없음"
         : academyLabelForGreeting(academyName, primaryAcademyId);
+
+  const headerProfile = useMemo(
+    () =>
+      buildDashboardHeaderProfile(authProfile, {
+        displayName: displayName.trim() || null,
+        phone: phone.trim() || null,
+        googleLinked,
+        googleEmail: googleEmail.trim() || null,
+      }),
+    [authProfile, displayName, googleEmail, googleLinked, phone],
+  );
 
   const openIosHint = () => {
     if (!isLikelyIos()) {
@@ -198,7 +219,7 @@ export default function ParentSettingsPage() {
           ]}
           onLogoutAction={() => void onLogout()}
           logoutBusy={logoutBusy}
-          profile={authProfile}
+          profile={headerProfile}
         />
 
         {toast ? (
@@ -210,19 +231,38 @@ export default function ParentSettingsPage() {
         <div className="space-y-4 mt-5">
           <section className={`p-4 ${glassCard}`}>
             <h2 className="text-sm font-semibold text-foreground">프로필</h2>
-            <label
-              className="mt-4 mb-1 block text-xs font-medium text-neutral-600"
-              htmlFor="p-dn"
-            >
-              표시 이름
-            </label>
-            <input
-              id="p-dn"
-              className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 px-4 py-2.5 text-sm outline-none focus:border-[#4a90e2]/50"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              maxLength={60}
-            />
+            <div className="mt-4">
+              <label
+                className="mb-1 block text-xs font-medium text-neutral-600"
+                htmlFor="p-dn"
+              >
+                표시 이름
+              </label>
+              <input
+                id="p-dn"
+                className={inputClass}
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                maxLength={60}
+                disabled={profileBusy || logoutBusy}
+                autoComplete="name"
+              />
+            </div>
+            <div className="mt-3">
+              <label
+                className="mb-1 block text-xs font-medium text-neutral-600"
+                htmlFor="p-phone"
+              >
+                전화번호
+              </label>
+              <KrPhoneInput
+                id="p-phone"
+                className={inputClass}
+                value={phone}
+                onChange={setPhone}
+                disabled={profileBusy || logoutBusy}
+              />
+            </div>
             {profileError ? (
               <p className="mt-2 text-sm text-red-700">{profileError}</p>
             ) : null}
@@ -235,7 +275,7 @@ export default function ParentSettingsPage() {
               onClick={() => void onSaveProfile()}
               className="mt-3 w-full rounded-2xl bg-[#222] py-2.5 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-950 disabled:opacity-60"
             >
-              {profileBusy ? "저장 중…" : "이름 저장"}
+              {profileBusy ? "저장 중…" : "프로필 저장"}
             </button>
           </section>
           {primaryAcademyId ? (

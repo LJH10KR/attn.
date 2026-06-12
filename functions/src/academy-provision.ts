@@ -271,7 +271,6 @@ async function runProvisionTemplateParents(request: {
       parentAuthUid: member.authUid,
       parentAttnId: attnId,
       count: childrenPerParent,
-      usedNames,
     });
     parents.push({
       attnId: member.attnId,
@@ -325,14 +324,12 @@ export const provisionStudentsBatch = onCall(async (request) => {
     throw new HttpsError("failed-precondition", "학부모 attnId가 없습니다.");
   }
 
-  const usedNames = new Set<string>();
   const children = await provisionTemplateStudentsForParent({
     db,
     academyId,
     parentAuthUid,
     parentAttnId,
     count,
-    usedNames,
   });
 
   return { students: children };

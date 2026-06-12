@@ -26,6 +26,7 @@ import { useAttendanceNotificationLog } from "@/lib/firebase/use-attendance-noti
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { resolveTeacherActivationState } from "@/lib/firebase/resolve-session-dashboard";
 import { useRoleLogout } from "@/lib/auth/use-role-logout";
+import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 
 const glassCard = "glass-card";
@@ -83,6 +84,8 @@ export default function TeacherDashboardPage() {
   const [academyName, setAcademyName] = useState<string | null>(null);
   const [memberPhone, setMemberPhone] = useState<string | null>(null);
   const [memberDisplayName, setMemberDisplayName] = useState<string | null>(null);
+  const [googleLinked, setGoogleLinked] = useState(false);
+  const [googleEmail, setGoogleEmail] = useState<string | null>(null);
   const [students, setStudents] = useState<StudentRowVM[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
@@ -340,6 +343,10 @@ export default function TeacherDashboardPage() {
           );
           const rawPhone = typeof d?.phone === "string" ? d.phone.trim() : "";
           setMemberPhone(rawPhone || null);
+          setGoogleLinked(d?.googleLinked === true);
+          setGoogleEmail(
+            typeof d?.googleEmail === "string" ? d.googleEmail.trim() || null : null,
+          );
         })
       : () => {};
     return () => {
@@ -348,14 +355,16 @@ export default function TeacherDashboardPage() {
     };
   }, [academyId]);
 
-  const headerProfile = useMemo(() => {
-    if (!authProfile) return null;
-    return {
-      ...authProfile,
-      ...(memberDisplayName ? { displayName: memberDisplayName } : {}),
-      phone: memberPhone,
-    };
-  }, [authProfile, memberDisplayName, memberPhone]);
+  const headerProfile = useMemo(
+    () =>
+      buildDashboardHeaderProfile(authProfile, {
+        displayName: memberDisplayName,
+        phone: memberPhone,
+        googleLinked,
+        googleEmail,
+      }),
+    [authProfile, googleEmail, googleLinked, memberDisplayName, memberPhone],
+  );
 
   if (!ready) {
     return (

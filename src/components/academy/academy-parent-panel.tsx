@@ -2,12 +2,10 @@
 
 import { FirebaseError } from "firebase/app";
 import {
-  addDoc,
   collection,
   getCountFromServer,
   getDocs,
   query,
-  serverTimestamp,
   Timestamp,
   where,
 } from "firebase/firestore";
@@ -147,14 +145,6 @@ function RegisterChildModal({
   open,
   busy,
   error,
-  formName,
-  setFormName,
-  formAge,
-  setFormAge,
-  formPhone,
-  setFormPhone,
-  formEmergency,
-  setFormEmergency,
   studentCount,
   countLoading,
   onClose,
@@ -164,14 +154,6 @@ function RegisterChildModal({
   open: boolean;
   busy: boolean;
   error: string | null;
-  formName: string;
-  setFormName: (v: string) => void;
-  formAge: string;
-  setFormAge: (v: string) => void;
-  formPhone: string;
-  setFormPhone: (v: string) => void;
-  formEmergency: string;
-  setFormEmergency: (v: string) => void;
   studentCount: number | null;
   countLoading: boolean;
   onClose: () => void;
@@ -223,7 +205,8 @@ function RegisterChildModal({
         </h2>
         <p className="mt-2 text-xs leading-relaxed text-neutral-600">
           <span className="font-medium text-foreground">{parentRow.name || "(이름 없음)"}</span>
-          학부모에게 연결됩니다. 한 학부모당 최대{" "}
+          학부모에게 연결됩니다. 학생은 관리 번호(attnId)로 생성되며, 등록 후 학생 목록에서
+          이름·연락처 등을 수정할 수 있습니다. 한 학부모당 최대{" "}
           <strong>{MAX_STUDENTS_PER_PARENT}명</strong>까지 등록할 수 있습니다.
         </p>
         {countLoading ? (
@@ -240,60 +223,6 @@ function RegisterChildModal({
             이미 {MAX_STUDENTS_PER_PARENT}명에 도달했습니다. 더 등록하려면 기존 학생 정리가 필요합니다.
           </p>
         ) : null}
-        <div className="mt-4 space-y-3">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="c-name">
-              이름 (필수)
-            </label>
-            <input
-              id="c-name"
-              className={inputClass}
-              value={formName}
-              onChange={(e) => setFormName(e.target.value)}
-              maxLength={80}
-              disabled={busy || atCap}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="c-age">
-              나이 (필수)
-            </label>
-            <input
-              id="c-age"
-              className={inputClass}
-              type="number"
-              min={0}
-              max={120}
-              value={formAge}
-              onChange={(e) => setFormAge(e.target.value)}
-              disabled={busy || atCap}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="c-phone">
-              연락처 (필수)
-            </label>
-            <KrPhoneInput
-              id="c-phone"
-              className={inputClass}
-              value={formPhone}
-              onChange={setFormPhone}
-              disabled={busy || atCap}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="c-em">
-              비상 연락처 (필수)
-            </label>
-            <KrPhoneInput
-              id="c-em"
-              className={inputClass}
-              value={formEmergency}
-              onChange={setFormEmergency}
-              disabled={busy || atCap}
-            />
-          </div>
-        </div>
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
         <div className="mt-6 flex flex-wrap justify-end gap-2">
           <button
@@ -424,10 +353,6 @@ function ParentRowActions({
   const [childCountLoading, setChildCountLoading] = useState(false);
   const [childFormBusy, setChildFormBusy] = useState(false);
   const [childFormError, setChildFormError] = useState<string | null>(null);
-  const [childFormName, setChildFormName] = useState("");
-  const [childFormAge, setChildFormAge] = useState("");
-  const [childFormPhone, setChildFormPhone] = useState("");
-  const [childFormEmergency, setChildFormEmergency] = useState("");
 
   const refreshChildCount = useCallback(async () => {
     setChildCountLoading(true);
@@ -449,10 +374,6 @@ function ParentRowActions({
   }, [academyId, row.id]);
 
   const openChildModal = useCallback(() => {
-    setChildFormName("");
-    setChildFormAge("");
-    setChildFormPhone("");
-    setChildFormEmergency("");
     setChildFormError(null);
     setChildModalOpen(true);
     void refreshChildCount();
@@ -467,58 +388,33 @@ function ParentRowActions({
 
   const submitChild = useCallback(async () => {
     setChildFormError(null);
-    const name = childFormName.trim();
-    if (!name || name.length > 80) {
-      setChildFormError("이름을 1~80자로 입력해 주세요.");
-      return;
-    }
-    const ageNum = Number.parseInt(childFormAge.trim(), 10);
-    if (!Number.isFinite(ageNum) || ageNum < 0 || ageNum > 120) {
-      setChildFormError("나이는 0~120 사이 정수로 입력해 주세요.");
-      return;
-    }
     if (childStudentCount !== null && childStudentCount >= MAX_STUDENTS_PER_PARENT) {
       setChildFormError(`자녀는 학부모당 최대 ${MAX_STUDENTS_PER_PARENT}명까지 등록할 수 있습니다.`);
       return;
     }
-    const phone = childFormPhone.trim().slice(0, 30);
-    const emergency = childFormEmergency.trim().slice(0, 30);
-    if (!phone) {
-      setChildFormError("연락처를 입력해 주세요.");
-      return;
-    }
-    if (!emergency) {
-      setChildFormError("비상 연락처를 입력해 주세요.");
-      return;
-    }
     setChildFormBusy(true);
     try {
-      const db = getFirebaseDb();
-      await addDoc(collection(db, "academies", academyId, "students"), {
-        parentUserId: row.id,
-        name,
-        age: ageNum,
-        phone,
-        emergencyContact: emergency,
-        createdAt: serverTimestamp(),
+      const call = httpsCallable(fn, "provisionStudentsBatch");
+      const res = await call({
+        academyId,
+        parentAuthUid: row.id,
+        count: 1,
       });
-      setNotice("자녀(학생)를 등록했습니다.");
+      const data = res.data as { students?: Array<{ attnId: string; name: string }> };
+      const created = data.students?.[0];
+      setNotice(
+        created
+          ? `자녀(학생)를 등록했습니다. (${created.attnId})`
+          : "자녀(학생)를 등록했습니다.",
+      );
       setChildModalOpen(false);
+      onListRefresh();
     } catch (e) {
       setChildFormError(callableErr(e));
     } finally {
       setChildFormBusy(false);
     }
-  }, [
-    academyId,
-    childFormAge,
-    childFormEmergency,
-    childFormName,
-    childFormPhone,
-    childStudentCount,
-    row.id,
-    setNotice,
-  ]);
+  }, [academyId, childStudentCount, fn, onListRefresh, row.id, setNotice]);
 
   const run = async (action: string, name: string, exec: () => Promise<unknown>) => {
     setNotice(null);
@@ -728,14 +624,6 @@ function ParentRowActions({
           open={childModalOpen}
           busy={childFormBusy}
           error={childFormError}
-          formName={childFormName}
-          setFormName={setChildFormName}
-          formAge={childFormAge}
-          setFormAge={setChildFormAge}
-          formPhone={childFormPhone}
-          setFormPhone={setChildFormPhone}
-          formEmergency={childFormEmergency}
-          setFormEmergency={setChildFormEmergency}
           studentCount={childStudentCount}
           countLoading={childCountLoading}
           onClose={closeChildModal}

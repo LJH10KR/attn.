@@ -4,7 +4,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot, setDoc, Timestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   docToStudentRow,
   type StudentRowVM,
@@ -26,6 +26,7 @@ import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { useParentDashboardBell } from "@/lib/firebase/use-parent-dashboard-bell";
 import { resolveParentActivationState } from "@/lib/firebase/resolve-session-dashboard";
 import { useRoleLogout } from "@/lib/auth/use-role-logout";
+import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
 import { FirebaseError } from "firebase/app";
@@ -90,6 +91,10 @@ export default function ParentDashboardPage() {
   const [ready, setReady] = useState(false);
   const [academyId, setAcademyId] = useState<string | null>(null);
   const [academyName, setAcademyName] = useState<string | null>(null);
+  const [memberDisplayName, setMemberDisplayName] = useState<string | null>(null);
+  const [memberPhone, setMemberPhone] = useState<string | null>(null);
+  const [googleLinked, setGoogleLinked] = useState(false);
+  const [googleEmail, setGoogleEmail] = useState<string | null>(null);
   const [students, setStudents] = useState<StudentRowVM[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
@@ -348,7 +353,8 @@ export default function ParentDashboardPage() {
   useEffect(() => {
     if (!academyId) return;
     const db = getFirebaseDb();
-    const unsub = onSnapshot(
+    const uid = getFirebaseAuth().currentUser?.uid;
+    const unsubAcademy = onSnapshot(
       doc(db, "academies", academyId),
       (snap) => {
         const n = snap.data()?.name;
@@ -356,8 +362,36 @@ export default function ParentDashboardPage() {
       },
       () => setAcademyName(null),
     );
-    return () => unsub();
+    const unsubParent = uid
+      ? onSnapshot(doc(db, "academies", academyId, "parents", uid), (snap) => {
+          const d = snap.data();
+          setMemberDisplayName(
+            typeof d?.displayName === "string" ? d.displayName : null,
+          );
+          const rawPhone = typeof d?.phone === "string" ? d.phone.trim() : "";
+          setMemberPhone(rawPhone || null);
+          setGoogleLinked(d?.googleLinked === true);
+          setGoogleEmail(
+            typeof d?.googleEmail === "string" ? d.googleEmail.trim() || null : null,
+          );
+        })
+      : () => {};
+    return () => {
+      unsubAcademy();
+      unsubParent();
+    };
   }, [academyId]);
+
+  const headerProfile = useMemo(
+    () =>
+      buildDashboardHeaderProfile(authProfile, {
+        displayName: memberDisplayName,
+        phone: memberPhone,
+        googleLinked,
+        googleEmail,
+      }),
+    [authProfile, googleEmail, googleLinked, memberDisplayName, memberPhone],
+  );
 
   if (!ready) {
     return (
@@ -411,7 +445,7 @@ export default function ParentDashboardPage() {
           ]}
           onLogoutAction={() => void onLogout()}
           logoutBusy={logoutBusy}
-          profile={authProfile}
+          profile={headerProfile}
         />
         {/* <p className="mb-4 mt-1 text-[11px] leading-relaxed text-neutral-500 dark:text-neutral-400">
           연결된 자녀 학생 정보를 확인할 수 있습니다.
