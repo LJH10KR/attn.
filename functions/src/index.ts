@@ -381,3 +381,4 @@ export {
   onTeacherMembershipWritten,
   onParentMembershipWritten,
 } from "./user-activation-mirror";
+export { sendTuitionReminders } from "./tuition-reminder";

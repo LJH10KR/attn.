@@ -221,6 +221,16 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      /** 원비 납부 안내(카카오페이 링크·계좌) — 오너만 쓰기, 소속 활성 학부모도 읽기 허용 */
+      match /meta/tuitionSettings {
+        allow read: if isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyPortalSession(academyId)
+          || isAcademyParentActive(academyId);
+        allow write: if isAdmin()
+          || isAcademyOwner(academyId);
+      }
+
       match /students/{studentId} {
         /**
          * list 쿼리 검증 시 OR 전체가 분석되므로, parentUserId 등 필드가 없을 때 직접 접근하면

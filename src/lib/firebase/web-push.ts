@@ -272,7 +272,7 @@ export function subscribeForegroundMessages(
       const d = payload.data;
       if (!d) return;
       setAppIconBadgeFromPushData(d);
-      if (d.type !== "attendance") return;
+      if (d.type !== "attendance" && d.type !== "tuition_reminder") return;
       const body = typeof d.body === "string" ? d.body : "";
       if (body) onPayload(body);
     });

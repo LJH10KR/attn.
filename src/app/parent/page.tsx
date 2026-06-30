@@ -16,7 +16,9 @@ import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-heade
 import { RoleDashboardBootShell } from "@/components/dashboard/role-dashboard-boot-shell";
 import { StudentListSectionSkeleton } from "@/components/dashboard/student-list-section-skeleton";
 import { ParentCheckInPinCard } from "@/components/parent/parent-check-in-pin-card";
+import { ParentTuitionReminderCard } from "@/components/parent/parent-tuition-reminder-card";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
+import { academyTuitionSettingsPath } from "@/lib/firebase/attn-schema";
 import {
   getFirebaseAuth,
   getFirebaseDb,
@@ -57,7 +59,22 @@ type CallableStudentPayload = {
   assignedTeacherUid?: string | null;
   createdAtMillis?: number | null;
   hasCheckInPin?: boolean;
+  tuitionDueDateMillis?: number | null;
+  tuitionAmount?: number | null;
 };
+
+type ParentStudentRow = StudentRowVM & {
+  hasCheckInPin?: boolean;
+  tuitionDueDateMillis?: number | null;
+  tuitionAmount?: number | null;
+};
+
+type TuitionSettingsState = {
+  kakaoPayLink?: string;
+  bankName?: string;
+  accountNumber?: string;
+  accountHolder?: string;
+} | null;
 
 type ParentListPayload = {
   students?: CallableStudentPayload[];
@@ -110,8 +127,10 @@ export default function ParentDashboardPage() {
   const [listInitialLoading, setListInitialLoading] = useState(false);
   const [kioskRequirePin, setKioskRequirePin] = useState(false);
   const [studentsWithPinMeta, setStudentsWithPinMeta] = useState<
-    (StudentRowVM & { hasCheckInPin?: boolean })[]
+    ParentStudentRow[]
   >([]);
+  const [tuitionSettings, setTuitionSettings] =
+    useState<TuitionSettingsState>(null);
 
   const {
     items: parentBellItems,
@@ -229,6 +248,8 @@ export default function ParentDashboardPage() {
           const list = rawList.map((s) => ({
             ...studentRowFromCallablePayload(s),
             hasCheckInPin: s.hasCheckInPin === true,
+            tuitionDueDateMillis: s.tuitionDueDateMillis ?? null,
+            tuitionAmount: typeof s.tuitionAmount === "number" ? s.tuitionAmount : null,
           }));
           list.sort(sortByName);
           setStudents(list);
@@ -335,6 +356,8 @@ export default function ParentDashboardPage() {
       const list = rawList.map((s) => ({
         ...studentRowFromCallablePayload(s),
         hasCheckInPin: s.hasCheckInPin === true,
+        tuitionDueDateMillis: s.tuitionDueDateMillis ?? null,
+        tuitionAmount: typeof s.tuitionAmount === "number" ? s.tuitionAmount : null,
       }));
       list.sort(sortByName);
       setStudents(list);
@@ -376,9 +399,27 @@ export default function ParentDashboardPage() {
           );
         })
       : () => {};
+    const unsubTuition = onSnapshot(
+      doc(db, academyTuitionSettingsPath(academyId)),
+      (snap) => {
+        if (snap.exists()) {
+          const d = snap.data();
+          setTuitionSettings({
+            kakaoPayLink: typeof d?.kakaoPayLink === "string" && d.kakaoPayLink ? d.kakaoPayLink : undefined,
+            bankName: typeof d?.bankName === "string" && d.bankName ? d.bankName : undefined,
+            accountNumber: typeof d?.accountNumber === "string" && d.accountNumber ? d.accountNumber : undefined,
+            accountHolder: typeof d?.accountHolder === "string" && d.accountHolder ? d.accountHolder : undefined,
+          });
+        } else {
+          setTuitionSettings(null);
+        }
+      },
+      () => setTuitionSettings(null),
+    );
     return () => {
       unsubAcademy();
       unsubParent();
+      unsubTuition();
     };
   }, [academyId]);
 
@@ -509,6 +550,13 @@ export default function ParentDashboardPage() {
                     academyId={academyId!}
                     student={s}
                     onUpdatedAction={() => void refreshChildrenList()}
+                  />
+                ) : null}
+                {s.tuitionDueDateMillis ? (
+                  <ParentTuitionReminderCard
+                    tuitionDueDateMillis={s.tuitionDueDateMillis}
+                    tuitionAmount={s.tuitionAmount}
+                    settings={tuitionSettings}
                   />
                 ) : null}
               </div>

@@ -258,9 +258,27 @@ export type AcademyStudent = {
    * 전담 저장 시 제거(`deleteField`)합니다.
    */
   assignedTeacherUid?: string | null;
+  tuitionDueDate?: Timestamp;
+  tuitionAmount?: number;
+  sentTuitionReminders?: string[];
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 };
 
 /** 학원이 학부모당 등록 가능한 학생(자녀) 상한 */
 export const MAX_STUDENTS_PER_PARENT = 20;
+
+/** `academies/{academyId}/meta/tuitionSettings` — 원장이 설정하는 납부 안내 정보 */
+export const ACADEMY_TUITION_SETTINGS_DOC_ID = "tuitionSettings" as const;
+
+export type AcademyTuitionSettingsDoc = {
+  kakaoPayLink: string;
+  bankName: string;
+  accountNumber: string;
+  accountHolder: string;
+  updatedAt?: Timestamp;
+};
+
+export function academyTuitionSettingsPath(academyId: string): string {
+  return `${academyPath(academyId)}/meta/${ACADEMY_TUITION_SETTINGS_DOC_ID}`;
+}
