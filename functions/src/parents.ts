@@ -410,7 +410,7 @@ function serializeStudentDocForCallable(
   assignedTeacherUid: string | null;
   createdAtMillis: number | null;
   hasCheckInPin?: boolean;
-  tuitionDueDateMillis: number | null;
+  tuitionDueDayOfMonth: number | null;
   tuitionAmount: number | null;
 } {
   const data = d.data();
@@ -423,10 +423,10 @@ function serializeStudentDocForCallable(
       ? (rawUids as string[]).filter((x) => x.length > 0)
       : [];
   const legacyUid = data.assignedTeacherUid;
-  const tuitionDueDate = data.tuitionDueDate as Timestamp | undefined;
-  const tuitionDueDateMillis =
-    tuitionDueDate && typeof tuitionDueDate.toMillis === "function"
-      ? tuitionDueDate.toMillis()
+  const rawDay = data.tuitionDueDayOfMonth;
+  const tuitionDueDayOfMonth =
+    typeof rawDay === "number" && Number.isInteger(rawDay) && rawDay >= 1 && rawDay <= 31
+      ? rawDay
       : null;
   return {
     id: d.id,
@@ -440,7 +440,7 @@ function serializeStudentDocForCallable(
       typeof legacyUid === "string" && legacyUid.length > 0 ? legacyUid : null,
     createdAtMillis,
     ...(opts?.hasCheckInPin !== undefined ? { hasCheckInPin: opts.hasCheckInPin } : {}),
-    tuitionDueDateMillis,
+    tuitionDueDayOfMonth,
     tuitionAmount: typeof data.tuitionAmount === "number" ? data.tuitionAmount : null,
   };
 }

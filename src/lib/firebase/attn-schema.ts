@@ -258,7 +258,7 @@ export type AcademyStudent = {
    * 전담 저장 시 제거(`deleteField`)합니다.
    */
   assignedTeacherUid?: string | null;
-  tuitionDueDate?: Timestamp;
+  tuitionDueDayOfMonth?: number;
   tuitionAmount?: number;
   sentTuitionReminders?: string[];
   createdAt: Timestamp;

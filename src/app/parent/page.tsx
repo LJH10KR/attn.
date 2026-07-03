@@ -59,13 +59,13 @@ type CallableStudentPayload = {
   assignedTeacherUid?: string | null;
   createdAtMillis?: number | null;
   hasCheckInPin?: boolean;
-  tuitionDueDateMillis?: number | null;
+  tuitionDueDayOfMonth?: number | null;
   tuitionAmount?: number | null;
 };
 
 type ParentStudentRow = StudentRowVM & {
   hasCheckInPin?: boolean;
-  tuitionDueDateMillis?: number | null;
+  tuitionDueDayOfMonth?: number | null;
   tuitionAmount?: number | null;
 };
 
@@ -248,7 +248,7 @@ export default function ParentDashboardPage() {
           const list = rawList.map((s) => ({
             ...studentRowFromCallablePayload(s),
             hasCheckInPin: s.hasCheckInPin === true,
-            tuitionDueDateMillis: s.tuitionDueDateMillis ?? null,
+            tuitionDueDayOfMonth: s.tuitionDueDayOfMonth ?? null,
             tuitionAmount: typeof s.tuitionAmount === "number" ? s.tuitionAmount : null,
           }));
           list.sort(sortByName);
@@ -356,7 +356,7 @@ export default function ParentDashboardPage() {
       const list = rawList.map((s) => ({
         ...studentRowFromCallablePayload(s),
         hasCheckInPin: s.hasCheckInPin === true,
-        tuitionDueDateMillis: s.tuitionDueDateMillis ?? null,
+        tuitionDueDayOfMonth: s.tuitionDueDayOfMonth ?? null,
         tuitionAmount: typeof s.tuitionAmount === "number" ? s.tuitionAmount : null,
       }));
       list.sort(sortByName);
@@ -552,9 +552,9 @@ export default function ParentDashboardPage() {
                     onUpdatedAction={() => void refreshChildrenList()}
                   />
                 ) : null}
-                {s.tuitionDueDateMillis ? (
+                {s.tuitionDueDayOfMonth ? (
                   <ParentTuitionReminderCard
-                    tuitionDueDateMillis={s.tuitionDueDateMillis}
+                    tuitionDueDayOfMonth={s.tuitionDueDayOfMonth}
                     tuitionAmount={s.tuitionAmount}
                     settings={tuitionSettings}
                   />

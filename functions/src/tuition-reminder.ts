@@ -17,24 +17,45 @@ type TuitionSettings = {
   accountHolder?: string;
 };
 
-/**
- * 주어진 Date를 서울 시간 기준 당일 자정(00:00 KST)의 Unix ms로 변환합니다.
- * 날짜 비교 시 시:분:초를 제거하고 "서울 날짜" 단위로 맞추기 위해 사용합니다.
- */
 function seoulMidnightMs(date: Date): number {
   const dateStr = date.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
   return new Date(`${dateStr}T00:00:00+09:00`).getTime();
 }
 
-/** 서울 기준 YYYY-MM-DD 문자열 */
 function seoulDateString(date: Date): string {
   return date.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
 }
 
 /**
- * attendance-push-delivery.ts의 loadPushBuckets와 동일한 패턴.
- * users/{uid}/pushSubscriptions 스냅샷에서 PushTokenBucket 배열을 빌드합니다.
+ * 오늘 서울 자정(ms) 기준으로 dueDayOfMonth의 다음 납부일 ms를 계산합니다.
+ * 해당 월에 날짜가 없으면(예: 31일인데 2월) 그 달의 마지막 날로 대체합니다.
  */
+export function getNextDueDateMs(
+  dueDayOfMonth: number,
+  todayMidnightMs: number,
+): number {
+  const todayStr = new Date(todayMidnightMs).toLocaleDateString("en-CA", {
+    timeZone: "Asia/Seoul",
+  });
+  const [y, m] = todayStr.split("-").map(Number) as [number, number];
+
+  const daysInCurrent = new Date(y, m, 0).getDate();
+  const currentDay = Math.min(dueDayOfMonth, daysInCurrent);
+  const currentDueMs = new Date(
+    `${y}-${String(m).padStart(2, "0")}-${String(currentDay).padStart(2, "0")}T00:00:00+09:00`,
+  ).getTime();
+
+  if (currentDueMs >= todayMidnightMs) return currentDueMs;
+
+  const nm = m === 12 ? 1 : m + 1;
+  const ny = m === 12 ? y + 1 : y;
+  const daysInNext = new Date(ny, nm, 0).getDate();
+  const nextDay = Math.min(dueDayOfMonth, daysInNext);
+  return new Date(
+    `${ny}-${String(nm).padStart(2, "0")}-${String(nextDay).padStart(2, "0")}T00:00:00+09:00`,
+  ).getTime();
+}
+
 function buildTokenBuckets(
   subsSnap: FirebaseFirestore.QuerySnapshot,
 ): PushTokenBucket[] {
@@ -74,13 +95,6 @@ function buildTokenBuckets(
   return buckets;
 }
 
-/**
- * 단일 학생에 대한 원비 납부 FCM 알림 전송.
- * - 학부모 push 수신 동의 여부를 먼저 확인합니다.
- * - FCM 전송 후 applyMulticastDeliveryResults로 토큰 상태를 갱신합니다.
- * - 전송 성공 시에만 sentTuitionReminders에 reminderKey를 기록합니다.
- * - tuitionSettings의 빈 문자열 필드는 data payload에서 생략합니다.
- */
 async function sendReminderToParent(
   db: admin.firestore.Firestore,
   params: {
@@ -140,7 +154,6 @@ async function sendReminderToParent(
       ? `${studentName} 학생의 원비 납부일이 7일 남았습니다. (${dueDateLabel})`
       : `${studentName} 학생의 원비 납부일이 내일입니다. (${dueDateLabel})`;
 
-  // 빈 문자열 또는 미설정 필드는 payload에서 생략합니다.
   const dataPayload: Record<string, string> = {
     title: "attn.",
     body,
@@ -202,9 +215,9 @@ async function sendReminderToParent(
  * 처리 흐름:
  * 1. 모든 academies 순회
  * 2. 각 academy의 tuitionSettings 조회 (카카오페이 링크, 계좌 정보)
- * 3. tuitionDueDate가 설정된 students 조회
- * 4. 서울 날짜 기준 D-7 / D-1 해당 학생에게 FCM 알림 발송
- * 5. sentTuitionReminders로 중복 발송 방지
+ * 3. tuitionDueDayOfMonth가 설정된 students 조회
+ * 4. 다음 납부일을 getNextDueDateMs로 계산 → D-7 / D-1 해당 시 FCM 알림 발송
+ * 5. sentTuitionReminders(연월_D숫자 형식)로 중복 발송 방지
  */
 export const sendTuitionReminders = onSchedule(
   {
@@ -229,7 +242,6 @@ export const sendTuitionReminders = onSchedule(
     for (const academyDoc of academiesSnap.docs) {
       const academyId = academyDoc.id;
 
-      // tuitionSettings 조회 — 실패해도 계속 진행 (설정 없이 알림 발송)
       let settings: TuitionSettings = {};
       try {
         const settingsSnap = await db
@@ -245,12 +257,11 @@ export const sendTuitionReminders = onSchedule(
         });
       }
 
-      // tuitionDueDate가 설정된 학생 조회
       let studentsSnap: FirebaseFirestore.QuerySnapshot;
       try {
         studentsSnap = await db
           .collection(`academies/${academyId}/students`)
-          .where("tuitionDueDate", "!=", null)
+          .where("tuitionDueDayOfMonth", ">=", 1)
           .get();
       } catch (e) {
         logger.error("tuitionReminder: students query failed", {
@@ -264,27 +275,31 @@ export const sendTuitionReminders = onSchedule(
         const studentId = studentDoc.id;
         const data = studentDoc.data();
 
-        const tuitionDueDate = data.tuitionDueDate as Timestamp | undefined;
-        if (!tuitionDueDate) continue;
-
-        // 서울 자정 기준으로 정규화한 뒤 D-day 차이를 계산합니다.
-        const dueMidnightMs = seoulMidnightMs(
-          new Date(tuitionDueDate.toMillis()),
-        );
-        const diffDays = Math.round(
-          (dueMidnightMs - todayMidnightMs) / DAY_MS,
-        );
-
-        if (diffDays !== 7 && diffDays !== 1) continue;
+        const dueDayOfMonth =
+          typeof data.tuitionDueDayOfMonth === "number" &&
+          Number.isInteger(data.tuitionDueDayOfMonth) &&
+          data.tuitionDueDayOfMonth >= 1 &&
+          data.tuitionDueDayOfMonth <= 31
+            ? data.tuitionDueDayOfMonth
+            : null;
+        if (!dueDayOfMonth) continue;
 
         const parentUserId =
           typeof data.parentUserId === "string" ? data.parentUserId : "";
         if (!parentUserId) continue;
 
-        const dueDateKey = seoulDateString(new Date(tuitionDueDate.toMillis()));
-        const reminderKey = `${dueDateKey}_D${diffDays}`;
+        const nextDueMs = getNextDueDateMs(dueDayOfMonth, todayMidnightMs);
+        const diffDays = Math.round((nextDueMs - todayMidnightMs) / DAY_MS);
 
-        // 중복 발송 방지
+        if (diffDays !== 7 && diffDays !== 1) continue;
+
+        // dedup key: "YYYY-MM_D7" or "YYYY-MM_D1" — 연월 기준으로 한 달에 한 번만 발송
+        const nextDueStr = new Date(nextDueMs).toLocaleDateString("en-CA", {
+          timeZone: "Asia/Seoul",
+        });
+        const [ny, nm] = nextDueStr.split("-").slice(0, 2);
+        const reminderKey = `${ny}-${nm}_D${diffDays}`;
+
         const sentReminders = Array.isArray(data.sentTuitionReminders)
           ? (data.sentTuitionReminders as string[])
           : [];
@@ -303,9 +318,7 @@ export const sendTuitionReminders = onSchedule(
             ? data.tuitionAmount
             : undefined;
 
-        const dueDateLabel = new Date(
-          tuitionDueDate.toMillis(),
-        ).toLocaleDateString("ko-KR", {
+        const dueDateLabel = new Date(nextDueMs).toLocaleDateString("ko-KR", {
           timeZone: "Asia/Seoul",
           year: "numeric",
           month: "long",
@@ -331,7 +344,6 @@ export const sendTuitionReminders = onSchedule(
             reminderKey,
             e,
           });
-          // 해당 학생 실패 시 에러 로깅 후 다음 학생 처리 계속
         }
       }
     }

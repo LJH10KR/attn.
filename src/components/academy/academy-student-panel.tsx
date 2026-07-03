@@ -44,6 +44,8 @@ export type StudentRowVM = {
   /** 병합된 전담 선생 uid — 구 `assignedTeacherUid` 단일 필드는 읽을 때 여기에 합쳐짐 */
   assignedTeacherUids: string[];
   createdAt?: Timestamp;
+  tuitionDueDayOfMonth?: number | null;
+  tuitionAmount?: number | null;
 };
 
 type StudentRowWithParent = StudentRowVM & { parentName: string; teacherLabel: string };
@@ -87,6 +89,16 @@ export function docToStudentRow(id: string, data: Record<string, unknown>): Stud
       : 0;
   const createdAt = data.createdAt;
   const assignedTeacherUids = mergeAssignedTeacherUidsFromDoc(data);
+
+  const rawDueDayOfMonth = data.tuitionDueDayOfMonth;
+  const tuitionDueDayOfMonth =
+    typeof rawDueDayOfMonth === "number" &&
+    Number.isInteger(rawDueDayOfMonth) &&
+    rawDueDayOfMonth >= 1 &&
+    rawDueDayOfMonth <= 31
+      ? rawDueDayOfMonth
+      : null;
+
   return {
     id,
     parentUserId: typeof data.parentUserId === "string" ? data.parentUserId : "",
@@ -102,6 +114,8 @@ export function docToStudentRow(id: string, data: Record<string, unknown>): Stud
       typeof (createdAt as Timestamp).toMillis === "function"
         ? (createdAt as Timestamp)
         : undefined,
+    tuitionDueDayOfMonth,
+    tuitionAmount: typeof data.tuitionAmount === "number" ? data.tuitionAmount : null,
   };
 }
 
@@ -360,6 +374,202 @@ function DeleteStudentConfirmModal({
   );
 }
 
+function TuitionSettingModal({
+  academyId,
+  student,
+  onClose,
+  onSaved,
+}: {
+  academyId: string;
+  student: StudentRowVM;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [dayInput, setDayInput] = useState(
+    student.tuitionDueDayOfMonth != null ? String(student.tuitionDueDayOfMonth) : "",
+  );
+  const [amountInput, setAmountInput] = useState(
+    student.tuitionAmount != null ? String(student.tuitionAmount) : "",
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useBodyScrollLock(true);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    closeRef.current?.focus();
+  }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onClose]);
+
+  const onSave = async () => {
+    setError(null);
+    const rawDay = dayInput.trim();
+    let dayNum: number | undefined;
+    if (rawDay) {
+      dayNum = Number.parseInt(rawDay, 10);
+      if (!Number.isInteger(dayNum) || dayNum < 1 || dayNum > 31) {
+        setError("납부 기준일은 1~31 사이의 정수로 입력해 주세요.");
+        return;
+      }
+    }
+    const rawAmount = amountInput.trim();
+    let amountNum: number | undefined;
+    if (rawAmount) {
+      amountNum = Number(rawAmount);
+      if (!Number.isFinite(amountNum) || amountNum < 0 || !Number.isInteger(amountNum)) {
+        setError("원비 금액은 0 이상의 정수로 입력해 주세요.");
+        return;
+      }
+    }
+    setBusy(true);
+    try {
+      const db = getFirebaseDb();
+      await updateDoc(doc(db, "academies", academyId, "students", student.id), {
+        tuitionDueDayOfMonth: dayNum !== undefined ? dayNum : deleteField(),
+        tuitionAmount: amountNum !== undefined ? amountNum : deleteField(),
+        updatedAt: serverTimestamp(),
+      });
+      onSaved();
+      onClose();
+    } catch (e) {
+      setError(fsErr(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onClear = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const db = getFirebaseDb();
+      await updateDoc(doc(db, "academies", academyId, "students", student.id), {
+        tuitionDueDayOfMonth: deleteField(),
+        tuitionAmount: deleteField(),
+        sentTuitionReminders: deleteField(),
+        updatedAt: serverTimestamp(),
+      });
+      onSaved();
+      onClose();
+    } catch (e) {
+      setError(fsErr(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[210] flex items-center justify-center bg-black/45 p-4 backdrop-blur-[2px]"
+      role="presentation"
+      onClick={() => {
+        if (!busy) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="tuition-setting-title"
+        className={`${glassCard} w-full max-w-md p-6 shadow-2xl`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="tuition-setting-title" className="text-base font-semibold text-foreground">
+          원비 납부일 설정
+        </h2>
+        <p className="mt-1 text-xs text-neutral-700">
+          대상: <span className="font-medium text-foreground">{student.name}</span>
+        </p>
+        <p className="mt-0.5 text-[11px] leading-relaxed text-neutral-500">
+          설정한 날짜를 기준으로 매달 D-7·D-1에 학부모에게 알림이 발송됩니다.
+        </p>
+        <div className="mt-4 space-y-3">
+          <div>
+            <label
+              className="mb-1 block text-xs font-medium text-neutral-600"
+              htmlFor="ts-day"
+            >
+              납부 기준일 (매월)
+            </label>
+            <div className="flex items-center gap-2">
+              <span className="shrink-0 text-sm text-neutral-600">매월</span>
+              <input
+                id="ts-day"
+                type="number"
+                min={1}
+                max={31}
+                step={1}
+                className={inputClass}
+                placeholder="예: 25"
+                value={dayInput}
+                onChange={(e) => setDayInput(e.target.value)}
+                disabled={busy}
+              />
+              <span className="shrink-0 text-sm text-neutral-600">일</span>
+            </div>
+          </div>
+          <div>
+            <label
+              className="mb-1 block text-xs font-medium text-neutral-600"
+              htmlFor="ts-amount"
+            >
+              원비 금액 (원){" "}
+              <span className="font-normal text-neutral-400">(선택)</span>
+            </label>
+            <input
+              id="ts-amount"
+              type="number"
+              min={0}
+              step={1}
+              className={inputClass}
+              placeholder="예: 300000"
+              value={amountInput}
+              onChange={(e) => setAmountInput(e.target.value)}
+              disabled={busy}
+            />
+          </div>
+        </div>
+        {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
+        <div className="mt-6 flex items-center justify-between gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
+            onClick={() => void onClear()}
+          >
+            {busy ? "처리 중…" : "초기화"}
+          </button>
+          <div className="flex gap-2">
+            <button
+              ref={closeRef}
+              type="button"
+              disabled={busy}
+              className="rounded-2xl border border-neutral-300/80 bg-white/80 px-4 py-2.5 text-sm font-medium text-neutral-800 disabled:opacity-50"
+              onClick={onClose}
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              className="rounded-2xl bg-[#222] dark:bg-neutral-100 px-4 py-2.5 text-sm font-medium text-white dark:text-neutral-950 disabled:opacity-50"
+              onClick={() => void onSave()}
+            >
+              {busy ? "저장 중…" : "저장"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function StudentAssignedTeachersModal({
   academyId,
   student,
@@ -527,6 +737,7 @@ export function AcademyParentStudentList({
   const [formPhone, setFormPhone] = useState("");
   const [formEmergency, setFormEmergency] = useState("");
   const [notifyBusyKey, setNotifyBusyKey] = useState<string | null>(null);
+  const [tuitionModalTarget, setTuitionModalTarget] = useState<StudentRowVM | null>(null);
 
   const loadParentChildren = useCallback(async () => {
     try {
@@ -694,6 +905,15 @@ export function AcademyParentStudentList({
                       ))}
                     </div>
                   ) : null}
+                  {s.tuitionDueDayOfMonth ? (
+                    <div className="mt-0.5 text-[11px] text-amber-800">
+                      납부일 매월{" "}
+                      <span className="font-medium">{s.tuitionDueDayOfMonth}일</span>
+                      {s.tuitionAmount != null ? (
+                        <> · {s.tuitionAmount.toLocaleString("ko-KR")}원</>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="flex shrink-0 gap-1">
                   <button
@@ -711,6 +931,13 @@ export function AcademyParentStudentList({
                     onClick={() => void sendAttendanceNotify(s.id, "absent")}
                   >
                     {notifyBusyKey === `${s.id}-absent` ? "전송 중…" : "결석"}
+                  </button>
+                  <button
+                    type="button"
+                    className={miniBtnClass}
+                    onClick={() => setTuitionModalTarget(s)}
+                  >
+                    원비
                   </button>
                   <button type="button" className={miniBtnClass} onClick={() => openEdit(s)}>
                     수정
@@ -753,6 +980,17 @@ export function AcademyParentStudentList({
           onConfirm={() => void confirmDelete()}
         />
       ) : null}
+      {tuitionModalTarget ? (
+        <TuitionSettingModal
+          academyId={academyId}
+          student={tuitionModalTarget}
+          onClose={() => setTuitionModalTarget(null)}
+          onSaved={() => {
+            setNoticeAction("원비 납부일을 저장했습니다.");
+            refreshParentChildren();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -776,6 +1014,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
   const [formAge, setFormAge] = useState("");
   const [formPhone, setFormPhone] = useState("");
   const [formEmergency, setFormEmergency] = useState("");
+  const [tuitionModalTarget, setTuitionModalTarget] = useState<StudentRowVM | null>(null);
 
   const loadStudentPanelData = useCallback(async () => {
     try {
@@ -1068,6 +1307,15 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                             : "없음"}
                         </span>
                       </span>
+                      {s.tuitionDueDayOfMonth ? (
+                        <span className="mt-0.5 block text-[11px] text-amber-800">
+                          납부일 매월{" "}
+                          <span className="font-medium">{s.tuitionDueDayOfMonth}일</span>
+                          {s.tuitionAmount != null ? (
+                            <> · {s.tuitionAmount.toLocaleString("ko-KR")}원</>
+                          ) : null}
+                        </span>
+                      ) : null}
                     </span>
                     <span
                       className="flex shrink-0 items-center gap-0.5 text-[11px] font-medium text-sky-900/90"
@@ -1078,6 +1326,13 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                     </span>
                   </button>
                   <div className="flex shrink-0 flex-col justify-center gap-1.5 sm:flex-row sm:items-center">
+                    <button
+                      type="button"
+                      className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90"
+                      onClick={() => setTuitionModalTarget(s)}
+                    >
+                      원비
+                    </button>
                     <button
                       type="button"
                       className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90"
@@ -1140,6 +1395,17 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
             if (!delBusy) setDeleteTarget(null);
           }}
           onConfirm={() => void confirmDelete()}
+        />
+      ) : null}
+      {tuitionModalTarget ? (
+        <TuitionSettingModal
+          academyId={academyId}
+          student={tuitionModalTarget}
+          onClose={() => setTuitionModalTarget(null)}
+          onSaved={() => {
+            setNotice("원비 납부일을 저장했습니다.");
+            refreshStudentPanel();
+          }}
         />
       ) : null}
     </div>
