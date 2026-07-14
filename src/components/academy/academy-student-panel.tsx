@@ -8,6 +8,7 @@ import {
   deleteField,
   doc,
   getDocs,
+  increment,
   onSnapshot,
   query,
   runTransaction,
@@ -1012,6 +1013,117 @@ function SessionCompleteConfirmModal({
   );
 }
 
+function ChargeSessionModal({
+  student,
+  onConfirm,
+  onCancel,
+  busy,
+}: {
+  student: StudentRowVM;
+  onConfirm: (n: number) => void;
+  onCancel: () => void;
+  busy: boolean;
+}) {
+  const [input, setInput] = useState("1");
+  useBodyScrollLock(true);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { inputRef.current?.focus(); }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !busy) onCancel(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onCancel]);
+
+  const n = Number.parseInt(input.trim(), 10);
+  const valid = Number.isInteger(n) && n >= 1 && n <= 999;
+  const currentBalance = student.sessionBalance ?? 0;
+  const afterBalance = valid ? currentBalance + n : null;
+  const hasDebt = currentBalance < 0;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[210] flex items-center justify-center bg-black/45 p-4 backdrop-blur-[2px]"
+      role="presentation"
+      onClick={() => { if (!busy) onCancel(); }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className={`${glassCard} w-full max-w-sm p-6 shadow-2xl`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-base font-semibold text-foreground">수업 횟수 충전</h2>
+        <p className="mt-1 text-xs text-neutral-600">
+          대상: <span className="font-medium text-foreground">{student.name}</span>
+        </p>
+        <div className="mt-4 space-y-3">
+          <div className="rounded-2xl bg-white/50 dark:bg-white/[0.06] px-4 py-3 space-y-1.5">
+            <div className="flex justify-between text-sm">
+              <span className="text-neutral-600">현재 잔여 횟수</span>
+              <span className={`font-medium ${currentBalance < 0 ? "text-red-600" : "text-foreground"}`}>
+                {currentBalance}회{currentBalance < 0 ? " (초과 수업 부채)" : ""}
+              </span>
+            </div>
+            {afterBalance !== null ? (
+              <div className="flex justify-between text-sm">
+                <span className="text-neutral-600">충전 후</span>
+                <span className={`font-semibold ${afterBalance < 0 ? "text-red-600" : "text-violet-700"}`}>
+                  {afterBalance}회
+                </span>
+              </div>
+            ) : null}
+          </div>
+          {hasDebt ? (
+            <p className="text-[11px] text-amber-700 rounded-xl bg-amber-50 px-3 py-2">
+              초과 수업 부채가 있습니다. 충전 후 초과 수업 기록이 초기화됩니다.
+            </p>
+          ) : null}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="charge-n">
+              충전 횟수
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                ref={inputRef}
+                id="charge-n"
+                type="number"
+                min={1}
+                max={999}
+                step={1}
+                className={inputClass}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                disabled={busy}
+                onKeyDown={(e) => { if (e.key === "Enter" && valid && !busy) onConfirm(n); }}
+              />
+              <span className="shrink-0 text-sm text-neutral-600">회</span>
+            </div>
+          </div>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            className="rounded-2xl border border-neutral-300/80 bg-white/80 px-4 py-2.5 text-sm font-medium text-neutral-800 disabled:opacity-50"
+            onClick={onCancel}
+          >
+            취소
+          </button>
+          <button
+            type="button"
+            disabled={busy || !valid}
+            className="rounded-2xl bg-violet-700 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+            onClick={() => { if (valid) onConfirm(n); }}
+          >
+            {busy ? "충전 중…" : `${valid ? n : ""}회 충전`}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 /** 학부모 카드 확장 영역 — 해당 학부모의 자녀만 */
 export function AcademyParentStudentList({
   academyId,
@@ -1038,6 +1150,8 @@ export function AcademyParentStudentList({
   const [tuitionModalTarget, setTuitionModalTarget] = useState<StudentRowVM | null>(null);
   const [sessionConfirmTarget, setSessionConfirmTarget] = useState<StudentRowVM | null>(null);
   const [sessionCompleteBusy, setSessionCompleteBusy] = useState(false);
+  const [chargeTarget, setChargeTarget] = useState<StudentRowVM | null>(null);
+  const [chargeBusy, setChargeBusy] = useState(false);
 
   const loadParentChildren = useCallback(async () => {
     try {
@@ -1106,6 +1220,25 @@ export function AcademyParentStudentList({
       setNoticeAction(fsErr(e));
     } finally {
       setSessionCompleteBusy(false);
+    }
+  }, [academyId, refreshParentChildren, setNoticeAction]);
+
+  const chargeSession = useCallback(async (student: StudentRowVM, n: number) => {
+    setChargeBusy(true);
+    try {
+      const db = getFirebaseDb();
+      await updateDoc(doc(db, "academies", academyId, "students", student.id), {
+        sessionBalance: increment(n),
+        extraSessionDates: deleteField(),
+        updatedAt: serverTimestamp(),
+      });
+      setNoticeAction(`${student.name}에게 ${n}회 충전했습니다.`);
+      setChargeTarget(null);
+      refreshParentChildren();
+    } catch (e) {
+      setNoticeAction(fsErr(e));
+    } finally {
+      setChargeBusy(false);
     }
   }, [academyId, refreshParentChildren, setNoticeAction]);
 
@@ -1283,14 +1416,24 @@ export function AcademyParentStudentList({
                     {notifyBusyKey === `${s.id}-absent` ? "전송 중…" : "결석"}
                   </button>
                   {s.weeklySessionCount != null ? (
-                    <button
-                      type="button"
-                      className={`${miniBtnClass} border-violet-300/70 bg-violet-50/70 text-violet-800 hover:bg-violet-100`}
-                      disabled={sessionCompleteBusy}
-                      onClick={() => setSessionConfirmTarget(s)}
-                    >
-                      수업 완료
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className={`${miniBtnClass} border-violet-300/70 bg-violet-50/70 text-violet-800 hover:bg-violet-100`}
+                        disabled={sessionCompleteBusy || chargeBusy}
+                        onClick={() => setSessionConfirmTarget(s)}
+                      >
+                        수업 완료
+                      </button>
+                      <button
+                        type="button"
+                        className={`${miniBtnClass} border-violet-400/60 bg-violet-700 text-white hover:bg-violet-800`}
+                        disabled={sessionCompleteBusy || chargeBusy}
+                        onClick={() => setChargeTarget(s)}
+                      >
+                        충전
+                      </button>
+                    </>
                   ) : null}
                   <button
                     type="button"
@@ -1359,6 +1502,14 @@ export function AcademyParentStudentList({
           onConfirm={() => void recordSessionComplete(sessionConfirmTarget)}
         />
       ) : null}
+      {chargeTarget ? (
+        <ChargeSessionModal
+          student={chargeTarget}
+          busy={chargeBusy}
+          onCancel={() => { if (!chargeBusy) setChargeTarget(null); }}
+          onConfirm={(n) => void chargeSession(chargeTarget, n)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1385,6 +1536,8 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
   const [tuitionModalTarget, setTuitionModalTarget] = useState<StudentRowVM | null>(null);
   const [sessionConfirmTarget, setSessionConfirmTarget] = useState<StudentRowVM | null>(null);
   const [sessionCompleteBusy, setSessionCompleteBusy] = useState(false);
+  const [chargeTarget, setChargeTarget] = useState<StudentRowVM | null>(null);
+  const [chargeBusy, setChargeBusy] = useState(false);
 
   const loadStudentPanelData = useCallback(async () => {
     try {
@@ -1459,6 +1612,25 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
       setNotice(fsErr(e));
     } finally {
       setSessionCompleteBusy(false);
+    }
+  }, [academyId, refreshStudentPanel]);
+
+  const chargeSession = useCallback(async (student: StudentRowVM, n: number) => {
+    setChargeBusy(true);
+    try {
+      const db = getFirebaseDb();
+      await updateDoc(doc(db, "academies", academyId, "students", student.id), {
+        sessionBalance: increment(n),
+        extraSessionDates: deleteField(),
+        updatedAt: serverTimestamp(),
+      });
+      setNotice(`${student.name}에게 ${n}회 충전했습니다.`);
+      setChargeTarget(null);
+      refreshStudentPanel();
+    } catch (e) {
+      setNotice(fsErr(e));
+    } finally {
+      setChargeBusy(false);
     }
   }, [academyId, refreshStudentPanel]);
 
@@ -1747,14 +1919,24 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                   </button>
                   <div className="flex shrink-0 flex-col justify-center gap-1.5 sm:flex-row sm:items-center">
                     {s.weeklySessionCount != null ? (
-                      <button
-                        type="button"
-                        className="rounded-xl border border-violet-300/70 bg-violet-50/70 px-3 py-2 text-[11px] font-medium text-violet-800 shadow-sm hover:bg-violet-100"
-                        disabled={sessionCompleteBusy}
-                        onClick={() => setSessionConfirmTarget(s)}
-                      >
-                        수업 완료
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          className="rounded-xl border border-violet-300/70 bg-violet-50/70 px-3 py-2 text-[11px] font-medium text-violet-800 shadow-sm hover:bg-violet-100"
+                          disabled={sessionCompleteBusy || chargeBusy}
+                          onClick={() => setSessionConfirmTarget(s)}
+                        >
+                          수업 완료
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-xl border border-violet-400/60 bg-violet-700 px-3 py-2 text-[11px] font-medium text-white shadow-sm hover:bg-violet-800"
+                          disabled={sessionCompleteBusy || chargeBusy}
+                          onClick={() => setChargeTarget(s)}
+                        >
+                          충전
+                        </button>
+                      </>
                     ) : null}
                     <button
                       type="button"
@@ -1844,6 +2026,14 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
           busy={sessionCompleteBusy}
           onCancel={() => { if (!sessionCompleteBusy) setSessionConfirmTarget(null); }}
           onConfirm={() => void recordSessionComplete(sessionConfirmTarget)}
+        />
+      ) : null}
+      {chargeTarget ? (
+        <ChargeSessionModal
+          student={chargeTarget}
+          busy={chargeBusy}
+          onCancel={() => { if (!chargeBusy) setChargeTarget(null); }}
+          onConfirm={(n) => void chargeSession(chargeTarget, n)}
         />
       ) : null}
     </div>
