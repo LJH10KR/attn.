@@ -105,7 +105,7 @@ async function sendReminderToParent(
     tuitionAmount: number | undefined;
     dueDateLabel: string;
     reminderKey: string;
-    diffDays: 7 | 1;
+    diffDays: 1 | 0;
     settings: TuitionSettings;
   },
 ): Promise<void> {
@@ -150,9 +150,9 @@ async function sendReminderToParent(
   }
 
   const body =
-    diffDays === 7
-      ? `${studentName} 학생의 원비 납부일이 7일 남았습니다. (${dueDateLabel})`
-      : `${studentName} 학생의 원비 납부일이 내일입니다. (${dueDateLabel})`;
+    diffDays === 1
+      ? `${studentName} 학생의 원비 납부일이 내일입니다. (${dueDateLabel})`
+      : `${studentName} 학생의 원비 납부일입니다. (${dueDateLabel})`;
 
   const dataPayload: Record<string, string> = {
     title: "attn.",
@@ -291,7 +291,7 @@ export const sendTuitionReminders = onSchedule(
         const nextDueMs = getNextDueDateMs(dueDayOfMonth, todayMidnightMs);
         const diffDays = Math.round((nextDueMs - todayMidnightMs) / DAY_MS);
 
-        if (diffDays !== 7 && diffDays !== 1) continue;
+        if (diffDays !== 1 && diffDays !== 0) continue;
 
         // dedup key: "YYYY-MM_D7" or "YYYY-MM_D1" — 연월 기준으로 한 달에 한 번만 발송
         const nextDueStr = new Date(nextDueMs).toLocaleDateString("en-CA", {
@@ -334,7 +334,7 @@ export const sendTuitionReminders = onSchedule(
             tuitionAmount,
             dueDateLabel,
             reminderKey,
-            diffDays: diffDays as 7 | 1,
+            diffDays: diffDays as 1 | 0,
             settings,
           });
         } catch (e) {
