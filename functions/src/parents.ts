@@ -412,6 +412,10 @@ function serializeStudentDocForCallable(
   hasCheckInPin?: boolean;
   tuitionDueDayOfMonth: number | null;
   tuitionAmount: number | null;
+  weeklySessionCount: number | null;
+  pricePerSession: number | null;
+  sessionBalance: number | null;
+  extraSessionDates: string[];
 } {
   const data = d.data();
   const createdAt = data.createdAt as Timestamp | undefined;
@@ -428,6 +432,22 @@ function serializeStudentDocForCallable(
     typeof rawDay === "number" && Number.isInteger(rawDay) && rawDay >= 1 && rawDay <= 31
       ? rawDay
       : null;
+  const rawWeeklyCount = data.weeklySessionCount;
+  const weeklySessionCount =
+    typeof rawWeeklyCount === "number" && Number.isInteger(rawWeeklyCount) && rawWeeklyCount >= 1 && rawWeeklyCount <= 7
+      ? rawWeeklyCount
+      : null;
+  const rawPrice = data.pricePerSession;
+  const pricePerSession =
+    typeof rawPrice === "number" && rawPrice >= 0 ? rawPrice : null;
+  const rawBalance = data.sessionBalance;
+  const sessionBalance =
+    typeof rawBalance === "number" && Number.isInteger(rawBalance) ? rawBalance : null;
+  const rawExtraDates = data.extraSessionDates;
+  const extraSessionDates =
+    Array.isArray(rawExtraDates)
+      ? (rawExtraDates as unknown[]).filter((x): x is string => typeof x === "string")
+      : [];
   return {
     id: d.id,
     parentUserId: typeof data.parentUserId === "string" ? data.parentUserId : "",
@@ -442,6 +462,10 @@ function serializeStudentDocForCallable(
     ...(opts?.hasCheckInPin !== undefined ? { hasCheckInPin: opts.hasCheckInPin } : {}),
     tuitionDueDayOfMonth,
     tuitionAmount: typeof data.tuitionAmount === "number" ? data.tuitionAmount : null,
+    weeklySessionCount,
+    pricePerSession,
+    sessionBalance,
+    extraSessionDates,
   };
 }
 

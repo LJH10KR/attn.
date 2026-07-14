@@ -16,6 +16,7 @@ import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-heade
 import { RoleDashboardBootShell } from "@/components/dashboard/role-dashboard-boot-shell";
 import { StudentListSectionSkeleton } from "@/components/dashboard/student-list-section-skeleton";
 import { ParentCheckInPinCard } from "@/components/parent/parent-check-in-pin-card";
+import { ParentSessionBalanceCard } from "@/components/parent/parent-session-balance-card";
 import { ParentTuitionReminderCard } from "@/components/parent/parent-tuition-reminder-card";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
 import { academyTuitionSettingsPath } from "@/lib/firebase/attn-schema";
@@ -61,12 +62,20 @@ type CallableStudentPayload = {
   hasCheckInPin?: boolean;
   tuitionDueDayOfMonth?: number | null;
   tuitionAmount?: number | null;
+  weeklySessionCount?: number | null;
+  pricePerSession?: number | null;
+  sessionBalance?: number | null;
+  extraSessionDates?: string[];
 };
 
 type ParentStudentRow = StudentRowVM & {
   hasCheckInPin?: boolean;
   tuitionDueDayOfMonth?: number | null;
   tuitionAmount?: number | null;
+  weeklySessionCount?: number | null;
+  pricePerSession?: number | null;
+  sessionBalance?: number | null;
+  extraSessionDates?: string[];
 };
 
 type TuitionSettingsState = {
@@ -250,6 +259,10 @@ export default function ParentDashboardPage() {
             hasCheckInPin: s.hasCheckInPin === true,
             tuitionDueDayOfMonth: s.tuitionDueDayOfMonth ?? null,
             tuitionAmount: typeof s.tuitionAmount === "number" ? s.tuitionAmount : null,
+            weeklySessionCount: typeof s.weeklySessionCount === "number" ? s.weeklySessionCount : null,
+            pricePerSession: typeof s.pricePerSession === "number" ? s.pricePerSession : null,
+            sessionBalance: typeof s.sessionBalance === "number" ? s.sessionBalance : null,
+            extraSessionDates: Array.isArray(s.extraSessionDates) ? s.extraSessionDates : [],
           }));
           list.sort(sortByName);
           setStudents(list);
@@ -358,6 +371,10 @@ export default function ParentDashboardPage() {
         hasCheckInPin: s.hasCheckInPin === true,
         tuitionDueDayOfMonth: s.tuitionDueDayOfMonth ?? null,
         tuitionAmount: typeof s.tuitionAmount === "number" ? s.tuitionAmount : null,
+        weeklySessionCount: typeof s.weeklySessionCount === "number" ? s.weeklySessionCount : null,
+        pricePerSession: typeof s.pricePerSession === "number" ? s.pricePerSession : null,
+        sessionBalance: typeof s.sessionBalance === "number" ? s.sessionBalance : null,
+        extraSessionDates: Array.isArray(s.extraSessionDates) ? s.extraSessionDates : [],
       }));
       list.sort(sortByName);
       setStudents(list);
@@ -556,6 +573,14 @@ export default function ParentDashboardPage() {
                   <ParentTuitionReminderCard
                     tuitionDueDayOfMonth={s.tuitionDueDayOfMonth}
                     tuitionAmount={s.tuitionAmount}
+                    settings={tuitionSettings}
+                  />
+                ) : s.weeklySessionCount != null ? (
+                  <ParentSessionBalanceCard
+                    weeklySessionCount={s.weeklySessionCount}
+                    pricePerSession={s.pricePerSession ?? null}
+                    sessionBalance={s.sessionBalance ?? null}
+                    extraSessionDates={s.extraSessionDates ?? []}
                     settings={tuitionSettings}
                   />
                 ) : null}
