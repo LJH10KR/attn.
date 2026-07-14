@@ -3,12 +3,14 @@
 import { FirebaseError } from "firebase/app";
 import { httpsCallable } from "firebase/functions";
 import {
+  arrayUnion,
   collection,
   deleteField,
   doc,
   getDocs,
   onSnapshot,
   query,
+  runTransaction,
   serverTimestamp,
   Timestamp,
   updateDoc,
@@ -18,11 +20,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   academySessionTuitionSettingsPath,
+  academyStudentSessionLogsPath,
   MAX_ASSIGNED_TEACHERS_PER_STUDENT,
   type TeacherRegistrationStatus,
   type TuitionType,
 } from "@/lib/firebase/attn-schema";
-import { getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { getFirebaseAuth, getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
@@ -921,6 +924,94 @@ function StudentAssignedTeachersModal({
   );
 }
 
+function SessionCompleteConfirmModal({
+  student,
+  onConfirm,
+  onCancel,
+  busy,
+}: {
+  student: StudentRowVM;
+  onConfirm: () => void;
+  onCancel: () => void;
+  busy: boolean;
+}) {
+  useBodyScrollLock(true);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    cancelRef.current?.focus();
+  }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy) onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onCancel]);
+
+  const currentBalance = student.sessionBalance ?? 0;
+  const afterBalance = currentBalance - 1;
+  const isExtra = currentBalance <= 0;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[210] flex items-center justify-center bg-black/45 p-4 backdrop-blur-[2px]"
+      role="presentation"
+      onClick={() => { if (!busy) onCancel(); }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className={`${glassCard} w-full max-w-sm p-6 shadow-2xl`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-base font-semibold text-foreground">수업 완료 기록</h2>
+        <p className="mt-1 text-xs text-neutral-600">
+          대상: <span className="font-medium text-foreground">{student.name}</span>
+        </p>
+        <div className="mt-4 rounded-2xl bg-white/50 dark:bg-white/[0.06] px-4 py-3 space-y-1.5">
+          <div className="flex justify-between text-sm">
+            <span className="text-neutral-600">현재 잔여 횟수</span>
+            <span className={`font-medium ${currentBalance <= 0 ? "text-red-600" : "text-foreground"}`}>
+              {currentBalance}회
+            </span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-neutral-600">수업 완료 후</span>
+            <span className={`font-semibold ${afterBalance < 0 ? "text-red-600" : "text-foreground"}`}>
+              {afterBalance}회
+            </span>
+          </div>
+        </div>
+        {isExtra ? (
+          <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-[11px] text-red-700">
+            잔여 횟수가 부족합니다. 오늘 수업은 <span className="font-semibold">초과 수업</span>으로 기록되며 다음 납부 안내에 포함됩니다.
+          </p>
+        ) : null}
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            ref={cancelRef}
+            type="button"
+            disabled={busy}
+            className="rounded-2xl border border-neutral-300/80 bg-white/80 px-4 py-2.5 text-sm font-medium text-neutral-800 disabled:opacity-50"
+            onClick={onCancel}
+          >
+            취소
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            className="rounded-2xl bg-[#222] dark:bg-neutral-100 px-4 py-2.5 text-sm font-medium text-white dark:text-neutral-950 disabled:opacity-50"
+            onClick={onConfirm}
+          >
+            {busy ? "기록 중…" : "수업 완료"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 /** 학부모 카드 확장 영역 — 해당 학부모의 자녀만 */
 export function AcademyParentStudentList({
   academyId,
@@ -945,6 +1036,8 @@ export function AcademyParentStudentList({
   const [formEmergency, setFormEmergency] = useState("");
   const [notifyBusyKey, setNotifyBusyKey] = useState<string | null>(null);
   const [tuitionModalTarget, setTuitionModalTarget] = useState<StudentRowVM | null>(null);
+  const [sessionConfirmTarget, setSessionConfirmTarget] = useState<StudentRowVM | null>(null);
+  const [sessionCompleteBusy, setSessionCompleteBusy] = useState(false);
 
   const loadParentChildren = useCallback(async () => {
     try {
@@ -980,6 +1073,41 @@ export function AcademyParentStudentList({
     academyId,
     parentUserId,
   ]);
+
+  const recordSessionComplete = useCallback(async (student: StudentRowVM) => {
+    const uid = getFirebaseAuth().currentUser?.uid;
+    if (!uid) { setNoticeAction("로그인 상태를 확인해 주세요."); return; }
+    setSessionCompleteBusy(true);
+    try {
+      const db = getFirebaseDb();
+      await runTransaction(db, async (txn) => {
+        const studentRef = doc(db, "academies", academyId, "students", student.id);
+        const snap = await txn.get(studentRef);
+        if (!snap.exists()) throw new Error("학생 정보를 찾을 수 없습니다.");
+        const data = snap.data();
+        const currentBalance = typeof data.sessionBalance === "number" ? data.sessionBalance : 0;
+        const wasExtra = currentBalance <= 0;
+        const logRef = doc(collection(db, academyStudentSessionLogsPath(academyId, student.id)));
+        txn.set(logRef, { recordedAt: serverTimestamp(), recordedByUid: uid, wasExtra });
+        const updates: Record<string, unknown> = {
+          sessionBalance: currentBalance - 1,
+          updatedAt: serverTimestamp(),
+        };
+        if (wasExtra) {
+          const todayKST = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
+          updates.extraSessionDates = arrayUnion(todayKST);
+        }
+        txn.update(studentRef, updates);
+      });
+      setNoticeAction(`${student.name} 수업 완료 기록이 저장되었습니다.`);
+      setSessionConfirmTarget(null);
+      refreshParentChildren();
+    } catch (e) {
+      setNoticeAction(fsErr(e));
+    } finally {
+      setSessionCompleteBusy(false);
+    }
+  }, [academyId, refreshParentChildren, setNoticeAction]);
 
   const openEdit = (s: StudentRowVM) => {
     setEditErr(null);
@@ -1154,6 +1282,16 @@ export function AcademyParentStudentList({
                   >
                     {notifyBusyKey === `${s.id}-absent` ? "전송 중…" : "결석"}
                   </button>
+                  {s.weeklySessionCount != null ? (
+                    <button
+                      type="button"
+                      className={`${miniBtnClass} border-violet-300/70 bg-violet-50/70 text-violet-800 hover:bg-violet-100`}
+                      disabled={sessionCompleteBusy}
+                      onClick={() => setSessionConfirmTarget(s)}
+                    >
+                      수업 완료
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className={miniBtnClass}
@@ -1213,6 +1351,14 @@ export function AcademyParentStudentList({
           }}
         />
       ) : null}
+      {sessionConfirmTarget ? (
+        <SessionCompleteConfirmModal
+          student={sessionConfirmTarget}
+          busy={sessionCompleteBusy}
+          onCancel={() => { if (!sessionCompleteBusy) setSessionConfirmTarget(null); }}
+          onConfirm={() => void recordSessionComplete(sessionConfirmTarget)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1237,6 +1383,8 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
   const [formPhone, setFormPhone] = useState("");
   const [formEmergency, setFormEmergency] = useState("");
   const [tuitionModalTarget, setTuitionModalTarget] = useState<StudentRowVM | null>(null);
+  const [sessionConfirmTarget, setSessionConfirmTarget] = useState<StudentRowVM | null>(null);
+  const [sessionCompleteBusy, setSessionCompleteBusy] = useState(false);
 
   const loadStudentPanelData = useCallback(async () => {
     try {
@@ -1278,6 +1426,41 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
     loadStudentPanelData,
     [academyId],
   );
+
+  const recordSessionComplete = useCallback(async (student: StudentRowVM) => {
+    const uid = getFirebaseAuth().currentUser?.uid;
+    if (!uid) { setNotice("로그인 상태를 확인해 주세요."); return; }
+    setSessionCompleteBusy(true);
+    try {
+      const db = getFirebaseDb();
+      await runTransaction(db, async (txn) => {
+        const studentRef = doc(db, "academies", academyId, "students", student.id);
+        const snap = await txn.get(studentRef);
+        if (!snap.exists()) throw new Error("학생 정보를 찾을 수 없습니다.");
+        const data = snap.data();
+        const currentBalance = typeof data.sessionBalance === "number" ? data.sessionBalance : 0;
+        const wasExtra = currentBalance <= 0;
+        const logRef = doc(collection(db, academyStudentSessionLogsPath(academyId, student.id)));
+        txn.set(logRef, { recordedAt: serverTimestamp(), recordedByUid: uid, wasExtra });
+        const updates: Record<string, unknown> = {
+          sessionBalance: currentBalance - 1,
+          updatedAt: serverTimestamp(),
+        };
+        if (wasExtra) {
+          const todayKST = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
+          updates.extraSessionDates = arrayUnion(todayKST);
+        }
+        txn.update(studentRef, updates);
+      });
+      setNotice(`${student.name} 수업 완료 기록이 저장되었습니다.`);
+      setSessionConfirmTarget(null);
+      refreshStudentPanel();
+    } catch (e) {
+      setNotice(fsErr(e));
+    } finally {
+      setSessionCompleteBusy(false);
+    }
+  }, [academyId, refreshStudentPanel]);
 
   const teacherNameById = useMemo(() => {
     const m: Record<string, string> = {};
@@ -1563,6 +1746,16 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                     </span>
                   </button>
                   <div className="flex shrink-0 flex-col justify-center gap-1.5 sm:flex-row sm:items-center">
+                    {s.weeklySessionCount != null ? (
+                      <button
+                        type="button"
+                        className="rounded-xl border border-violet-300/70 bg-violet-50/70 px-3 py-2 text-[11px] font-medium text-violet-800 shadow-sm hover:bg-violet-100"
+                        disabled={sessionCompleteBusy}
+                        onClick={() => setSessionConfirmTarget(s)}
+                      >
+                        수업 완료
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90"
@@ -1643,6 +1836,14 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
             setNotice("원비 납부일을 저장했습니다.");
             refreshStudentPanel();
           }}
+        />
+      ) : null}
+      {sessionConfirmTarget ? (
+        <SessionCompleteConfirmModal
+          student={sessionConfirmTarget}
+          busy={sessionCompleteBusy}
+          onCancel={() => { if (!sessionCompleteBusy) setSessionConfirmTarget(null); }}
+          onConfirm={() => void recordSessionComplete(sessionConfirmTarget)}
         />
       ) : null}
     </div>
