@@ -7,6 +7,7 @@ import {
   deleteField,
   doc,
   getDocs,
+  onSnapshot,
   query,
   serverTimestamp,
   Timestamp,
@@ -16,8 +17,10 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  academySessionTuitionSettingsPath,
   MAX_ASSIGNED_TEACHERS_PER_STUDENT,
   type TeacherRegistrationStatus,
+  type TuitionType,
 } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
@@ -44,8 +47,14 @@ export type StudentRowVM = {
   /** 병합된 전담 선생 uid — 구 `assignedTeacherUid` 단일 필드는 읽을 때 여기에 합쳐짐 */
   assignedTeacherUids: string[];
   createdAt?: Timestamp;
+  /** 매월 지정일 납부 */
   tuitionDueDayOfMonth?: number | null;
   tuitionAmount?: number | null;
+  /** 회차 방식 납부 */
+  tuitionType?: TuitionType | null;
+  weeklySessionCount?: number | null;
+  pricePerSession?: number | null;
+  sessionBalance?: number | null;
 };
 
 type StudentRowWithParent = StudentRowVM & { parentName: string; teacherLabel: string };
@@ -99,6 +108,29 @@ export function docToStudentRow(id: string, data: Record<string, unknown>): Stud
       ? rawDueDayOfMonth
       : null;
 
+  const rawTuitionType = data.tuitionType;
+  const tuitionType: TuitionType | null =
+    rawTuitionType === "monthly_fixed" || rawTuitionType === "session_based"
+      ? rawTuitionType
+      : null;
+
+  const rawWeeklyCount = data.weeklySessionCount;
+  const weeklySessionCount =
+    typeof rawWeeklyCount === "number" &&
+    Number.isInteger(rawWeeklyCount) &&
+    rawWeeklyCount >= 1 &&
+    rawWeeklyCount <= 7
+      ? rawWeeklyCount
+      : null;
+
+  const rawPrice = data.pricePerSession;
+  const pricePerSession =
+    typeof rawPrice === "number" && rawPrice >= 0 ? rawPrice : null;
+
+  const rawBalance = data.sessionBalance;
+  const sessionBalance =
+    typeof rawBalance === "number" && Number.isInteger(rawBalance) ? rawBalance : null;
+
   return {
     id,
     parentUserId: typeof data.parentUserId === "string" ? data.parentUserId : "",
@@ -116,6 +148,10 @@ export function docToStudentRow(id: string, data: Record<string, unknown>): Stud
         : undefined,
     tuitionDueDayOfMonth,
     tuitionAmount: typeof data.tuitionAmount === "number" ? data.tuitionAmount : null,
+    tuitionType,
+    weeklySessionCount,
+    pricePerSession,
+    sessionBalance,
   };
 }
 
@@ -385,20 +421,36 @@ function TuitionSettingModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const [academyDefaultType, setAcademyDefaultType] = useState<TuitionType>("monthly_fixed");
+  // null = 학원 기본값 사용, 명시적 값 = 학생별 재정의
+  const [selectedType, setSelectedType] = useState<TuitionType | null>(student.tuitionType ?? null);
+
+  // 매월 지정일 필드
   const [dayInput, setDayInput] = useState(
     student.tuitionDueDayOfMonth != null ? String(student.tuitionDueDayOfMonth) : "",
   );
   const [amountInput, setAmountInput] = useState(
     student.tuitionAmount != null ? String(student.tuitionAmount) : "",
   );
+
+  // 회차 방식 필드
+  const [weeklyCountInput, setWeeklyCountInput] = useState(
+    student.weeklySessionCount != null ? String(student.weeklySessionCount) : "",
+  );
+  const [priceInput, setPriceInput] = useState(
+    student.pricePerSession != null ? String(student.pricePerSession) : "",
+  );
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useBodyScrollLock(true);
   const closeRef = useRef<HTMLButtonElement>(null);
+
   useEffect(() => {
     closeRef.current?.focus();
   }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !busy) onClose();
@@ -407,40 +459,104 @@ function TuitionSettingModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [busy, onClose]);
 
+  // 학원 기본 납부 방식 로드
+  useEffect(() => {
+    const db = getFirebaseDb();
+    return onSnapshot(doc(db, academySessionTuitionSettingsPath(academyId)), (snap) => {
+      if (snap.exists()) {
+        const d = snap.data();
+        setAcademyDefaultType(
+          d.defaultTuitionType === "session_based" ? "session_based" : "monthly_fixed",
+        );
+      }
+    });
+  }, [academyId]);
+
+  const effectiveType = selectedType ?? academyDefaultType;
+
   const onSave = async () => {
     setError(null);
-    const rawDay = dayInput.trim();
-    let dayNum: number | undefined;
-    if (rawDay) {
-      dayNum = Number.parseInt(rawDay, 10);
-      if (!Number.isInteger(dayNum) || dayNum < 1 || dayNum > 31) {
-        setError("납부 기준일은 1~31 사이의 정수로 입력해 주세요.");
+    const db = getFirebaseDb();
+    const ref = doc(db, "academies", academyId, "students", student.id);
+
+    if (effectiveType === "monthly_fixed") {
+      const rawDay = dayInput.trim();
+      let dayNum: number | undefined;
+      if (rawDay) {
+        dayNum = Number.parseInt(rawDay, 10);
+        if (!Number.isInteger(dayNum) || dayNum < 1 || dayNum > 31) {
+          setError("납부 기준일은 1~31 사이의 정수로 입력해 주세요.");
+          return;
+        }
+      }
+      let amountNum: number | undefined;
+      const rawAmount = amountInput.trim();
+      if (rawAmount) {
+        amountNum = Number(rawAmount);
+        if (!Number.isFinite(amountNum) || amountNum < 0 || !Number.isInteger(amountNum)) {
+          setError("원비 금액은 0 이상의 정수로 입력해 주세요.");
+          return;
+        }
+      }
+      setBusy(true);
+      try {
+        await updateDoc(ref, {
+          tuitionType: selectedType !== null ? selectedType : deleteField(),
+          tuitionDueDayOfMonth: dayNum !== undefined ? dayNum : deleteField(),
+          tuitionAmount: amountNum !== undefined ? amountNum : deleteField(),
+          // 회차 방식 필드 초기화
+          weeklySessionCount: deleteField(),
+          pricePerSession: deleteField(),
+          updatedAt: serverTimestamp(),
+        });
+        onSaved();
+        onClose();
+      } catch (e) {
+        setError(fsErr(e));
+      } finally {
+        setBusy(false);
+      }
+    } else {
+      // session_based
+      const rawCount = weeklyCountInput.trim();
+      if (!rawCount) {
+        setError("주당 수업 횟수를 입력해 주세요.");
         return;
       }
-    }
-    const rawAmount = amountInput.trim();
-    let amountNum: number | undefined;
-    if (rawAmount) {
-      amountNum = Number(rawAmount);
-      if (!Number.isFinite(amountNum) || amountNum < 0 || !Number.isInteger(amountNum)) {
-        setError("원비 금액은 0 이상의 정수로 입력해 주세요.");
+      const countNum = Number.parseInt(rawCount, 10);
+      if (!Number.isInteger(countNum) || countNum < 1 || countNum > 7) {
+        setError("주당 수업 횟수는 1~7 사이의 정수로 입력해 주세요.");
         return;
       }
-    }
-    setBusy(true);
-    try {
-      const db = getFirebaseDb();
-      await updateDoc(doc(db, "academies", academyId, "students", student.id), {
-        tuitionDueDayOfMonth: dayNum !== undefined ? dayNum : deleteField(),
-        tuitionAmount: amountNum !== undefined ? amountNum : deleteField(),
-        updatedAt: serverTimestamp(),
-      });
-      onSaved();
-      onClose();
-    } catch (e) {
-      setError(fsErr(e));
-    } finally {
-      setBusy(false);
+      const rawPrice = priceInput.trim();
+      if (!rawPrice) {
+        setError("회차당 수업료를 입력해 주세요.");
+        return;
+      }
+      const priceNum = Number(rawPrice);
+      if (!Number.isFinite(priceNum) || priceNum < 0 || !Number.isInteger(priceNum)) {
+        setError("회차당 수업료는 0 이상의 정수로 입력해 주세요.");
+        return;
+      }
+      setBusy(true);
+      try {
+        await updateDoc(ref, {
+          tuitionType: selectedType !== null ? selectedType : deleteField(),
+          weeklySessionCount: countNum,
+          pricePerSession: priceNum,
+          // 매월 지정일 필드 초기화
+          tuitionDueDayOfMonth: deleteField(),
+          tuitionAmount: deleteField(),
+          sentTuitionReminders: deleteField(),
+          updatedAt: serverTimestamp(),
+        });
+        onSaved();
+        onClose();
+      } catch (e) {
+        setError(fsErr(e));
+      } finally {
+        setBusy(false);
+      }
     }
   };
 
@@ -450,9 +566,14 @@ function TuitionSettingModal({
     try {
       const db = getFirebaseDb();
       await updateDoc(doc(db, "academies", academyId, "students", student.id), {
+        tuitionType: deleteField(),
         tuitionDueDayOfMonth: deleteField(),
         tuitionAmount: deleteField(),
         sentTuitionReminders: deleteField(),
+        weeklySessionCount: deleteField(),
+        pricePerSession: deleteField(),
+        sessionBalance: deleteField(),
+        extraSessionDates: deleteField(),
         updatedAt: serverTimestamp(),
       });
       onSaved();
@@ -463,6 +584,15 @@ function TuitionSettingModal({
       setBusy(false);
     }
   };
+
+  const typeOptions: { value: TuitionType | null; label: string }[] = [
+    {
+      value: null,
+      label: `학원 기본값 (${academyDefaultType === "session_based" ? "회차 방식" : "매월 지정일"})`,
+    },
+    { value: "monthly_fixed", label: "매월 지정일" },
+    { value: "session_based", label: "회차 방식" },
+  ];
 
   return createPortal(
     <div
@@ -476,65 +606,142 @@ function TuitionSettingModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="tuition-setting-title"
-        className={`${glassCard} w-full max-w-md p-6 shadow-2xl`}
+        className={`${glassCard} w-full max-w-md max-h-[min(90dvh,640px)] overflow-y-auto p-6 shadow-2xl`}
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id="tuition-setting-title" className="text-base font-semibold text-foreground">
-          원비 납부일 설정
+          원비 설정
         </h2>
         <p className="mt-1 text-xs text-neutral-700">
           대상: <span className="font-medium text-foreground">{student.name}</span>
         </p>
-        <p className="mt-0.5 text-[11px] leading-relaxed text-neutral-500">
-          설정한 날짜를 기준으로 매달 D-7·D-1에 학부모에게 알림이 발송됩니다.
-        </p>
-        <div className="mt-4 space-y-3">
-          <div>
-            <label
-              className="mb-1 block text-xs font-medium text-neutral-600"
-              htmlFor="ts-day"
-            >
-              납부 기준일 (매월)
-            </label>
-            <div className="flex items-center gap-2">
-              <span className="shrink-0 text-sm text-neutral-600">매월</span>
-              <input
-                id="ts-day"
-                type="number"
-                min={1}
-                max={31}
-                step={1}
-                className={inputClass}
-                placeholder="예: 25"
-                value={dayInput}
-                onChange={(e) => setDayInput(e.target.value)}
+
+        {/* 납부 방식 선택 */}
+        <div className="mt-4">
+          <p className="mb-2 text-xs font-medium text-neutral-600">납부 방식</p>
+          <div className="flex rounded-2xl border border-neutral-300/60 bg-white/30 dark:border-white/10 dark:bg-white/[0.04] overflow-hidden">
+            {typeOptions.map(({ value, label }) => (
+              <button
+                key={String(value)}
+                type="button"
                 disabled={busy}
-              />
-              <span className="shrink-0 text-sm text-neutral-600">일</span>
-            </div>
-          </div>
-          <div>
-            <label
-              className="mb-1 block text-xs font-medium text-neutral-600"
-              htmlFor="ts-amount"
-            >
-              원비 금액 (원){" "}
-              <span className="font-normal text-neutral-400">(선택)</span>
-            </label>
-            <input
-              id="ts-amount"
-              type="number"
-              min={0}
-              step={1}
-              className={inputClass}
-              placeholder="예: 300000"
-              value={amountInput}
-              onChange={(e) => setAmountInput(e.target.value)}
-              disabled={busy}
-            />
+                onClick={() => {
+                  setSelectedType(value);
+                  setError(null);
+                }}
+                className={`flex-1 px-2 py-2 text-[11px] font-medium transition ${
+                  selectedType === value
+                    ? "bg-[#222] text-white dark:bg-neutral-100 dark:text-neutral-950"
+                    : "text-neutral-600 hover:bg-white/50 dark:text-neutral-400"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </div>
+
+        {/* 매월 지정일 필드 */}
+        {effectiveType === "monthly_fixed" ? (
+          <div className="mt-4 space-y-3">
+            <p className="text-[11px] text-neutral-500">
+              설정한 날짜를 기준으로 매달 D-1·D-0에 학부모에게 알림이 발송됩니다.
+            </p>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="ts-day">
+                납부 기준일 (매월)
+              </label>
+              <div className="flex items-center gap-2">
+                <span className="shrink-0 text-sm text-neutral-600">매월</span>
+                <input
+                  id="ts-day"
+                  type="number"
+                  min={1}
+                  max={31}
+                  step={1}
+                  className={inputClass}
+                  placeholder="예: 25"
+                  value={dayInput}
+                  onChange={(e) => setDayInput(e.target.value)}
+                  disabled={busy}
+                />
+                <span className="shrink-0 text-sm text-neutral-600">일</span>
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="ts-amount">
+                원비 금액 (원){" "}
+                <span className="font-normal text-neutral-400">(선택)</span>
+              </label>
+              <input
+                id="ts-amount"
+                type="number"
+                min={0}
+                step={1}
+                className={inputClass}
+                placeholder="예: 300000"
+                value={amountInput}
+                onChange={(e) => setAmountInput(e.target.value)}
+                disabled={busy}
+              />
+            </div>
+          </div>
+        ) : (
+          /* 회차 방식 필드 */
+          <div className="mt-4 space-y-3">
+            <p className="text-[11px] text-neutral-500">
+              잔여 횟수가 주당 횟수 이하로 떨어지면 학부모에게 납부 안내 알림이 발송됩니다.
+            </p>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="ts-weekly">
+                주당 기본 수업 횟수
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  id="ts-weekly"
+                  type="number"
+                  min={1}
+                  max={7}
+                  step={1}
+                  className={inputClass}
+                  placeholder="예: 4"
+                  value={weeklyCountInput}
+                  onChange={(e) => setWeeklyCountInput(e.target.value)}
+                  disabled={busy}
+                />
+                <span className="shrink-0 text-sm text-neutral-600">회 / 주</span>
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="ts-price">
+                회차당 수업료 (원)
+              </label>
+              <input
+                id="ts-price"
+                type="number"
+                min={0}
+                step={1}
+                className={inputClass}
+                placeholder="예: 70000"
+                value={priceInput}
+                onChange={(e) => setPriceInput(e.target.value)}
+                disabled={busy}
+              />
+            </div>
+            {student.sessionBalance != null ? (
+              <div className="rounded-xl bg-white/50 dark:bg-white/[0.06] px-4 py-3">
+                <p className="text-[11px] text-neutral-500">현재 잔여 횟수</p>
+                <p className={`mt-0.5 text-sm font-semibold ${student.sessionBalance < 0 ? "text-red-600" : "text-foreground"}`}>
+                  {student.sessionBalance}회
+                  {student.sessionBalance < 0 ? " (초과 수업)" : ""}
+                </p>
+              </div>
+            ) : null}
+          </div>
+        )}
+
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
+
         <div className="mt-6 flex items-center justify-between gap-2">
           <button
             type="button"
@@ -911,6 +1118,21 @@ export function AcademyParentStudentList({
                       <span className="font-medium">{s.tuitionDueDayOfMonth}일</span>
                       {s.tuitionAmount != null ? (
                         <> · {s.tuitionAmount.toLocaleString("ko-KR")}원</>
+                      ) : null}
+                    </div>
+                  ) : s.weeklySessionCount != null ? (
+                    <div className="mt-0.5 text-[11px] text-violet-800">
+                      회차 방식 · 주{s.weeklySessionCount}회
+                      {s.pricePerSession != null ? (
+                        <> · {s.pricePerSession.toLocaleString("ko-KR")}원/회</>
+                      ) : null}
+                      {s.sessionBalance != null ? (
+                        <span className={s.sessionBalance < 0 ? " · 잔여 " : " · 잔여 "}>
+                          {" "}·{" "}
+                          <span className={s.sessionBalance < 0 ? "font-medium text-red-700" : "font-medium"}>
+                            잔여 {s.sessionBalance}회
+                          </span>
+                        </span>
                       ) : null}
                     </div>
                   ) : null}
@@ -1313,6 +1535,21 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                           <span className="font-medium">{s.tuitionDueDayOfMonth}일</span>
                           {s.tuitionAmount != null ? (
                             <> · {s.tuitionAmount.toLocaleString("ko-KR")}원</>
+                          ) : null}
+                        </span>
+                      ) : s.weeklySessionCount != null ? (
+                        <span className="mt-0.5 block text-[11px] text-violet-800">
+                          회차 방식 · 주{s.weeklySessionCount}회
+                          {s.pricePerSession != null ? (
+                            <> · {s.pricePerSession.toLocaleString("ko-KR")}원/회</>
+                          ) : null}
+                          {s.sessionBalance != null ? (
+                            <>
+                              {" "}·{" "}
+                              <span className={s.sessionBalance < 0 ? "font-medium text-red-700" : "font-medium"}>
+                                잔여 {s.sessionBalance}회
+                              </span>
+                            </>
                           ) : null}
                         </span>
                       ) : null}

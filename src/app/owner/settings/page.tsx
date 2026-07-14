@@ -11,6 +11,7 @@ import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-heade
 import { OwnerPasswordSettingsCard } from "@/components/account/password-settings-cards";
 import { OwnerGoogleLinkCard } from "@/components/owner/owner-google-link-card";
 import { OwnerTuitionSettingsCard } from "@/components/owner/owner-tuition-settings-card";
+import { OwnerSessionTuitionSettingsCard } from "@/components/owner/owner-session-tuition-settings-card";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { COLLECTIONS } from "@/lib/firebase/attn-schema";
 import { getFirebaseAuth, getFirebaseDb } from "@/lib/firebase/client-app";
@@ -189,6 +190,14 @@ export default function OwnerSettingsPage() {
         <div className="mt-5 space-y-4">
           <OwnerPasswordSettingsCard disabled={logoutBusy} />
           <OwnerGoogleLinkCard />
+          {academies.map((a) => (
+            <OwnerSessionTuitionSettingsCard
+              key={`session-${a.id}`}
+              academyId={a.id}
+              academyName={a.name}
+              disabled={logoutBusy}
+            />
+          ))}
           {academies.map((a) => (
             <OwnerTuitionSettingsCard
               key={a.id}

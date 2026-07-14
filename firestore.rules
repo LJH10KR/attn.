@@ -231,6 +231,15 @@ service cloud.firestore {
           || isAcademyOwner(academyId);
       }
 
+      /** 회차 방식 원비 기본 설정 — 오너만 쓰기 */
+      match /meta/sessionTuitionSettings {
+        allow read: if isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyPortalSession(academyId);
+        allow write: if isAdmin()
+          || isAcademyOwner(academyId);
+      }
+
       match /students/{studentId} {
         /**
          * list 쿼리 검증 시 OR 전체가 분석되므로, parentUserId 등 필드가 없을 때 직접 접근하면
@@ -271,6 +280,20 @@ service cloud.firestore {
 
         match /serverSecrets/{secretId} {
           allow read, write: if false;
+        }
+
+        /** 수업 완료 기록 로그 — 오너·포털·활성 선생님이 생성, 삭제는 오너만 */
+        match /sessionLogs/{logId} {
+          allow read: if isAdmin()
+            || isAcademyOwner(academyId)
+            || isAcademyPortalSession(academyId)
+            || isAcademyTeacherActive(academyId);
+          allow create: if isAdmin()
+            || isAcademyOwner(academyId)
+            || isAcademyPortalSession(academyId)
+            || isAcademyTeacherActive(academyId);
+          allow update, delete: if isAdmin()
+            || isAcademyOwner(academyId);
         }
       }
     }

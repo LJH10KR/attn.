@@ -239,6 +239,9 @@ export type AcademyParent = {
 /** 학생당 전담 선생 상한 — Firestore 규칙과 클라이언트가 동일 값 사용 */
 export const MAX_ASSIGNED_TEACHERS_PER_STUDENT = 20;
 
+/** 원비 납부 방식 */
+export type TuitionType = "monthly_fixed" | "session_based";
+
 /** 학생 — 부모와 연결, Auth 없을 수 있음 */
 export type AcademyStudent = {
   attnId?: string;
@@ -258,9 +261,20 @@ export type AcademyStudent = {
    * 전담 저장 시 제거(`deleteField`)합니다.
    */
   assignedTeacherUid?: string | null;
+  /** 매월 지정일 납부 — tuitionType이 "monthly_fixed"이거나 미설정(학원 기본값) 시 사용 */
   tuitionDueDayOfMonth?: number;
   tuitionAmount?: number;
   sentTuitionReminders?: string[];
+  /** 학생별 납부 방식 재정의 — 미설정 시 학원 defaultTuitionType 상속 */
+  tuitionType?: TuitionType;
+  /** 회차 방식 — 주당 기본 수업 횟수 (1~7) */
+  weeklySessionCount?: number;
+  /** 회차당 수업료 (원) */
+  pricePerSession?: number;
+  /** 잔여 선결제 횟수 — 음수는 초과 수업 부채 */
+  sessionBalance?: number;
+  /** 초과 수업이 발생한 날짜 목록 (YYYY-MM-DD) — 충전 시 초기화 */
+  extraSessionDates?: string[];
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 };
@@ -281,4 +295,28 @@ export type AcademyTuitionSettingsDoc = {
 
 export function academyTuitionSettingsPath(academyId: string): string {
   return `${academyPath(academyId)}/meta/${ACADEMY_TUITION_SETTINGS_DOC_ID}`;
+}
+
+/** `academies/{academyId}/meta/sessionTuitionSettings` — 회차 방식 기본 설정 */
+export const ACADEMY_SESSION_TUITION_SETTINGS_DOC_ID = "sessionTuitionSettings" as const;
+
+export type AcademySessionTuitionSettingsDoc = {
+  defaultTuitionType: TuitionType;
+  updatedAt?: Timestamp;
+};
+
+export function academySessionTuitionSettingsPath(academyId: string): string {
+  return `${academyPath(academyId)}/meta/${ACADEMY_SESSION_TUITION_SETTINGS_DOC_ID}`;
+}
+
+/** `academies/{academyId}/students/{studentId}/sessionLogs/{logId}` */
+export type SessionLogDoc = {
+  recordedAt: Timestamp;
+  recordedByUid: string;
+  /** 기록 시점에 sessionBalance가 0 이하였던 경우 true (초과 수업) */
+  wasExtra: boolean;
+};
+
+export function academyStudentSessionLogsPath(academyId: string, studentId: string): string {
+  return `${academyStudentsPath(academyId)}/${studentId}/sessionLogs`;
 }
