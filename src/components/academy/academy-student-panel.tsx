@@ -1230,6 +1230,7 @@ export function AcademyParentStudentList({
       await updateDoc(doc(db, "academies", academyId, "students", student.id), {
         sessionBalance: increment(n),
         extraSessionDates: deleteField(),
+        sentSessionPaymentReminder: deleteField(),
         updatedAt: serverTimestamp(),
       });
       setNoticeAction(`${student.name}에게 ${n}회 충전했습니다.`);
@@ -1622,6 +1623,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
       await updateDoc(doc(db, "academies", academyId, "students", student.id), {
         sessionBalance: increment(n),
         extraSessionDates: deleteField(),
+        sentSessionPaymentReminder: deleteField(),
         updatedAt: serverTimestamp(),
       });
       setNotice(`${student.name}에게 ${n}회 충전했습니다.`);

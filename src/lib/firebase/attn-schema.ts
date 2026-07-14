@@ -275,6 +275,8 @@ export type AcademyStudent = {
   sessionBalance?: number;
   /** 초과 수업이 발생한 날짜 목록 (YYYY-MM-DD) — 충전 시 초기화 */
   extraSessionDates?: string[];
+  /** 회차 납부 안내 FCM 발송 여부 — 충전 시 초기화 */
+  sentSessionPaymentReminder?: boolean;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 };
