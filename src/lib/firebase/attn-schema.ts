@@ -277,6 +277,10 @@ export type AcademyStudent = {
   extraSessionDates?: string[];
   /** 회차 납부 안내 FCM 발송 여부 — 충전 시 초기화 */
   sentSessionPaymentReminder?: boolean;
+  /** 학부모가 납부 안내 알림을 확인한 시각 — 충전 시 초기화 */
+  tuitionReminderConfirmedAt?: Timestamp;
+  /** 납부 알림을 확인한 학부모 uid */
+  tuitionReminderConfirmedByUid?: string;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 };

@@ -1,7 +1,7 @@
 "use client";
 
 import { httpsCallable } from "firebase/functions";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { KioskHangulKeyboard } from "@/components/academy/kiosk-hangul-keyboard";
 import { KioskNumericKeypad } from "@/components/academy/kiosk-numeric-keypad";
 import { PinPadModal } from "@/components/academy/pin-pad-modal";
@@ -49,6 +49,70 @@ function callableMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
+const CHECK_IN_AUTO_CLOSE_SEC = 5;
+
+function CheckInSuccessModal({
+  student,
+  onClose,
+}: {
+  student: KioskStudentRow;
+  onClose: () => void;
+}) {
+  const [remaining, setRemaining] = useState(CHECK_IN_AUTO_CLOSE_SEC);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setRemaining((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          onCloseRef.current();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const nowStr = new Date().toLocaleTimeString("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Seoul",
+  });
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-live="assertive"
+    >
+      <div className="w-full max-w-sm rounded-3xl bg-white dark:bg-neutral-900 p-8 shadow-2xl text-center">
+        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path d="M5 13l4 4L19 7" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+        <p className="text-xl font-bold text-foreground">출석 완료</p>
+        <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+          <span className="font-semibold text-foreground">{student.name}</span> 학생
+        </p>
+        <p className="mt-1 text-xs text-neutral-400">{nowStr} 출석 처리됨</p>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-8 w-full rounded-2xl bg-[#222] dark:bg-neutral-100 py-3.5 text-sm font-semibold text-white dark:text-neutral-950"
+        >
+          확인 ({remaining})
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const MODE_OPTIONS: { id: SearchMode; label: string }[] = [
   { id: "phone", label: "전화번호" },
   { id: "name", label: "이름" },
@@ -66,7 +130,7 @@ export function AcademyKioskPanel({
   const [pinStudent, setPinStudent] = useState<KioskStudentRow | null>(null);
   const [pinError, setPinError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [checkInSuccessStudent, setCheckInSuccessStudent] = useState<KioskStudentRow | null>(null);
 
   const trimmedQuery = query.trim();
   const showResults = trimmedQuery.length > 0;
@@ -117,16 +181,18 @@ export function AcademyKioskPanel({
           studentId: student.studentId,
           ...(checkInPin ? { checkInPin } : {}),
         });
-        setToast(`${student.name} 학생 출석이 완료되었습니다.`);
         setConfirmStudent(null);
         setPinStudent(null);
+        setQuery("");
+        setCheckInSuccessStudent(student);
         onCheckInDoneAction?.();
       } catch (err) {
         const msg = callableMessage(err, "출석 처리에 실패했습니다.");
         if (pinStudent) {
           setPinError(msg);
         } else {
-          setToast(msg);
+          setCheckInSuccessStudent(null);
+          alert(msg);
         }
       } finally {
         setBusy(false);
@@ -241,10 +307,11 @@ export function AcademyKioskPanel({
         ) : null}
       </div>
 
-      {toast ? (
-        <p className="mb-3 rounded-xl bg-neutral-100 px-3 py-2 text-center text-sm text-neutral-800 dark:bg-white/10 dark:text-neutral-200">
-          {toast}
-        </p>
+      {checkInSuccessStudent ? (
+        <CheckInSuccessModal
+          student={checkInSuccessStudent}
+          onClose={() => setCheckInSuccessStudent(null)}
+        />
       ) : null}
 
       {showResults ? (

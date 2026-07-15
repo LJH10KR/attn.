@@ -259,7 +259,7 @@ export async function resyncParentPushTokenAfterResume(options: ParentPushResync
 }
 
 export function subscribeForegroundMessages(
-  onPayload: (body: string) => void,
+  onPayload: (body: string, data: Record<string, string>) => void,
 ): () => void {
   let cancelled = false;
   let unsub: (() => void) | undefined;
@@ -274,7 +274,7 @@ export function subscribeForegroundMessages(
       setAppIconBadgeFromPushData(d);
       if (d.type !== "attendance" && d.type !== "tuition_reminder" && d.type !== "session_payment_reminder") return;
       const body = typeof d.body === "string" ? d.body : "";
-      if (body) onPayload(body);
+      if (body) onPayload(body, d);
     });
   })();
   return () => {

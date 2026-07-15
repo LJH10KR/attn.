@@ -61,6 +61,8 @@ export type StudentRowVM = {
   weeklySessionCount?: number | null;
   pricePerSession?: number | null;
   sessionBalance?: number | null;
+  /** 학부모가 납부 안내 알림을 확인한 시각 */
+  tuitionReminderConfirmedAt?: Timestamp | null;
 };
 
 type StudentRowWithParent = StudentRowVM & { parentName: string; teacherLabel: string };
@@ -137,6 +139,15 @@ export function docToStudentRow(id: string, data: Record<string, unknown>): Stud
   const sessionBalance =
     typeof rawBalance === "number" && Number.isInteger(rawBalance) ? rawBalance : null;
 
+  const rawConfirmedAt = data.tuitionReminderConfirmedAt;
+  const tuitionReminderConfirmedAt =
+    rawConfirmedAt &&
+    typeof rawConfirmedAt === "object" &&
+    "toMillis" in rawConfirmedAt &&
+    typeof (rawConfirmedAt as Timestamp).toMillis === "function"
+      ? (rawConfirmedAt as Timestamp)
+      : null;
+
   return {
     id,
     parentUserId: typeof data.parentUserId === "string" ? data.parentUserId : "",
@@ -158,6 +169,7 @@ export function docToStudentRow(id: string, data: Record<string, unknown>): Stud
     weeklySessionCount,
     pricePerSession,
     sessionBalance,
+    tuitionReminderConfirmedAt,
   };
 }
 
@@ -553,6 +565,8 @@ function DefaultTuitionTypeModal({
               updates.sessionBalance = deleteField();
               updates.extraSessionDates = deleteField();
               updates.sentSessionPaymentReminder = deleteField();
+              updates.tuitionReminderConfirmedAt = deleteField();
+              updates.tuitionReminderConfirmedByUid = deleteField();
             } else {
               if (result.weeklyCount != null) updates.weeklySessionCount = result.weeklyCount;
               if (result.priceNum != null) updates.pricePerSession = result.priceNum;
@@ -1551,6 +1565,8 @@ export function AcademyParentStudentList({
         sessionBalance: increment(n),
         extraSessionDates: deleteField(),
         sentSessionPaymentReminder: deleteField(),
+        tuitionReminderConfirmedAt: deleteField(),
+        tuitionReminderConfirmedByUid: deleteField(),
         updatedAt: serverTimestamp(),
       });
       setNoticeAction(`${student.name}에게 ${n}회 충전했습니다.`);
@@ -1716,6 +1732,11 @@ export function AcademyParentStudentList({
                           </span>
                         </span>
                       ) : null}
+                    </div>
+                  ) : null}
+                  {s.tuitionReminderConfirmedAt ? (
+                    <div className="mt-0.5 text-[11px] text-emerald-700 font-medium">
+                      ✓ 학부모 납부 알림 확인 완료
                     </div>
                   ) : null}
                 </div>
@@ -1945,6 +1966,8 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
         sessionBalance: increment(n),
         extraSessionDates: deleteField(),
         sentSessionPaymentReminder: deleteField(),
+        tuitionReminderConfirmedAt: deleteField(),
+        tuitionReminderConfirmedByUid: deleteField(),
         updatedAt: serverTimestamp(),
       });
       setNotice(`${student.name}에게 ${n}회 충전했습니다.`);
@@ -2238,6 +2261,11 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                               </span>
                             </>
                           ) : null}
+                        </span>
+                      ) : null}
+                      {s.tuitionReminderConfirmedAt ? (
+                        <span className="mt-0.5 block text-[11px] font-medium text-emerald-700">
+                          ✓ 학부모 납부 알림 확인 완료
                         </span>
                       ) : null}
                     </span>
