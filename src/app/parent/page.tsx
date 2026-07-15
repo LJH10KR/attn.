@@ -18,6 +18,10 @@ import { StudentListSectionSkeleton } from "@/components/dashboard/student-list-
 import { ParentCheckInPinCard } from "@/components/parent/parent-check-in-pin-card";
 import { ParentSessionBalanceCard } from "@/components/parent/parent-session-balance-card";
 import { ParentTuitionReminderCard } from "@/components/parent/parent-tuition-reminder-card";
+import {
+  PaymentReminderModal,
+  type PaymentReminderPayload,
+} from "@/components/parent/payment-reminder-modal";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
 import { academyTuitionSettingsPath } from "@/lib/firebase/attn-schema";
 import {
@@ -66,6 +70,7 @@ type CallableStudentPayload = {
   pricePerSession?: number | null;
   sessionBalance?: number | null;
   extraSessionDates?: string[];
+  hasPendingPaymentReminder?: boolean;
 };
 
 type ParentStudentRow = StudentRowVM & {
@@ -76,6 +81,7 @@ type ParentStudentRow = StudentRowVM & {
   pricePerSession?: number | null;
   sessionBalance?: number | null;
   extraSessionDates?: string[];
+  hasPendingPaymentReminder?: boolean;
 };
 
 type TuitionSettingsState = {
@@ -140,6 +146,8 @@ export default function ParentDashboardPage() {
   >([]);
   const [tuitionSettings, setTuitionSettings] =
     useState<TuitionSettingsState>(null);
+  const [reminderPayload, setReminderPayload] = useState<PaymentReminderPayload | null>(null);
+  const shownReminderForRef = useRef<Set<string>>(new Set());
 
   const {
     items: parentBellItems,
@@ -263,6 +271,7 @@ export default function ParentDashboardPage() {
             pricePerSession: typeof s.pricePerSession === "number" ? s.pricePerSession : null,
             sessionBalance: typeof s.sessionBalance === "number" ? s.sessionBalance : null,
             extraSessionDates: Array.isArray(s.extraSessionDates) ? s.extraSessionDates : [],
+            hasPendingPaymentReminder: s.hasPendingPaymentReminder === true,
           }));
           list.sort(sortByName);
           setStudents(list);
@@ -341,6 +350,49 @@ export default function ParentDashboardPage() {
     }
     setIosAutoModalOpen(false);
   }, []);
+
+  // 페이지 진입 시 미확인 납부 안내가 있는 학생을 찾아 모달 자동 오픈
+  useEffect(() => {
+    if (listInitialLoading || !academyId) return;
+    const candidate = studentsWithPinMeta.find(
+      (s) => s.hasPendingPaymentReminder && !shownReminderForRef.current.has(s.id),
+    );
+    if (!candidate || candidate.weeklySessionCount == null) return;
+
+    shownReminderForRef.current.add(candidate.id);
+
+    const wc = candidate.weeklySessionCount;
+    const balance = candidate.sessionBalance ?? 0;
+    const extraCount = candidate.extraSessionDates?.length ?? 0;
+    const monthlySessionCount = wc * 4;
+    let body: string;
+    if (balance <= 0) {
+      body = `${candidate.name} 학생의 수업 잔여 횟수가 없습니다`;
+      if (extraCount > 0) body += ` (초과 ${extraCount}회 발생)`;
+      body += `. 다음 4주 수업(${monthlySessionCount}회)을 위해 납부를 부탁드립니다.`;
+    } else {
+      body = `${candidate.name} 학생의 잔여 수업이 ${balance}회 남았습니다`;
+      body += `. 다음 4주 수업(${monthlySessionCount}회)을 위해 납부를 부탁드립니다.`;
+    }
+    const debtSessions = Math.max(0, -balance);
+    const totalSessions = monthlySessionCount + debtSessions;
+    const suggestedAmount =
+      candidate.pricePerSession != null
+        ? String(totalSessions * candidate.pricePerSession)
+        : undefined;
+
+    setReminderPayload({
+      body,
+      studentName: candidate.name,
+      studentId: candidate.id,
+      academyId,
+      suggestedAmount,
+      kakaoPayLink: tuitionSettings?.kakaoPayLink,
+      bankName: tuitionSettings?.bankName,
+      accountNumber: tuitionSettings?.accountNumber,
+      accountHolder: tuitionSettings?.accountHolder,
+    });
+  }, [studentsWithPinMeta, listInitialLoading, academyId, tuitionSettings]);
 
   const refreshChildrenList = useCallback(async () => {
     const auth = getFirebaseAuth();
@@ -622,6 +674,12 @@ export default function ParentDashboardPage() {
 
       <DashboardBottomScrim />
       {logoutModal}
+      {reminderPayload ? (
+        <PaymentReminderModal
+          payload={reminderPayload}
+          onConfirmAction={() => setReminderPayload(null)}
+        />
+      ) : null}
     </div>
   );
 }

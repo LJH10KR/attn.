@@ -416,6 +416,7 @@ function serializeStudentDocForCallable(
   pricePerSession: number | null;
   sessionBalance: number | null;
   extraSessionDates: string[];
+  hasPendingPaymentReminder: boolean;
 } {
   const data = d.data();
   const createdAt = data.createdAt as Timestamp | undefined;
@@ -466,6 +467,8 @@ function serializeStudentDocForCallable(
     pricePerSession,
     sessionBalance,
     extraSessionDates,
+    hasPendingPaymentReminder:
+      data.sentSessionPaymentReminder === true && !data.tuitionReminderConfirmedAt,
   };
 }
 
