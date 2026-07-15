@@ -109,22 +109,23 @@ async function sendSessionPaymentReminderToParent(
     return;
   }
 
-  // 납부 안내 메시지 구성
+  // 납부 안내 메시지 구성 (월 4주 단위 정산)
   const extraCount = extraSessionDates.length;
+  const monthlySessionCount = weeklySessionCount * 4;
   let body: string;
   if (sessionBalance <= 0) {
     body = `${studentName} 학생의 수업 잔여 횟수가 없습니다`;
     if (extraCount > 0) body += ` (초과 ${extraCount}회 발생)`;
-    body += `. 다음 주 수업(${weeklySessionCount}회)을 위해 납부를 부탁드립니다.`;
+    body += `. 다음 4주 수업(${monthlySessionCount}회)을 위해 납부를 부탁드립니다.`;
   } else {
     body = `${studentName} 학생의 잔여 수업이 ${sessionBalance}회 남았습니다`;
     if (extraCount > 0) body += ` (초과 ${extraCount}회 포함)`;
-    body += `. 다음 주 수업(${weeklySessionCount}회)을 위해 납부를 부탁드립니다.`;
+    body += `. 다음 4주 수업(${monthlySessionCount}회)을 위해 납부를 부탁드립니다.`;
   }
 
-  // 권장 납부 금액: 다음 주 수업료 + 초과 수업 부채
+  // 권장 납부 금액: 다음 4주 수업료(월 단위) + 초과 수업 부채
   const debtSessions = Math.max(0, -sessionBalance);
-  const totalSessions = weeklySessionCount + debtSessions;
+  const totalSessions = monthlySessionCount + debtSessions;
   const suggestedAmount =
     pricePerSession !== undefined ? totalSessions * pricePerSession : undefined;
 

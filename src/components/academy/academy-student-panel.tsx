@@ -13,6 +13,7 @@ import {
   query,
   runTransaction,
   serverTimestamp,
+  setDoc,
   Timestamp,
   updateDoc,
   where,
@@ -406,6 +407,161 @@ function DeleteStudentConfirmModal({
             onClick={onConfirm}
           >
             {busy ? "삭제 중…" : "삭제"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function DefaultTuitionTypeModal({
+  academyId,
+  onClose,
+}: {
+  academyId: string;
+  onClose: () => void;
+}) {
+  const [type, setType] = useState<TuitionType>("monthly_fixed");
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useBodyScrollLock(true);
+
+  useEffect(() => {
+    const db = getFirebaseDb();
+    return onSnapshot(
+      doc(db, academySessionTuitionSettingsPath(academyId)),
+      (snap) => {
+        if (snap.exists()) {
+          const d = snap.data();
+          setType(d.defaultTuitionType === "session_based" ? "session_based" : "monthly_fixed");
+        }
+        setLoaded(true);
+      },
+      () => setLoaded(true),
+    );
+  }, [academyId]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onClose]);
+
+  const onSave = async () => {
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const db = getFirebaseDb();
+      await setDoc(
+        doc(db, academySessionTuitionSettingsPath(academyId)),
+        { defaultTuitionType: type, updatedAt: serverTimestamp() },
+        { merge: true },
+      );
+      setSaved(true);
+    } catch (e) {
+      setError(fsErr(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const formDisabled = !loaded || busy;
+
+  const OPTIONS: { value: TuitionType; label: string; desc: string }[] = [
+    {
+      value: "monthly_fixed",
+      label: "매월 지정일 납부",
+      desc: "매월 특정 날짜에 고정 금액을 납부합니다.",
+    },
+    {
+      value: "session_based",
+      label: "회차 방식 납부",
+      desc: "4주(1달) 분 수업료를 기준으로 잔여 횟수가 1주분 이하가 되면 납부 안내를 발송합니다.",
+    },
+  ];
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[999] flex items-end justify-center bg-black/50 sm:items-center"
+      onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}
+    >
+      <div className="w-full max-w-sm rounded-t-3xl sm:rounded-3xl bg-background p-5 space-y-4 shadow-xl">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-semibold text-foreground">기본 원비 납부 방식</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="rounded-full p-1 text-neutral-400 hover:text-neutral-700 disabled:opacity-50"
+            aria-label="닫기"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
+
+        <p className="text-[11px] leading-relaxed text-neutral-500">
+          학생 개별 원비 설정에서 방식을 지정하지 않으면 이 기본값이 사용됩니다.
+        </p>
+
+        <div className="space-y-2">
+          {OPTIONS.map(({ value, label, desc }) => (
+            <label
+              key={value}
+              className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 transition ${
+                type === value
+                  ? "border-[#4a90e2]/60 bg-[#4a90e2]/[0.06] dark:bg-[#4a90e2]/[0.12]"
+                  : "border-neutral-300/60 bg-white/40 dark:border-white/10 dark:bg-white/[0.04]"
+              } ${formDisabled ? "pointer-events-none opacity-60" : ""}`}
+            >
+              <input
+                type="radio"
+                name="default-tuition-type"
+                value={value}
+                checked={type === value}
+                onChange={() => { setSaved(false); setType(value); }}
+                disabled={formDisabled}
+                className="mt-0.5 accent-[#4a90e2]"
+              />
+              <div>
+                <p className="text-sm font-medium text-foreground">{label}</p>
+                <p className="mt-0.5 text-[11px] text-neutral-500">{desc}</p>
+              </div>
+            </label>
+          ))}
+        </div>
+
+        {error ? (
+          <p className="text-sm text-red-700" role="alert">{error}</p>
+        ) : null}
+        {saved ? (
+          <p className="text-sm text-emerald-800">기본 납부 방식이 저장되었습니다.</p>
+        ) : null}
+
+        <div className="flex gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="flex-1 rounded-2xl border border-neutral-300/70 bg-white/50 py-2.5 text-sm font-medium text-foreground disabled:opacity-60"
+          >
+            닫기
+          </button>
+          <button
+            type="button"
+            onClick={() => void onSave()}
+            disabled={formDisabled}
+            className="flex-1 rounded-2xl bg-[#222] dark:bg-neutral-100 py-2.5 text-sm font-medium text-white dark:text-neutral-950 disabled:opacity-60"
+          >
+            {busy ? "저장 중…" : "저장"}
           </button>
         </div>
       </div>
@@ -1539,6 +1695,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
   const [sessionCompleteBusy, setSessionCompleteBusy] = useState(false);
   const [chargeTarget, setChargeTarget] = useState<StudentRowVM | null>(null);
   const [chargeBusy, setChargeBusy] = useState(false);
+  const [defaultTuitionModalOpen, setDefaultTuitionModalOpen] = useState(false);
 
   const loadStudentPanelData = useCallback(async () => {
     try {
@@ -1827,7 +1984,16 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
 
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold text-foreground">학생 관리</h2>
-        <AcademyPanelRefreshButton busy={listBusy} onRefreshAction={refreshStudentPanel} />
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setDefaultTuitionModalOpen(true)}
+            className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-1.5 text-[11px] font-medium text-neutral-700 hover:bg-white/90"
+          >
+            기본 원비 설정
+          </button>
+          <AcademyPanelRefreshButton busy={listBusy} onRefreshAction={refreshStudentPanel} />
+        </div>
       </div>
 
       <div className="flex gap-2">
@@ -2036,6 +2202,12 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
           busy={chargeBusy}
           onCancel={() => { if (!chargeBusy) setChargeTarget(null); }}
           onConfirm={(n) => void chargeSession(chargeTarget, n)}
+        />
+      ) : null}
+      {defaultTuitionModalOpen ? (
+        <DefaultTuitionTypeModal
+          academyId={academyId}
+          onClose={() => setDefaultTuitionModalOpen(false)}
         />
       ) : null}
     </div>

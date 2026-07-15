@@ -31,6 +31,7 @@ export function ParentSessionBalanceCard({
   const isNegative = balance < 0;
   const extraCount = extraSessionDates.length;
   const debtSessions = Math.max(0, -balance);
+  const monthlySessionCount = weeklySessionCount * 4;
 
   let statusLabel: string;
   let statusColorClass: string;
@@ -56,7 +57,7 @@ export function ParentSessionBalanceCard({
 
   const suggestedAmount =
     pricePerSession != null
-      ? (weeklySessionCount + debtSessions) * pricePerSession
+      ? (monthlySessionCount + debtSessions) * pricePerSession
       : null;
 
   const hasBankInfo = settings?.bankName || settings?.accountNumber || settings?.accountHolder;
@@ -122,8 +123,8 @@ export function ParentSessionBalanceCard({
             <div className="rounded-xl bg-white/60 dark:bg-white/10 px-3 py-2.5">
               <p className="text-[10px] text-neutral-500 dark:text-neutral-400">
                 {isNegative
-                  ? `다음 주 수업료(${weeklySessionCount}회) + 초과 수업료(${debtSessions}회)`
-                  : `다음 주 수업료 (${weeklySessionCount}회)`}
+                  ? `다음 4주 수업료(${monthlySessionCount}회) + 초과 수업료(${debtSessions}회)`
+                  : `다음 4주 수업료 (${monthlySessionCount}회)`}
               </p>
               <p className="mt-0.5 text-sm font-semibold text-foreground">
                 {suggestedAmount.toLocaleString("ko-KR")}원
