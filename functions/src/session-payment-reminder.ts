@@ -1,5 +1,6 @@
 import * as admin from "firebase-admin";
 import { Timestamp } from "firebase-admin/firestore";
+import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as logger from "firebase-functions/logger";
 import {
@@ -191,6 +192,87 @@ async function sendSessionPaymentReminderToParent(
     });
   }
 }
+
+/**
+ * 학생 문서 업데이트 시 sessionBalance 감소 → 기준치 이하 도달 시 즉시 FCM 발송.
+ * 스케줄러(오전 9시)는 이 트리거가 놓친 케이스에 대한 안전망으로 유지.
+ */
+export const onStudentSessionBalanceChanged = onDocumentUpdated(
+  {
+    document: "academies/{academyId}/students/{studentId}",
+    region: REGION,
+    memory: "256MiB",
+  },
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after) return;
+
+    const weeklySessionCount =
+      typeof after.weeklySessionCount === "number" &&
+      Number.isInteger(after.weeklySessionCount) &&
+      after.weeklySessionCount >= 1
+        ? (after.weeklySessionCount as number)
+        : null;
+    if (!weeklySessionCount) return;
+
+    const balanceBefore =
+      typeof before.sessionBalance === "number" && Number.isInteger(before.sessionBalance)
+        ? (before.sessionBalance as number)
+        : 0;
+    const balanceAfter =
+      typeof after.sessionBalance === "number" && Number.isInteger(after.sessionBalance)
+        ? (after.sessionBalance as number)
+        : 0;
+
+    // sessionBalance가 감소한 경우에만 처리
+    if (balanceAfter >= balanceBefore) return;
+
+    // 아직 기준치(주당 횟수) 초과 — 알림 불필요
+    if (balanceAfter > weeklySessionCount) return;
+
+    // 이미 발송된 알림 — 충전 시 초기화됨
+    if (after.sentSessionPaymentReminder === true) return;
+
+    const { academyId, studentId } = event.params;
+    const parentUserId = typeof after.parentUserId === "string" ? after.parentUserId : "";
+    if (!parentUserId) return;
+
+    const studentName = typeof after.name === "string" && after.name ? after.name : "학생";
+    const pricePerSession =
+      typeof after.pricePerSession === "number" && after.pricePerSession >= 0
+        ? (after.pricePerSession as number)
+        : undefined;
+    const extraSessionDates = Array.isArray(after.extraSessionDates)
+      ? (after.extraSessionDates as string[]).filter((d) => typeof d === "string")
+      : [];
+
+    const db = admin.firestore();
+    let settings: TuitionSettings = {};
+    try {
+      const settingsSnap = await db.doc(`academies/${academyId}/meta/tuitionSettings`).get();
+      if (settingsSnap.exists) settings = settingsSnap.data() as TuitionSettings;
+    } catch (e) {
+      logger.error("onStudentSessionBalanceChanged: tuitionSettings load failed", { academyId, e });
+    }
+
+    try {
+      await sendSessionPaymentReminderToParent(db, {
+        academyId,
+        studentId,
+        studentName,
+        parentUserId,
+        sessionBalance: balanceAfter,
+        weeklySessionCount,
+        pricePerSession,
+        extraSessionDates,
+        settings,
+      });
+    } catch (e) {
+      logger.error("onStudentSessionBalanceChanged: send failed", { academyId, studentId, e });
+    }
+  },
+);
 
 /**
  * 매일 서울 기준 오전 9시에 실행되는 회차 방식 원비 납부 안내 스케줄러.

@@ -382,4 +382,7 @@ export {
   onParentMembershipWritten,
 } from "./user-activation-mirror";
 export { sendTuitionReminders } from "./tuition-reminder";
-export { sendSessionPaymentReminders } from "./session-payment-reminder";
+export {
+  sendSessionPaymentReminders,
+  onStudentSessionBalanceChanged,
+} from "./session-payment-reminder";
