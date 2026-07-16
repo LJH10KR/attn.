@@ -14,6 +14,8 @@ export type AttendanceLogItem = {
   parentUserId: string;
   senderRole: string;
   senderUid: string;
+  senderDisplayName: string;
+  parentDisplayName: string;
   source: string;
   createdAtMillis: number | null;
 };
@@ -144,7 +146,7 @@ export function useAttendanceNotificationLog(params: {
       visibleItems.map((x) => ({
         id: x.id,
         title: `${x.kind === "present" ? "출석" : "결석"} · ${x.studentName || x.studentId}`,
-        detail: `${formatWhen(x.createdAtMillis)} · ${x.senderRole} · ${x.senderUid}`,
+        detail: `${formatWhen(x.createdAtMillis)} · ${x.senderDisplayName} · ${x.parentDisplayName} 학부모`,
       })),
     [visibleItems],
   );

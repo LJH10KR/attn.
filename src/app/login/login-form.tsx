@@ -97,7 +97,14 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
   const [otpPurpose, setOtpPurpose] = useState<"owner" | "parent">("owner");
   const [otpEmailHint, setOtpEmailHint] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [sessionBannerReady, setSessionBannerReady] = useState(false);
   const otpFlowRef = useRef(false);
+
+  // LoginSessionAutoRedirect가 자동 리다이렉트를 처리할 시간을 확보한 뒤에만 배너를 표시
+  useEffect(() => {
+    const t = setTimeout(() => setSessionBannerReady(true), 900);
+    return () => clearTimeout(t);
+  }, []);
 
   const configured = isFirebaseConfigured();
   const loginPasswordInputClass =
@@ -723,7 +730,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
           </div>
         ) : null}
 
-        {hasSession ? (
+        {hasSession && !busy && sessionBannerReady ? (
           <div className="mt-5 rounded-2xl border border-amber-200/70 bg-amber-50/80 px-3.5 py-3 text-sm text-amber-950 ring-1 ring-amber-500/15 backdrop-blur-sm">
             <p className="font-medium">이미 로그인된 상태입니다</p>
             <p className="mt-1 text-xs text-amber-900/90">

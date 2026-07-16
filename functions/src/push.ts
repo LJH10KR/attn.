@@ -252,35 +252,109 @@ export const listAttendanceNotifications = onCall(async (request) => {
           .get()
         : await db.collection(`academies/${academyId}/attendanceNotifications`).orderBy("createdAt", "desc").limit(limit).get();
 
-  return {
-    ok: true as const,
-    items: snaps.docs.map((d) => {
-      const x = d.data() as {
-        academyId?: unknown;
-        kind?: unknown;
-        studentId?: unknown;
-        studentName?: unknown;
-        parentUserId?: unknown;
-        senderRole?: unknown;
-        senderUid?: unknown;
-        source?: unknown;
-        createdAt?: unknown;
-      };
-      return {
-        id: d.id,
-        academyId: typeof x.academyId === "string" ? x.academyId : "",
-        kind: x.kind === "absent" ? "absent" : "present",
-        studentId: typeof x.studentId === "string" ? x.studentId : "",
-        studentName: typeof x.studentName === "string" ? x.studentName : "",
-        parentUserId: typeof x.parentUserId === "string" ? x.parentUserId : "",
-        senderRole: typeof x.senderRole === "string" ? x.senderRole : "",
-        senderUid: typeof x.senderUid === "string" ? x.senderUid : "",
-        source: typeof x.source === "string" ? x.source : "",
-        createdAtMillis:
-          x.createdAt && typeof (x.createdAt as { toMillis?: unknown }).toMillis === "function"
-            ? (x.createdAt as { toMillis: () => number }).toMillis()
-            : null,
-      };
-    }),
-  };
+  // 1단계: 원본 데이터 직렬화
+  const rawItems = snaps.docs.map((d) => {
+    const x = d.data() as {
+      academyId?: unknown;
+      kind?: unknown;
+      studentId?: unknown;
+      studentName?: unknown;
+      parentUserId?: unknown;
+      senderRole?: unknown;
+      senderUid?: unknown;
+      source?: unknown;
+      createdAt?: unknown;
+    };
+    return {
+      id: d.id,
+      academyId: typeof x.academyId === "string" ? x.academyId : "",
+      kind: (x.kind === "absent" ? "absent" : "present") as "present" | "absent",
+      studentId: typeof x.studentId === "string" ? x.studentId : "",
+      studentName: typeof x.studentName === "string" ? x.studentName : "",
+      parentUserId: typeof x.parentUserId === "string" ? x.parentUserId : "",
+      senderRole: typeof x.senderRole === "string" ? x.senderRole : "",
+      senderUid: typeof x.senderUid === "string" ? x.senderUid : "",
+      source: typeof x.source === "string" ? x.source : "",
+      createdAtMillis:
+        x.createdAt && typeof (x.createdAt as { toMillis?: unknown }).toMillis === "function"
+          ? (x.createdAt as { toMillis: () => number }).toMillis()
+          : null,
+    };
+  });
+
+  // 2단계: display name 배치 조회 — 중복 제거 후 병렬 fetch
+  const teacherKeys: { academyId: string; uid: string }[] = [];
+  const ownerKeys: string[] = [];
+  const parentKeys: { academyId: string; uid: string }[] = [];
+  const teacherKeySet = new Set<string>();
+  const ownerKeySet = new Set<string>();
+  const parentKeySet = new Set<string>();
+
+  for (const item of rawItems) {
+    const isKiosk = item.source === "student_kiosk" || item.senderRole === "student_kiosk";
+    if (!isKiosk && item.senderUid && item.academyId) {
+      if (item.senderRole === "teacher") {
+        const key = `${item.academyId}:${item.senderUid}`;
+        if (!teacherKeySet.has(key)) {
+          teacherKeySet.add(key);
+          teacherKeys.push({ academyId: item.academyId, uid: item.senderUid });
+        }
+      } else if (item.senderRole === "owner") {
+        if (!ownerKeySet.has(item.senderUid)) {
+          ownerKeySet.add(item.senderUid);
+          ownerKeys.push(item.senderUid);
+        }
+      }
+    }
+    if (item.parentUserId && item.academyId) {
+      const key = `${item.academyId}:${item.parentUserId}`;
+      if (!parentKeySet.has(key)) {
+        parentKeySet.add(key);
+        parentKeys.push({ academyId: item.academyId, uid: item.parentUserId });
+      }
+    }
+  }
+
+  const [teacherSnaps, ownerSnaps, parentSnaps] = await Promise.all([
+    Promise.all(teacherKeys.map((k) => db.doc(`academies/${k.academyId}/teachers/${k.uid}`).get())),
+    Promise.all(ownerKeys.map((uid) => db.doc(`users/${uid}`).get())),
+    Promise.all(parentKeys.map((k) => db.doc(`academies/${k.academyId}/parents/${k.uid}`).get())),
+  ]);
+
+  const teacherNameMap = new Map<string, string>();
+  teacherKeys.forEach((k, i) => {
+    const name = teacherSnaps[i]?.get("displayName");
+    if (typeof name === "string" && name) teacherNameMap.set(`${k.academyId}:${k.uid}`, name);
+  });
+  const ownerNameMap = new Map<string, string>();
+  ownerKeys.forEach((uid, i) => {
+    const name = ownerSnaps[i]?.get("displayName");
+    if (typeof name === "string" && name) ownerNameMap.set(uid, name);
+  });
+  const parentNameMap = new Map<string, string>();
+  parentKeys.forEach((k, i) => {
+    const name = parentSnaps[i]?.get("displayName");
+    if (typeof name === "string" && name) parentNameMap.set(`${k.academyId}:${k.uid}`, name);
+  });
+
+  // 3단계: display name 합성
+  const items = rawItems.map((item) => {
+    let senderDisplayName: string;
+    if (item.source === "student_kiosk" || item.senderRole === "student_kiosk") {
+      senderDisplayName = "키오스크";
+    } else if (item.senderRole === "teacher") {
+      senderDisplayName = teacherNameMap.get(`${item.academyId}:${item.senderUid}`) ?? "선생님";
+    } else if (item.senderRole === "owner") {
+      senderDisplayName = ownerNameMap.get(item.senderUid) ?? "오너";
+    } else if (item.senderRole === "academy") {
+      senderDisplayName = "학원";
+    } else {
+      senderDisplayName = item.senderRole || "알 수 없음";
+    }
+    const parentDisplayName =
+      parentNameMap.get(`${item.academyId}:${item.parentUserId}`) ?? "학부모";
+    return { ...item, senderDisplayName, parentDisplayName };
+  });
+
+  return { ok: true as const, items };
 });
