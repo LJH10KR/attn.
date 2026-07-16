@@ -15,19 +15,21 @@ function utcDayKey(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function formatRequestedTimeLabel(date: Date): string {
+function formatCheckInTimeLabel(date: Date): string {
   try {
-    const hhmm = new Intl.DateTimeFormat("ko-KR", {
+    const parts = new Intl.DateTimeFormat("ko-KR", {
       timeZone: "Asia/Seoul",
-      hour: "2-digit",
+      hour: "numeric",
       minute: "2-digit",
       hour12: false,
-    }).format(date);
-    return `요청 시각 ${hhmm}`;
+    }).formatToParts(date);
+    const hour = parts.find((p) => p.type === "hour")?.value ?? String(date.getHours());
+    const minute = parts.find((p) => p.type === "minute")?.value ?? String(date.getMinutes()).padStart(2, "0");
+    return `${hour}시 ${minute}분`;
   } catch {
-    const hh = String(date.getHours()).padStart(2, "0");
+    const hh = String(date.getHours());
     const mm = String(date.getMinutes()).padStart(2, "0");
-    return `요청 시각 ${hh}:${mm}`;
+    return `${hh}시 ${mm}분`;
   }
 }
 
@@ -123,11 +125,11 @@ export async function sendStudentAttendanceNotificationCore(
 
   const studentName =
     typeof studentData.name === "string" && studentData.name ? studentData.name : "학생";
-  const requestedAtLabel = formatRequestedTimeLabel(new Date());
+  const timeLabel = formatCheckInTimeLabel(new Date());
   const body =
     kind === "present"
-      ? `${studentName} 학생이 출석했습니다. (${requestedAtLabel})`
-      : `${studentName} 학생이 결석 처리되었습니다. (${requestedAtLabel})`;
+      ? `'${studentName}' 학생이 안전하게 등원 했습니다. (등원 시간: ${timeLabel})`
+      : `'${studentName}' 학생이 결석 처리되었습니다. (${timeLabel})`;
 
   await parentUserRef.collection("dashboardBellItems").add({
     kind: kind === "present" ? "attendance_present" : "attendance_absent",
