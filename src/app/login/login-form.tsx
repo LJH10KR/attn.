@@ -99,6 +99,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
   const [showPassword, setShowPassword] = useState(false);
   const [sessionBannerReady, setSessionBannerReady] = useState(false);
   const otpFlowRef = useRef(false);
+  const autoSessionTriggeredRef = useRef(false);
 
   // LoginSessionAutoRedirect가 자동 리다이렉트를 처리할 시간을 확보한 뒤에만 배너를 표시
   useEffect(() => {
@@ -332,6 +333,15 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
     router,
     showOwnerEmailAuth,
   ]);
+
+  // 역할 고정 페이지(/login/parent 등)에서 기존 세션이 있으면 배너 없이 자동 이동
+  useEffect(() => {
+    if (!fixedRole) return;
+    if (!hasSession || busy || !sessionBannerReady) return;
+    if (autoSessionTriggeredRef.current || otpFlowRef.current) return;
+    autoSessionTriggeredRef.current = true;
+    void onContinueAsSession();
+  }, [fixedRole, hasSession, busy, sessionBannerReady, onContinueAsSession]);
 
   const onMemberAttnLogin = useCallback(
     async (e: React.FormEvent) => {
@@ -730,7 +740,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
           </div>
         ) : null}
 
-        {hasSession && !busy && sessionBannerReady ? (
+        {hasSession && !busy && sessionBannerReady && !fixedRole ? (
           <div className="mt-5 rounded-2xl border border-amber-200/70 bg-amber-50/80 px-3.5 py-3 text-sm text-amber-950 ring-1 ring-amber-500/15 backdrop-blur-sm">
             <p className="font-medium">이미 로그인된 상태입니다</p>
             <p className="mt-1 text-xs text-amber-900/90">
