@@ -1488,6 +1488,7 @@ export function AcademyParentStudentList({
   const [chargeTarget, setChargeTarget] = useState<StudentRowVM | null>(null);
   const [chargeBusy, setChargeBusy] = useState(false);
   const [logModalTarget, setLogModalTarget] = useState<StudentRowVM | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const loadParentChildren = useCallback(async () => {
     try {
@@ -1691,9 +1692,9 @@ export function AcademyParentStudentList({
           {rows.map((s) => (
             <li
               key={s.id}
-              className="rounded-xl border border-white/60 bg-white/25 px-3 py-2 text-xs text-neutral-800"
+              className="overflow-hidden rounded-xl border border-white/60 bg-white/25 text-xs text-neutral-800"
             >
-              <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start justify-between gap-2 px-3 py-2">
                 <div className="min-w-0">
                   <span className="font-medium text-foreground">{s.name}</span>
                   <span className="text-neutral-500"> · 만 {s.age}세</span>
@@ -1742,65 +1743,40 @@ export function AcademyParentStudentList({
                     </div>
                   ) : null}
                 </div>
-                <div className="flex shrink-0 gap-1">
-                  <button
-                    type="button"
-                    className={miniBtnClass}
-                    disabled={notifyBusyKey !== null}
-                    onClick={() => void sendAttendanceNotify(s.id, "present")}
-                  >
+                <div className="flex shrink-0 items-center gap-1">
+                  <button type="button" className={miniBtnClass} disabled={notifyBusyKey !== null} onClick={() => void sendAttendanceNotify(s.id, "present")}>
                     {notifyBusyKey === `${s.id}-present` ? "전송 중…" : "출석"}
                   </button>
-                  <button
-                    type="button"
-                    className={miniBtnClass}
-                    disabled={notifyBusyKey !== null}
-                    onClick={() => void sendAttendanceNotify(s.id, "absent")}
-                  >
+                  <button type="button" className={miniBtnClass} disabled={notifyBusyKey !== null} onClick={() => void sendAttendanceNotify(s.id, "absent")}>
                     {notifyBusyKey === `${s.id}-absent` ? "전송 중…" : "결석"}
                   </button>
                   {s.weeklySessionCount != null ? (
                     <>
-                      <button
-                        type="button"
-                        className={`${miniBtnClass} border-violet-300/70 bg-violet-50/70 text-violet-800 hover:bg-violet-100`}
-                        disabled={sessionCompleteBusy || chargeBusy}
-                        onClick={() => setSessionConfirmTarget(s)}
-                      >
-                        수업 완료
-                      </button>
-                      <button
-                        type="button"
-                        className={`${miniBtnClass} border-violet-400/60 bg-violet-700 text-white hover:bg-violet-800`}
-                        disabled={sessionCompleteBusy || chargeBusy}
-                        onClick={() => setChargeTarget(s)}
-                      >
-                        충전
-                      </button>
-                      <button
-                        type="button"
-                        className={miniBtnClass}
-                        onClick={() => setLogModalTarget(s)}
-                      >
-                        기록
-                      </button>
+                      <button type="button" className={`${miniBtnClass} border-violet-300/70 bg-violet-50/70 text-violet-800 hover:bg-violet-100`} disabled={sessionCompleteBusy || chargeBusy} onClick={() => setSessionConfirmTarget(s)}>수업 완료</button>
+                      <button type="button" className={`${miniBtnClass} border-violet-400/60 bg-violet-700 text-white hover:bg-violet-800`} disabled={sessionCompleteBusy || chargeBusy} onClick={() => setChargeTarget(s)}>충전</button>
                     </>
                   ) : null}
-                  <button
-                    type="button"
-                    className={miniBtnClass}
-                    onClick={() => setTuitionModalTarget(s)}
-                  >
-                    원비
-                  </button>
-                  <button type="button" className={miniBtnClass} onClick={() => openEdit(s)}>
-                    수정
-                  </button>
-                  <button type="button" className={miniBtnClass} onClick={() => setDeleteTarget(s)}>
-                    삭제
-                  </button>
                 </div>
               </div>
+              <button
+                type="button"
+                className="flex w-full items-center justify-center border-t border-white/40 py-1 hover:bg-black/[0.03] dark:hover:bg-white/[0.03]"
+                onClick={() => setExpandedId((prev) => (prev === s.id ? null : s.id))}
+                aria-expanded={expandedId === s.id}
+                aria-label="더 보기"
+              >
+                <ChevronRightGlyph className={`transition-transform duration-150 text-neutral-400 ${expandedId === s.id ? "-rotate-90" : "rotate-90"}`} />
+              </button>
+              {expandedId === s.id ? (
+                <div className="flex flex-wrap gap-1 border-t border-white/40 px-3 py-2">
+                  {s.weeklySessionCount != null ? (
+                    <button type="button" className={miniBtnClass} onClick={() => setLogModalTarget(s)}>기록</button>
+                  ) : null}
+                  <button type="button" className={miniBtnClass} onClick={() => setTuitionModalTarget(s)}>원비</button>
+                  <button type="button" className={miniBtnClass} onClick={() => { openEdit(s); setExpandedId(null); }}>수정</button>
+                  <button type="button" className={`${miniBtnClass} border-red-200/80 text-red-600 hover:bg-red-50`} onClick={() => { setDeleteTarget(s); setExpandedId(null); }}>삭제</button>
+                </div>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -1900,6 +1876,8 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
   const [chargeBusy, setChargeBusy] = useState(false);
   const [defaultTuitionModalOpen, setDefaultTuitionModalOpen] = useState(false);
   const [logModalTarget, setLogModalTarget] = useState<StudentRowVM | null>(null);
+  const [notifyBusyKey, setNotifyBusyKey] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const loadStudentPanelData = useCallback(async () => {
     try {
@@ -1998,6 +1976,27 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
       setChargeBusy(false);
     }
   }, [academyId, refreshStudentPanel]);
+
+  const sendAttendanceNotify = useCallback(
+    async (studentId: string, kind: "present" | "absent") => {
+      const key = `${studentId}-${kind}`;
+      setNotifyBusyKey(key);
+      try {
+        const fn = httpsCallable(getFirebaseFunctions(), "sendStudentAttendanceNotification");
+        await fn({ academyId, studentId, kind });
+        setNotice(kind === "present" ? "출석 알림을 보냈습니다." : "결석 알림을 보냈습니다.");
+      } catch (e) {
+        if (e instanceof FirebaseError && e.code === "functions/resource-exhausted") {
+          setNotice("같은 학생에게 너무 자주 보낼 수 없습니다. 잠시 후 다시 시도해 주세요.");
+        } else {
+          setNotice("알림을 보내지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        }
+      } finally {
+        setNotifyBusyKey(null);
+      }
+    },
+    [academyId],
+  );
 
   const teacherNameById = useMemo(() => {
     const m: Record<string, string> = {};
@@ -2233,11 +2232,11 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                 key={s.id}
                 className={`overflow-hidden ${glassCard} ${modalOpen ? "ring-1 ring-[#222]/10" : ""}`}
               >
-                <div className="flex items-stretch gap-1 p-2 sm:gap-2 sm:p-3.5">
+                <div className="p-2 sm:p-3.5">
                   <button
                     type="button"
                     id={`student-row-${s.id}`}
-                    className="flex min-w-0 flex-1 items-center gap-2 rounded-2xl px-2 py-2 text-left transition hover:bg-white/35 active:bg-white/45 sm:gap-3 sm:px-3"
+                    className="flex w-full items-center gap-2 rounded-2xl px-2 py-2 text-left transition hover:bg-white/35 active:bg-white/45 sm:gap-3 sm:px-3"
                     aria-haspopup="dialog"
                     aria-expanded={modalOpen}
                     aria-controls="student-assign-teachers-title"
@@ -2296,60 +2295,40 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                       <ChevronRightGlyph className="text-neutral-400" />
                     </span>
                   </button>
-                  <div className="flex shrink-0 flex-col justify-center gap-1.5 sm:flex-row sm:items-center">
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <button type="button" className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 disabled:opacity-40" disabled={notifyBusyKey !== null} onClick={() => void sendAttendanceNotify(s.id, "present")}>
+                      {notifyBusyKey === `${s.id}-present` ? "전송 중…" : "출석"}
+                    </button>
+                    <button type="button" className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 disabled:opacity-40" disabled={notifyBusyKey !== null} onClick={() => void sendAttendanceNotify(s.id, "absent")}>
+                      {notifyBusyKey === `${s.id}-absent` ? "전송 중…" : "결석"}
+                    </button>
                     {s.weeklySessionCount != null ? (
                       <>
-                        <button
-                          type="button"
-                          className="rounded-xl border border-violet-300/70 bg-violet-50/70 px-3 py-2 text-[11px] font-medium text-violet-800 shadow-sm hover:bg-violet-100"
-                          disabled={sessionCompleteBusy || chargeBusy}
-                          onClick={() => setSessionConfirmTarget(s)}
-                        >
-                          수업 완료
-                        </button>
-                        <button
-                          type="button"
-                          className="rounded-xl border border-violet-400/60 bg-violet-700 px-3 py-2 text-[11px] font-medium text-white shadow-sm hover:bg-violet-800"
-                          disabled={sessionCompleteBusy || chargeBusy}
-                          onClick={() => setChargeTarget(s)}
-                        >
-                          충전
-                        </button>
-                        <button
-                          type="button"
-                          className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90"
-                          onClick={() => setLogModalTarget(s)}
-                        >
-                          기록
-                        </button>
+                        <button type="button" className="rounded-xl border border-violet-300/70 bg-violet-50/70 px-3 py-2 text-[11px] font-medium text-violet-800 shadow-sm hover:bg-violet-100" disabled={sessionCompleteBusy || chargeBusy} onClick={() => setSessionConfirmTarget(s)}>수업 완료</button>
+                        <button type="button" className="rounded-xl border border-violet-400/60 bg-violet-700 px-3 py-2 text-[11px] font-medium text-white shadow-sm hover:bg-violet-800" disabled={sessionCompleteBusy || chargeBusy} onClick={() => setChargeTarget(s)}>충전</button>
                       </>
                     ) : null}
-                    <button
-                      type="button"
-                      className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90"
-                      onClick={() => setTuitionModalTarget(s)}
-                    >
-                      원비
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90"
-                      onClick={() => openEdit(s)}
-                    >
-                      수정
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90"
-                      onClick={() => {
-                        setTeacherModalStudentId(null);
-                        setDeleteTarget(s);
-                      }}
-                    >
-                      삭제
-                    </button>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-center border-t border-white/40 py-1 hover:bg-black/[0.02] dark:hover:bg-white/[0.03]"
+                  onClick={() => setExpandedId((prev) => (prev === s.id ? null : s.id))}
+                  aria-expanded={expandedId === s.id}
+                  aria-label="더 보기"
+                >
+                  <ChevronRightGlyph className={`transition-transform duration-150 text-neutral-400 ${expandedId === s.id ? "-rotate-90" : "rotate-90"}`} />
+                </button>
+                {expandedId === s.id ? (
+                  <div className="flex flex-wrap gap-1.5 border-t border-white/40 px-2 py-2 sm:px-3.5">
+                    {s.weeklySessionCount != null ? (
+                      <button type="button" className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90" onClick={() => setLogModalTarget(s)}>기록</button>
+                    ) : null}
+                    <button type="button" className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90" onClick={() => setTuitionModalTarget(s)}>원비</button>
+                    <button type="button" className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90" onClick={() => { openEdit(s); setExpandedId(null); }}>수정</button>
+                    <button type="button" className="rounded-xl border border-red-200/80 bg-white/55 px-3 py-2 text-[11px] font-medium text-red-600 shadow-sm hover:bg-red-50" onClick={() => { setTeacherModalStudentId(null); setDeleteTarget(s); setExpandedId(null); }}>삭제</button>
+                  </div>
+                ) : null}
               </div>
             );
           })
