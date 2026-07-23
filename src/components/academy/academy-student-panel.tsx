@@ -30,6 +30,7 @@ import {
 } from "@/lib/firebase/attn-schema";
 import { getFirebaseAuth, getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
+import { SessionLogModal } from "@/components/academy/session-log-modal";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 import { KrPhoneInput } from "@/components/ui/kr-phone-input";
@@ -1486,6 +1487,7 @@ export function AcademyParentStudentList({
   const [sessionCompleteBusy, setSessionCompleteBusy] = useState(false);
   const [chargeTarget, setChargeTarget] = useState<StudentRowVM | null>(null);
   const [chargeBusy, setChargeBusy] = useState(false);
+  const [logModalTarget, setLogModalTarget] = useState<StudentRowVM | null>(null);
 
   const loadParentChildren = useCallback(async () => {
     try {
@@ -1775,6 +1777,13 @@ export function AcademyParentStudentList({
                       >
                         충전
                       </button>
+                      <button
+                        type="button"
+                        className={miniBtnClass}
+                        onClick={() => setLogModalTarget(s)}
+                      >
+                        기록
+                      </button>
                     </>
                   ) : null}
                   <button
@@ -1852,6 +1861,15 @@ export function AcademyParentStudentList({
           onConfirm={(n) => void chargeSession(chargeTarget, n)}
         />
       ) : null}
+      {logModalTarget ? (
+        <SessionLogModal
+          academyId={academyId}
+          studentId={logModalTarget.id}
+          studentName={logModalTarget.name}
+          onClose={() => setLogModalTarget(null)}
+          onCancelled={refreshParentChildren}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1881,6 +1899,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
   const [chargeTarget, setChargeTarget] = useState<StudentRowVM | null>(null);
   const [chargeBusy, setChargeBusy] = useState(false);
   const [defaultTuitionModalOpen, setDefaultTuitionModalOpen] = useState(false);
+  const [logModalTarget, setLogModalTarget] = useState<StudentRowVM | null>(null);
 
   const loadStudentPanelData = useCallback(async () => {
     try {
@@ -2296,6 +2315,13 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                         >
                           충전
                         </button>
+                        <button
+                          type="button"
+                          className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90"
+                          onClick={() => setLogModalTarget(s)}
+                        >
+                          기록
+                        </button>
                       </>
                     ) : null}
                     <button
@@ -2400,6 +2426,15 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
         <DefaultTuitionTypeModal
           academyId={academyId}
           onClose={() => setDefaultTuitionModalOpen(false)}
+        />
+      ) : null}
+      {logModalTarget ? (
+        <SessionLogModal
+          academyId={academyId}
+          studentId={logModalTarget.id}
+          studentName={logModalTarget.name}
+          onClose={() => setLogModalTarget(null)}
+          onCancelled={refreshStudentPanel}
         />
       ) : null}
     </div>
