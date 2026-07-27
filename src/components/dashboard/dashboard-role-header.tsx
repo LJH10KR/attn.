@@ -32,6 +32,8 @@ type DashboardRoleHeaderProps = {
   onBellClickAction?: () => void;
   bellBadgeCount?: number;
   beforeBell?: ReactNode;
+  showBell?: boolean;
+  showProfile?: boolean;
   bottomTabs?: DashboardBottomNavTab[];
   hideBottomNav?: boolean;
   includeSettingsAction?: boolean;
@@ -56,6 +58,8 @@ export function DashboardRoleHeader({
   onBellClickAction,
   bellBadgeCount = 0,
   beforeBell,
+  showBell,
+  showProfile,
   bottomTabs,
   hideBottomNav = false,
   includeSettingsAction = false,
@@ -113,6 +117,8 @@ export function DashboardRoleHeader({
         onBellClickAction={onBellClickAction}
         bellBadgeCount={bellBadgeCount}
         beforeBell={beforeBell}
+        showBell={showBell}
+        showProfile={showProfile}
         affiliationLabel={affiliationLabel}
         menuIntro={menuIntro}
         menuActions={menuActions}

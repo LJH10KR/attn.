@@ -15,17 +15,17 @@ const INNER_ROW = "flex min-h-10 items-center justify-between gap-2";
 
 function BellIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden>
       <path
         d="M12 3a6 6 0 00-6 6v2.4L4 14v1h16v-1l-2-2.6V9a6 6 0 00-6-6z"
         stroke="currentColor"
-        strokeWidth="1.6"
+        strokeWidth="1.55"
         strokeLinejoin="round"
       />
       <path
         d="M9 19a3 3 0 006 0"
         stroke="currentColor"
-        strokeWidth="1.6"
+        strokeWidth="1.55"
         strokeLinecap="round"
       />
     </svg>
@@ -88,6 +88,7 @@ export type DashboardTopHeaderProps = {
   bellBadgeCount?: number;
   /** 알림 벨 왼쪽에 배치할 액션(예: 키오스크 토글) */
   beforeBell?: ReactNode;
+  showProfile?: boolean;
   affiliationLabel: string;
   menuIntro?: ReactNode;
   menuActions: DashboardBottomNavMenuAction[];
@@ -107,6 +108,7 @@ export function DashboardTopHeader({
   showBell = true,
   bellBadgeCount = 0,
   beforeBell,
+  showProfile = true,
   affiliationLabel,
   menuIntro,
   menuActions,
@@ -141,14 +143,20 @@ export function DashboardTopHeader({
         <div className="pointer-events-auto mx-auto max-w-lg px-4">
           <div className={INNER_ROW}>
             {/* 왼쪽: attn. 로고 */}
-            <button
-              type="button"
-              onClick={() => onHomeAction?.()}
-              className="text-[17px] font-bold tracking-tight text-foreground transition hover:opacity-70"
-              aria-label="홈으로 이동"
-            >
-              attn.
-            </button>
+            {onHomeAction ? (
+              <button
+                type="button"
+                onClick={() => onHomeAction()}
+                className="text-[20px] font-black tracking-tight text-foreground transition hover:opacity-70"
+                aria-label="홈으로 이동"
+              >
+                attn.
+              </button>
+            ) : (
+              <span className="text-[20px] font-black tracking-tight text-foreground select-none">
+                attn.
+              </span>
+            )}
 
             {/* 오른쪽: beforeBell + 벨 + 프로필 */}
             <div className="flex items-center gap-0.5">
@@ -157,35 +165,37 @@ export function DashboardTopHeader({
                 <button
                   type="button"
                   onClick={() => onBellClickAction?.()}
-                  className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-foreground transition hover:bg-black/[0.05] dark:hover:bg-white/10"
+                  className="relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-foreground transition hover:bg-black/[0.05] dark:hover:bg-white/10"
                   aria-label={bellBadgeCount > 0 ? `알림 ${bellBadgeCount}건` : "알림"}
                 >
                   <BellIcon />
                   {bellBadgeCount > 0 ? (
-                    <span className="absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white shadow-sm">
+                    <span className="absolute right-1.5 top-1.5 flex h-[17px] min-w-[17px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white shadow-sm">
                       {formatDashboardBellBadge(bellBadgeCount)}
                     </span>
                   ) : null}
                 </button>
               ) : null}
-              <button
-                type="button"
-                onClick={() => setMenuOpen((o) => !o)}
-                className={
-                  hasProfilePhoto
-                    ? "relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full shadow-sm transition hover:brightness-105"
-                    : "relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-neutral-300/60 bg-white/55 text-foreground shadow-sm transition hover:bg-white/90 dark:border-white/20 dark:bg-white/12 dark:hover:bg-white/18"
-                }
-                aria-expanded={menuOpen}
-                aria-haspopup="menu"
-                aria-label="계정 메뉴"
-              >
-                <ProfileAvatar
-                  photoURL={profile?.photoURL}
-                  initial={initial}
-                  size="sm"
-                />
-              </button>
+              {showProfile ? (
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen((o) => !o)}
+                  className={
+                    hasProfilePhoto
+                      ? "relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full shadow-sm transition hover:brightness-105"
+                      : "relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-neutral-300/60 bg-white/55 text-foreground shadow-sm transition hover:bg-white/90 dark:border-white/20 dark:bg-white/12 dark:hover:bg-white/18"
+                  }
+                  aria-expanded={menuOpen}
+                  aria-haspopup="menu"
+                  aria-label="계정 메뉴"
+                >
+                  <ProfileAvatar
+                    photoURL={profile?.photoURL}
+                    initial={initial}
+                    size="sm"
+                  />
+                </button>
+              ) : null}
             </div>
           </div>
         </div>

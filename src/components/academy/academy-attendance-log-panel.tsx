@@ -59,7 +59,7 @@ export function AcademyAttendanceLogPanel({
           disabled={busy}
           className="rounded-xl border border-neutral-300/80 bg-white/70 px-3 py-2 text-[11px] font-medium text-neutral-800 hover:bg-white disabled:opacity-50"
         >
-          {busy ? "불러오는 중…" : "새로고침"}
+          새로고침
         </button>
       </div>
       {error ? (
@@ -68,7 +68,11 @@ export function AcademyAttendanceLogPanel({
         </p>
       ) : null}
 
-      {rows.length === 0 ? (
+      {busy && rows.length === 0 ? (
+        <p className={`py-10 text-center text-sm text-neutral-500 ${glassCard}`}>
+          불러오는 중…
+        </p>
+      ) : rows.length === 0 ? (
         <p className={`py-10 text-center text-sm text-neutral-500 ${glassCard}`}>
           표시할 기록이 없습니다.
         </p>

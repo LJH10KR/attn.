@@ -248,17 +248,13 @@ function IconBackpack({ active }: { active?: boolean }) {
   );
 }
 
-function IconBellMini({ active }: { active?: boolean }) {
+function IconHistory({ active }: { active?: boolean }) {
   const stroke = active ? "#171717" : "#666";
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M7 10a5 5 0 0 1 10 0v4.2c0 .7.2 1.38.56 1.98L19 18H5l1.44-1.82c.36-.6.56-1.28.56-1.98V10Z"
-        stroke={stroke}
-        strokeWidth="1.6"
-        fill={active ? "rgba(0,0,0,0.06)" : "none"}
-      />
-      <path d="M10 19a2 2 0 0 0 4 0" stroke={stroke} strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" stroke={stroke} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3 3v5h5" stroke={stroke} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M12 7v5l4 2" stroke={stroke} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -773,19 +769,6 @@ export function AcademyDashboard() {
             : () => router.push(`/academy/settings?id=${encodeURIComponent(academyId)}`)
         }
         settingsLabel="학원 설정"
-        beforeBell={
-          <div className="flex items-center gap-2">
-            <SlideSwitch
-              checked={kioskMode}
-              disabled={kioskActionBusy}
-              ariaLabel="출석 키오스크"
-              onCheckedChangeAction={(next) => {
-                if (next) requestKioskOn();
-                else requestKioskOff();
-              }}
-            />
-          </div>
-        }
         menuIntro={
           showBack && !kioskMode ? (
             <span className="text-neutral-600 dark:text-neutral-400">
@@ -797,14 +780,25 @@ export function AcademyDashboard() {
         hideBottomNav={kioskMode}
         onBackAction={onBackToOwner}
         backAriaLabel="오너 대시보드로 돌아가기"
-        onHomeAction={() => router.push("/")}
+        onHomeAction={kioskMode ? undefined : () => router.push("/")}
         onBellClickAction={() => setNotificationsOpen(true)}
+        showBell={!kioskMode}
+        showProfile={!kioskMode}
+        beforeBell={
+          kioskMode ? (
+            <SlideSwitch
+              checked={true}
+              disabled={kioskActionBusy}
+              ariaLabel="키오스크 모드 종료"
+              onCheckedChangeAction={requestKioskOff}
+            />
+          ) : undefined
+        }
         bellBadgeCount={academyBellCount}
         bottomTabs={[
           {
             id: "home",
-            label: "요약",
-            showLabel: false,
+            label: "홈",
             iconAction: (active: boolean) => <HomeTabIcon active={active} />,
             active: section === "home",
             onSelectAction: () => navigateSection("home"),
@@ -833,7 +827,7 @@ export function AcademyDashboard() {
           {
             id: "notifications",
             label: "알림 기록",
-            iconAction: (active: boolean) => <IconBellMini active={active} />,
+            iconAction: (active: boolean) => <IconHistory active={active} />,
             active: section === "notifications",
             onSelectAction: () => navigateSection("notifications"),
           },
@@ -964,6 +958,28 @@ export function AcademyDashboard() {
         ) : null}
 
         {section === "home" ? (
+          <>
+          <section className="mt-6">
+            <div className={`${glassCard} flex items-center justify-between gap-4 px-4 py-3`}>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground">학원 출석 키오스크 모드 전환</p>
+                <p className="mt-0.5 text-xs text-neutral-500">
+                  {kioskMode
+                    ? "키오스크 모드가 활성화되어 있습니다."
+                    : "키오스크 모드로 전환하면 전용 출석 체크 화면이 표시됩니다."}
+                </p>
+              </div>
+              <SlideSwitch
+                checked={kioskMode}
+                disabled={kioskActionBusy}
+                ariaLabel="출석 키오스크 모드 전환"
+                onCheckedChangeAction={(next) => {
+                  if (next) requestKioskOn();
+                  else requestKioskOff();
+                }}
+              />
+            </div>
+          </section>
           <section className="mt-6">
             <h2 className="mb-3 text-sm font-semibold text-foreground">
               히트맵
@@ -991,6 +1007,7 @@ export function AcademyDashboard() {
               />
             ) : null}
           </section>
+          </>
         ) : null}
 
         {section === "teachers" ? (
