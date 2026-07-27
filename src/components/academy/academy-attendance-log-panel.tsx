@@ -57,7 +57,7 @@ export function AcademyAttendanceLogPanel({
           type="button"
           onClick={() => void refresh()}
           disabled={busy}
-          className="rounded-xl border border-neutral-300/80 bg-white/70 px-3 py-2 text-[11px] font-medium text-neutral-800 hover:bg-white disabled:opacity-50"
+          className="rounded-[15px] border border-neutral-300/80 bg-white/70 px-3 py-2 text-[11px] font-medium text-neutral-800 hover:bg-white disabled:opacity-50"
         >
           새로고침
         </button>

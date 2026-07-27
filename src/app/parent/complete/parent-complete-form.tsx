@@ -135,7 +135,7 @@ export function ParentCompleteForm() {
             <button
               type="button"
               onClick={() => void onSignOutOtherParent()}
-              className="w-full rounded-xl border border-amber-700/30 bg-white/60 py-2 text-xs font-medium text-amber-950"
+              className="w-full rounded-[15px] border border-amber-700/30 bg-white/60 py-2 text-xs font-medium text-amber-950"
             >
               다른 학부모로 진행 (로그인 화면)
             </button>

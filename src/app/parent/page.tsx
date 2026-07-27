@@ -545,7 +545,6 @@ export default function ParentDashboardPage() {
             {
               id: "home",
               label: "홈",
-              showLabel: false,
               iconAction: (active: boolean) => <HomeTabIcon active={active} />,
               active: true,
               onSelectAction: () => router.push("/"),
@@ -565,7 +564,7 @@ export default function ParentDashboardPage() {
             type="button"
             onClick={() => void refreshChildrenList()}
             disabled={listRefreshBusy || !academyId}
-            className="rounded-xl border border-neutral-300/80 bg-white/70 px-3 py-2 text-[11px] font-medium text-neutral-800 hover:bg-white disabled:opacity-50"
+            className="rounded-[15px] border border-neutral-300/80 bg-white/70 px-3 py-2 text-[11px] font-medium text-neutral-800 hover:bg-white disabled:opacity-50"
           >
             {listRefreshBusy ? "불러오는 중…" : "목록 새로고침"}
           </button>

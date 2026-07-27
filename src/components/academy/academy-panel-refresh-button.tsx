@@ -15,7 +15,7 @@ export function AcademyPanelRefreshButton({
       type="button"
       onClick={onRefreshAction}
       disabled={busy}
-      className="shrink-0 rounded-xl border border-neutral-300/80 bg-white/70 px-3 py-2 text-[11px] font-medium text-neutral-800 hover:bg-white disabled:opacity-50 dark:border-white/12 dark:bg-white/[0.08] dark:text-neutral-200 dark:hover:bg-white/15"
+      className="shrink-0 rounded-[15px] border border-neutral-300/80 bg-white/70 px-3 py-2 text-[11px] font-medium text-neutral-800 hover:bg-white disabled:opacity-50 dark:border-white/12 dark:bg-white/[0.08] dark:text-neutral-200 dark:hover:bg-white/15"
     >
       {busy ? "불러오는 중…" : label}
     </button>

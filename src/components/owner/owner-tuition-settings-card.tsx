@@ -12,15 +12,39 @@ import { getFirebaseDb } from "@/lib/firebase/client-app";
 const inputClass =
   "w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3 text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50";
 
+function ChevronIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+      className={`shrink-0 text-neutral-400 transition-transform duration-150 ${open ? "rotate-90" : ""}`}
+    >
+      <path
+        d="M9 18l6-6-6-6"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function OwnerTuitionSettingsCard({
   academyId,
   academyName,
   disabled,
+  defaultCollapsed,
 }: {
   academyId: string;
   academyName: string;
   disabled?: boolean;
+  defaultCollapsed?: boolean;
 }) {
+  const [open, setOpen] = useState(!defaultCollapsed);
   const [kakaoPayLink, setKakaoPayLink] = useState("");
   const [bankName, setBankName] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
@@ -79,13 +103,19 @@ export function OwnerTuitionSettingsCard({
   const formDisabled = disabled || busy || !loaded;
 
   return (
-    <section className="glass-card space-y-4 p-4">
-      <div>
-        <h2 className="text-sm font-semibold text-foreground">원비 납부 안내</h2>
-        {academyName ? (
-          <p className="mt-0.5 text-[11px] text-neutral-500">{academyName}</p>
-        ) : null}
-      </div>
+    <section className="glass-card overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between px-4 py-3.5 text-left"
+      >
+        <span className="text-sm font-semibold text-foreground">
+          원비 납부 안내{academyName ? ` — ${academyName}` : ""}
+        </span>
+        <ChevronIcon open={open} />
+      </button>
+      {open ? (
+      <div className="border-t border-black/[0.06] px-4 pb-4 pt-3 dark:border-white/10 space-y-4">
       <p className="text-[11px] leading-relaxed text-neutral-600">
         학부모에게 발송되는 원비 납부 알림에 포함될 카카오페이 링크와 계좌 정보를
         입력합니다. 비워 두면 해당 항목은 알림에서 생략됩니다.
@@ -198,6 +228,8 @@ export function OwnerTuitionSettingsCard({
       >
         {busy ? "저장 중…" : "저장"}
       </button>
+      </div>
+      ) : null}
     </section>
   );
 }

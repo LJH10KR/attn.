@@ -74,7 +74,7 @@ export function ParentCheckInPinCard({ academyId, student, onUpdatedAction }: Pr
       ) : null}
       <button
         type="button"
-        className="mt-2 rounded-xl border border-neutral-200 px-3 py-2 text-xs font-medium dark:border-white/15"
+        className="mt-2 rounded-[15px] border border-neutral-200 px-3 py-2 text-xs font-medium dark:border-white/15"
         onClick={() => {
           resetFlow();
           setOpen(true);

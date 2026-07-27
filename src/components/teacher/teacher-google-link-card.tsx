@@ -45,21 +45,45 @@ function linkGoogleErrorMessage(code: string): string {
   }
 }
 
+function ChevronIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+      className={`shrink-0 text-neutral-400 transition-transform duration-150 ${open ? "rotate-90" : ""}`}
+    >
+      <path
+        d="M9 18l6-6-6-6"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export type TeacherGoogleLinkCardProps = {
   loginId?: string;
   googleLinked?: boolean;
   googleEmail?: string;
+  defaultCollapsed?: boolean;
 };
 
 export function TeacherGoogleLinkCard({
   loginId,
   googleLinked,
   googleEmail: googleEmailStored,
+  defaultCollapsed,
 }: TeacherGoogleLinkCardProps) {
   const [user, setUser] = useState<User | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [linkedEmail, setLinkedEmail] = useState<string | null>(null);
+  const [open, setOpen] = useState(!defaultCollapsed);
   const [needReauth, setNeedReauth] = useState(false);
   const [reauthPassword, setReauthPassword] = useState("");
 
@@ -173,110 +197,113 @@ export function TeacherGoogleLinkCard({
     firebaseState.kind === "both" ||
     (googleLinked || hasProvider(user, "google.com"));
 
-  if (showLinked) {
-    return (
-      <section className={`rounded-2xl p-5 ${glassCard}`} aria-label="Google 계정 연결">
-        <h3 className="text-sm font-semibold text-foreground">Google 계정 연결</h3>
-        <p className="mt-2 text-xs leading-relaxed text-neutral-600">
-          로그인 ID·비밀번호와 Google 로그인이 연결되어 있습니다. Google로도
-          로그인할 수 있습니다.
-        </p>
-        {displayGoogleEmail ? (
-          <p className="mt-2 text-[11px] text-neutral-500">
-            연결된 Google:{" "}
-            <span className="font-mono text-foreground">{displayGoogleEmail}</span>
-          </p>
-        ) : null}
-      </section>
-    );
-  }
-
-  if (firebaseState.kind === "googleOnly") {
-    return (
-      <section className={`rounded-2xl p-5 ${glassCard}`} aria-label="Google 계정 연결">
-        <h3 className="text-sm font-semibold text-foreground">Google 계정 연결</h3>
-        <p className="mt-2 text-xs leading-relaxed text-neutral-600">
-          Google 계정으로 로그인 중입니다.
-          {displayGoogleEmail ? (
-            <>
-              {" "}
-              (<span className="font-mono">{displayGoogleEmail}</span>)
-            </>
-          ) : null}
-        </p>
-      </section>
-    );
-  }
-
-  if (firebaseState.kind !== "passwordOnly") {
+  if (!showLinked && firebaseState.kind !== "googleOnly" && firebaseState.kind !== "passwordOnly") {
     return null;
   }
 
   return (
-    <section className={`rounded-2xl p-5 ${glassCard}`} aria-label="Google 계정 연결">
-      <h3 className="text-sm font-semibold text-foreground">Google 계정 연결</h3>
-      <p className="mt-2 text-xs leading-relaxed text-neutral-600">
-        Google 계정을 연결하면 로그인 ID(
-        {loginId ? <span className="font-mono text-[11px]">{loginId}</span> : "—"})·비밀번호
-        대신 Google로도 로그인할 수 있습니다. 연결 후에도 기존 로그인 방식은 그대로
-        사용할 수 있습니다.
-      </p>
+    <section className="glass-card overflow-hidden" aria-label="Google 계정 연결">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between px-4 py-3.5 text-left"
+      >
+        <span className="text-sm font-semibold text-foreground">Google 계정 연결</span>
+        <ChevronIcon open={open} />
+      </button>
+      {open ? (
+        <div className="border-t border-black/[0.06] px-4 pb-4 pt-3 dark:border-white/10 space-y-3">
+          {showLinked ? (
+            <>
+              <p className="text-xs leading-relaxed text-neutral-600">
+                로그인 ID·비밀번호와 Google 로그인이 연결되어 있습니다. Google로도
+                로그인할 수 있습니다.
+              </p>
+              {displayGoogleEmail ? (
+                <p className="text-[11px] text-neutral-500">
+                  연결된 Google:{" "}
+                  <span className="font-mono text-foreground">{displayGoogleEmail}</span>
+                </p>
+              ) : null}
+            </>
+          ) : firebaseState.kind === "googleOnly" ? (
+            <p className="text-xs leading-relaxed text-neutral-600">
+              Google 계정으로 로그인 중입니다.
+              {displayGoogleEmail ? (
+                <>
+                  {" "}
+                  (<span className="font-mono">{displayGoogleEmail}</span>)
+                </>
+              ) : null}
+            </p>
+          ) : (
+            <>
+              <p className="text-xs leading-relaxed text-neutral-600">
+                Google 계정을 연결하면 로그인 ID(
+                {loginId ? <span className="font-mono text-[11px]">{loginId}</span> : "—"})·비밀번호
+                대신 Google로도 로그인할 수 있습니다. 연결 후에도 기존 로그인 방식은 그대로
+                사용할 수 있습니다.
+              </p>
 
-      {needReauth ? (
-        <div className="mt-4 space-y-3">
-          <label className="block">
-            <span className="mb-1.5 block text-xs font-medium text-neutral-600">
-              로그인 비밀번호 확인
-            </span>
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={reauthPassword}
-              onChange={(e) => setReauthPassword(e.target.value)}
-              className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 px-4 py-3 text-sm text-foreground outline-none focus:border-[#4a90e2]/50 dark:border-white/12 dark:bg-white/[0.08]"
-              placeholder="현재 비밀번호"
-            />
-          </label>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void onReauthAndLink()}
-            className="w-full rounded-2xl bg-[#222] px-4 py-3 text-sm font-medium text-white transition hover:bg-[#333] disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-950 dark:hover:bg-white"
-          >
-            {busy ? "처리 중…" : "본인 확인 후 Google 연결"}
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => {
-              setNeedReauth(false);
-              setReauthPassword("");
-              setError(null);
-            }}
-            className="w-full text-center text-xs text-neutral-500 underline-offset-2 hover:underline"
-          >
-            취소
-          </button>
+              {needReauth ? (
+                <div className="space-y-3">
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-medium text-neutral-600">
+                      로그인 비밀번호 확인
+                    </span>
+                    <input
+                      type="password"
+                      autoComplete="current-password"
+                      value={reauthPassword}
+                      onChange={(e) => setReauthPassword(e.target.value)}
+                      className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 px-4 py-3 text-sm text-foreground outline-none focus:border-[#4a90e2]/50 dark:border-white/12 dark:bg-white/[0.08]"
+                      placeholder="현재 비밀번호"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void onReauthAndLink()}
+                    className="w-full rounded-2xl bg-[#222] px-4 py-3 text-sm font-medium text-white transition hover:bg-[#333] disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-950 dark:hover:bg-white"
+                  >
+                    {busy ? "처리 중…" : "본인 확인 후 Google 연결"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setNeedReauth(false);
+                      setReauthPassword("");
+                      setError(null);
+                    }}
+                    className="w-full text-center text-xs text-neutral-500 underline-offset-2 hover:underline"
+                  >
+                    취소
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void onLinkGoogle()}
+                  className="flex w-full items-center justify-center gap-3 rounded-2xl border border-neutral-300/70 bg-white/60 py-3.5 text-sm font-medium text-foreground shadow-sm transition hover:bg-white/85 disabled:opacity-50 dark:border-white/12 dark:bg-white/10"
+                >
+                  <GoogleMark />
+                  Google 계정 연결
+                </button>
+              )}
+
+              {error ? (
+                <p
+                  className="rounded-xl bg-red-500/10 px-3 py-2 text-center text-xs text-red-800 ring-1 ring-red-500/15"
+                  role="alert"
+                >
+                  {error}
+                </p>
+              ) : null}
+            </>
+          )}
         </div>
-      ) : (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void onLinkGoogle()}
-          className="mt-4 flex w-full items-center justify-center gap-3 rounded-2xl border border-neutral-300/70 bg-white/60 py-3.5 text-sm font-medium text-foreground shadow-sm transition hover:bg-white/85 disabled:opacity-50 dark:border-white/12 dark:bg-white/10"
-        >
-          <GoogleMark />
-          Google 계정 연결
-        </button>
-      )}
-
-      {error ? (
-        <p
-          className="mt-3 rounded-xl bg-red-500/10 px-3 py-2 text-center text-xs text-red-800 ring-1 ring-red-500/15"
-          role="alert"
-        >
-          {error}
-        </p>
       ) : null}
     </section>
   );

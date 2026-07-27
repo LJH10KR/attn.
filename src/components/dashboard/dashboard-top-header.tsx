@@ -147,13 +147,13 @@ export function DashboardTopHeader({
               <button
                 type="button"
                 onClick={() => onHomeAction()}
-                className="text-[20px] font-black tracking-tight text-foreground transition hover:opacity-70"
+                className="text-[27px] font-black tracking-tight text-foreground transition hover:opacity-70"
                 aria-label="홈으로 이동"
               >
                 attn.
               </button>
             ) : (
-              <span className="text-[20px] font-black tracking-tight text-foreground select-none">
+              <span className="text-[27px] font-black tracking-tight text-foreground select-none">
                 attn.
               </span>
             )}
@@ -166,7 +166,9 @@ export function DashboardTopHeader({
                   type="button"
                   onClick={() => onBellClickAction?.()}
                   className="relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-foreground transition hover:bg-black/[0.05] dark:hover:bg-white/10"
-                  aria-label={bellBadgeCount > 0 ? `알림 ${bellBadgeCount}건` : "알림"}
+                  aria-label={
+                    bellBadgeCount > 0 ? `알림 ${bellBadgeCount}건` : "알림"
+                  }
                 >
                   <BellIcon />
                   {bellBadgeCount > 0 ? (
@@ -279,7 +281,10 @@ export function DashboardTopHeader({
 /** 고정 헤더와 동일한 세로 공간을 확보해 본문이 헤더 아래에서 시작하도록 합니다. */
 export function DashboardTopHeaderSpacer() {
   return (
-    <div aria-hidden className={`mx-auto max-w-lg px-4 ${TOP_OUTER_PT} ${TOP_OUTER_PB}`}>
+    <div
+      aria-hidden
+      className={`mx-auto max-w-lg px-4 ${TOP_OUTER_PT} ${TOP_OUTER_PB}`}
+    >
       <div className={INNER_ROW} />
     </div>
   );

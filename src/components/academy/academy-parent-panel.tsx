@@ -28,7 +28,6 @@ import {
   AcademyMemberCredentialActions,
   AcademyMemberProvisionModal,
 } from "@/components/academy/academy-member-provision";
-import { AcademyParentSignupLink } from "@/components/academy/academy-parent-signup-link";
 import { formatKrPhoneDisplay, phoneMatchesSearch } from "@/lib/phone/kr-phone";
 
 const glassCard = "glass-card";
@@ -138,7 +137,7 @@ function SearchIcon() {
 }
 
 const actionBtnClass =
-  "rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45";
+  "rounded-[15px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45";
 
 function RegisterChildModal({
   parentRow,
@@ -845,8 +844,6 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
         </div>
       </div>
 
-      <AcademyParentSignupLink academyId={academyId} />
-
       <div className="flex gap-2">
         <input
           type="search"
@@ -973,7 +970,7 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
                     <button
                       type="button"
                       onClick={() => setStudentProvisionParentId(t.id)}
-                      className="mb-3 w-full rounded-xl border border-neutral-300/70 bg-white/50 py-2 text-xs font-medium text-foreground"
+                      className="mb-3 w-full rounded-[15px] border border-neutral-300/70 bg-white/50 py-2 text-xs font-medium text-foreground"
                     >
                       자녀 등록
                     </button>

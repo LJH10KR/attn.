@@ -17,6 +17,7 @@ import {
 } from "@/components/parent/parent-account-settings-cards";
 import { ParentGoogleLinkCard } from "@/components/parent/parent-google-link-card";
 import { ParentPushNotificationsCard } from "@/components/parent/parent-push-notifications-card";
+import { SettingsAccordionItem } from "@/components/ui/settings-accordion-item";
 import {
   getFirebaseAuth,
   getFirebaseDb,
@@ -29,7 +30,6 @@ import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
 import { useRoleLogout } from "@/lib/auth/use-role-logout";
 
-const glassCard = "glass-card";
 const inputClass =
   "w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3 text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50";
 
@@ -202,14 +202,13 @@ export default function ParentSettingsPage() {
             </span>
           }
           showBack
-          onBackAction={() => router.push("/parent")}
+          onBackAction={() => router.back()}
           backAriaLabel="학부모 대시보드로 돌아가기"
           onHomeAction={() => router.push("/")}
           bottomTabs={[
             {
               id: "home",
               label: "홈",
-              showLabel: false,
               iconAction: (active: boolean) => <HomeTabIcon active={active} />,
               active: true,
               onSelectAction: () => router.push("/"),
@@ -227,9 +226,8 @@ export default function ParentSettingsPage() {
         ) : null}
 
         <div className="space-y-4 mt-5">
-          <section className={`p-4 ${glassCard}`}>
-            <h2 className="text-sm font-semibold text-foreground">프로필</h2>
-            <div className="mt-4">
+          <SettingsAccordionItem title="프로필">
+            <div>
               <label
                 className="mb-1 block text-xs font-medium text-neutral-600"
                 htmlFor="p-dn"
@@ -246,7 +244,7 @@ export default function ParentSettingsPage() {
                 autoComplete="name"
               />
             </div>
-            <div className="mt-3">
+            <div>
               <label
                 className="mb-1 block text-xs font-medium text-neutral-600"
                 htmlFor="p-phone"
@@ -262,20 +260,20 @@ export default function ParentSettingsPage() {
               />
             </div>
             {profileError ? (
-              <p className="mt-2 text-sm text-red-700">{profileError}</p>
+              <p className="text-sm text-red-700">{profileError}</p>
             ) : null}
             {profileSaved ? (
-              <p className="mt-2 text-sm text-emerald-800">저장되었습니다.</p>
+              <p className="text-sm text-emerald-800">저장되었습니다.</p>
             ) : null}
             <button
               type="button"
               disabled={profileBusy}
               onClick={() => void onSaveProfile()}
-              className="mt-3 w-full rounded-2xl bg-[#222] py-2.5 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-950 disabled:opacity-60"
+              className="w-full rounded-2xl bg-[#222] py-2.5 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-950 disabled:opacity-60"
             >
               {profileBusy ? "저장 중…" : "프로필 저장"}
             </button>
-          </section>
+          </SettingsAccordionItem>
           {primaryAcademyId ? (
             <ParentLoginIdSettingsCard
               attnId={attnId}
@@ -283,12 +281,14 @@ export default function ParentSettingsPage() {
               requirePassword={authProvider !== "google"}
               disabled={profileBusy || logoutBusy}
               onSavedAction={setLoginId}
+              defaultCollapsed
             />
           ) : null}
           {primaryAcademyId ? (
             <ParentPasswordSettingsCard
               disabled={profileBusy || logoutBusy}
               registerMode={authProvider === "google"}
+              defaultCollapsed
             />
           ) : null}
           {primaryAcademyId ? (
@@ -297,25 +297,23 @@ export default function ParentSettingsPage() {
               loginId={loginId || attnId}
               googleLinked={googleLinked}
               googleEmail={googleEmail}
+              defaultCollapsed
             />
           ) : null}
-          <ParentPushNotificationsCard />
-          <section className={`p-4 ${glassCard}`}>
-            <h2 className="text-sm font-semibold text-foreground">
-              iOS (Safari)
-            </h2>
-            <p className="mt-2 text-[11px] leading-relaxed text-neutral-600">
+          <ParentPushNotificationsCard defaultCollapsed />
+          <SettingsAccordionItem title="iOS (Safari)">
+            <p className="text-[11px] leading-relaxed text-neutral-600">
               푸시를 안정적으로 쓰려면 홈 화면에 추가한 뒤 해당 아이콘으로 여는
               것이 좋습니다. 안내를 다시 보려면 아래를 누르세요.
             </p>
             <button
               type="button"
               onClick={openIosHint}
-              className="mt-3 w-full rounded-2xl border border-neutral-300/80 bg-white/70 py-2.5 text-sm font-medium text-neutral-800 hover:bg-white"
+              className="w-full rounded-2xl border border-neutral-300/80 bg-white/70 py-2.5 text-sm font-medium text-neutral-800 hover:bg-white"
             >
               iOS 안내 다시 보기
             </button>
-          </section>
+          </SettingsAccordionItem>
         </div>
 
         <IosPwaHintModal

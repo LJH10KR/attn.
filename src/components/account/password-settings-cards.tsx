@@ -25,6 +25,27 @@ function hasPasswordProvider(user: User): boolean {
   return user.providerData.some((p) => p.providerId === "password");
 }
 
+function ChevronIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+      className={`shrink-0 text-neutral-400 transition-transform duration-150 ${open ? "rotate-90" : ""}`}
+    >
+      <path
+        d="M9 18l6-6-6-6"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export type MemberPasswordSettingsCardProps = {
   callableName: string;
   description: string;
@@ -33,6 +54,7 @@ export type MemberPasswordSettingsCardProps = {
   minLength?: number;
   /** Google 전용 등 — 비밀번호 최초 등록 */
   registerMode?: boolean;
+  defaultCollapsed?: boolean;
 };
 
 /** 선생님·학부모 — Callable로 비밀번호 변경 */
@@ -43,7 +65,9 @@ export function MemberPasswordSettingsCard({
   disabled,
   minLength = 6,
   registerMode = false,
+  defaultCollapsed,
 }: MemberPasswordSettingsCardProps) {
+  const [open, setOpen] = useState(!defaultCollapsed);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newPassword2, setNewPassword2] = useState("");
@@ -103,81 +127,99 @@ export function MemberPasswordSettingsCard({
   const formDisabled = disabled || busy;
 
   return (
-    <section className="glass-card space-y-4 p-4">
-      <h2 className="text-sm font-semibold text-foreground">
-        {registerMode ? "비밀번호 등록" : "비밀번호 변경"}
-      </h2>
-      <p className="text-[11px] leading-relaxed text-neutral-600">{description}</p>
-      {!registerMode ? (
-        <PasswordInput
-          id={`${idPrefix}-cur-pw`}
-          label={
-            <>
-              현재 비밀번호 <span className="text-red-600">*</span>
-            </>
-          }
-          value={currentPassword}
-          onChangeAction={setCurrentPassword}
-          visible={showCurrent}
-          onToggleVisibleAction={() => setShowCurrent((v) => !v)}
-          inputClassName={inputClass}
-          labelClassName="mb-1 block text-xs font-medium text-neutral-600"
-          disabled={formDisabled}
-          autoComplete="current-password"
-        />
-      ) : null}
-      <PasswordInput
-        id={`${idPrefix}-new-pw`}
-        label={
-          <>
-            새 비밀번호 <span className="text-red-600">*</span>
-          </>
-        }
-        value={newPassword}
-        onChangeAction={setNewPassword}
-        visible={showNew}
-        onToggleVisibleAction={() => setShowNew((v) => !v)}
-        inputClassName={inputClass}
-        labelClassName="mb-1 block text-xs font-medium text-neutral-600"
-        disabled={formDisabled}
-        minLength={minLength}
-        autoComplete="new-password"
-      />
-      <PasswordInput
-        id={`${idPrefix}-new-pw2`}
-        label={
-          <>
-            새 비밀번호 확인 <span className="text-red-600">*</span>
-          </>
-        }
-        value={newPassword2}
-        onChangeAction={setNewPassword2}
-        onBlurAction={() => setConfirmBlurred(true)}
-        visible={showNew2}
-        onToggleVisibleAction={() => setShowNew2((v) => !v)}
-        confirmHint={passwordConfirmHint}
-        inputClassName={inputClass}
-        labelClassName="mb-1 block text-xs font-medium text-neutral-600"
-        disabled={formDisabled}
-        minLength={minLength}
-        autoComplete="new-password"
-      />
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
-      {saved ? <p className="text-sm text-emerald-800">비밀번호가 변경되었습니다.</p> : null}
+    <section className="glass-card overflow-hidden">
       <button
         type="button"
-        disabled={formDisabled}
-        onClick={() => void onSave()}
-        className="w-full rounded-2xl bg-[#222] py-2.5 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-950 disabled:opacity-60"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between px-4 py-3.5 text-left"
       >
-        {busy ? "저장 중…" : registerMode ? "비밀번호 등록" : "비밀번호 저장"}
+        <span className="text-sm font-semibold text-foreground">
+          {registerMode ? "비밀번호 등록" : "비밀번호 변경"}
+        </span>
+        <ChevronIcon open={open} />
       </button>
+      {open ? (
+        <div className="border-t border-black/[0.06] px-4 pb-4 pt-3 dark:border-white/10 space-y-4">
+          <p className="text-[11px] leading-relaxed text-neutral-600">{description}</p>
+          {!registerMode ? (
+            <PasswordInput
+              id={`${idPrefix}-cur-pw`}
+              label={
+                <>
+                  현재 비밀번호 <span className="text-red-600">*</span>
+                </>
+              }
+              value={currentPassword}
+              onChangeAction={setCurrentPassword}
+              visible={showCurrent}
+              onToggleVisibleAction={() => setShowCurrent((v) => !v)}
+              inputClassName={inputClass}
+              labelClassName="mb-1 block text-xs font-medium text-neutral-600"
+              disabled={formDisabled}
+              autoComplete="current-password"
+            />
+          ) : null}
+          <PasswordInput
+            id={`${idPrefix}-new-pw`}
+            label={
+              <>
+                새 비밀번호 <span className="text-red-600">*</span>
+              </>
+            }
+            value={newPassword}
+            onChangeAction={setNewPassword}
+            visible={showNew}
+            onToggleVisibleAction={() => setShowNew((v) => !v)}
+            inputClassName={inputClass}
+            labelClassName="mb-1 block text-xs font-medium text-neutral-600"
+            disabled={formDisabled}
+            minLength={minLength}
+            autoComplete="new-password"
+          />
+          <PasswordInput
+            id={`${idPrefix}-new-pw2`}
+            label={
+              <>
+                새 비밀번호 확인 <span className="text-red-600">*</span>
+              </>
+            }
+            value={newPassword2}
+            onChangeAction={setNewPassword2}
+            onBlurAction={() => setConfirmBlurred(true)}
+            visible={showNew2}
+            onToggleVisibleAction={() => setShowNew2((v) => !v)}
+            confirmHint={passwordConfirmHint}
+            inputClassName={inputClass}
+            labelClassName="mb-1 block text-xs font-medium text-neutral-600"
+            disabled={formDisabled}
+            minLength={minLength}
+            autoComplete="new-password"
+          />
+          {error ? <p className="text-sm text-red-700">{error}</p> : null}
+          {saved ? <p className="text-sm text-emerald-800">비밀번호가 변경되었습니다.</p> : null}
+          <button
+            type="button"
+            disabled={formDisabled}
+            onClick={() => void onSave()}
+            className="w-full rounded-2xl bg-[#222] py-2.5 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-950 disabled:opacity-60"
+          >
+            {busy ? "저장 중…" : registerMode ? "비밀번호 등록" : "비밀번호 저장"}
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }
 
 /** 오너 — 이메일·비밀번호 계정 비밀번호 변경 */
-export function OwnerPasswordSettingsCard({ disabled }: { disabled?: boolean }) {
+export function OwnerPasswordSettingsCard({
+  disabled,
+  defaultCollapsed,
+}: {
+  disabled?: boolean;
+  defaultCollapsed?: boolean;
+}) {
+  const [open, setOpen] = useState(!defaultCollapsed);
   const [user, setUser] = useState<User | null>(null);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -293,22 +335,24 @@ export function OwnerPasswordSettingsCard({ disabled }: { disabled?: boolean }) 
 
   if (!configured || !user) return null;
 
-  if (!canChangePassword) {
-    return (
-      <section className="glass-card space-y-3 p-4">
-        <h2 className="text-sm font-semibold text-foreground">비밀번호</h2>
+  return (
+    <section className="glass-card overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between px-4 py-3.5 text-left"
+      >
+        <span className="text-sm font-semibold text-foreground">비밀번호</span>
+        <ChevronIcon open={open} />
+      </button>
+      {open ? (
+        <div className="border-t border-black/[0.06] px-4 pb-4 pt-3 dark:border-white/10 space-y-4">
+      {!canChangePassword ? (
         <p className="text-[11px] leading-relaxed text-neutral-600">
           이메일이 확인된 계정에서만 비밀번호를 등록하거나 변경할 수 있습니다.
         </p>
-      </section>
-    );
-  }
-
-  return (
-    <section className="glass-card space-y-4 p-4">
-      <h2 className="text-sm font-semibold text-foreground">
-        {registerMode ? "비밀번호 등록" : "비밀번호 변경"}
-      </h2>
+      ) : (
+        <>
       <p className="text-[11px] leading-relaxed text-neutral-600">
         {registerMode
           ? "Google 로그인과 함께 이메일·비밀번호 로그인도 사용할 수 있도록 비밀번호를 등록합니다."
@@ -378,6 +422,10 @@ export function OwnerPasswordSettingsCard({ disabled }: { disabled?: boolean }) 
       >
         {busy ? "저장 중…" : registerMode ? "비밀번호 등록" : "비밀번호 저장"}
       </button>
+        </>
+      )}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -386,10 +434,13 @@ export function OwnerPasswordSettingsCard({ disabled }: { disabled?: boolean }) 
 export function AcademyPortalPasswordSettingsCard({
   academyId,
   disabled,
+  defaultCollapsed,
 }: {
   academyId: string;
   disabled?: boolean;
+  defaultCollapsed?: boolean;
 }) {
+  const [open, setOpen] = useState(!defaultCollapsed);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newPassword2, setNewPassword2] = useState("");
@@ -445,74 +496,85 @@ export function AcademyPortalPasswordSettingsCard({
   const formDisabled = disabled || busy;
 
   return (
-    <section className="glass-card space-y-4 p-5">
-      <h2 className="text-sm font-semibold text-foreground">학원 로그인 비밀번호</h2>
-      <p className="text-[11px] leading-relaxed text-neutral-600">
-        학원 포털 로그인(
-        <span className="font-mono">{academyId}</span>)에 쓰는 비밀번호를 변경합니다.
-      </p>
-      <PasswordInput
-        id="academy-cur-pw"
-        label={
-          <>
-            현재 비밀번호 <span className="text-red-600">*</span>
-          </>
-        }
-        value={currentPassword}
-        onChangeAction={setCurrentPassword}
-        visible={showCurrent}
-        onToggleVisibleAction={() => setShowCurrent((v) => !v)}
-        inputClassName={inputClass}
-        labelClassName="mb-1 block text-xs font-medium text-neutral-600"
-        disabled={formDisabled}
-        autoComplete="current-password"
-      />
-      <PasswordInput
-        id="academy-new-pw"
-        label={
-          <>
-            새 비밀번호 <span className="text-red-600">*</span>
-          </>
-        }
-        value={newPassword}
-        onChangeAction={setNewPassword}
-        visible={showNew}
-        onToggleVisibleAction={() => setShowNew((v) => !v)}
-        inputClassName={inputClass}
-        labelClassName="mb-1 block text-xs font-medium text-neutral-600"
-        disabled={formDisabled}
-        minLength={6}
-        autoComplete="new-password"
-      />
-      <PasswordInput
-        id="academy-new-pw2"
-        label={
-          <>
-            새 비밀번호 확인 <span className="text-red-600">*</span>
-          </>
-        }
-        value={newPassword2}
-        onChangeAction={setNewPassword2}
-        onBlurAction={() => setConfirmBlurred(true)}
-        visible={showNew2}
-        onToggleVisibleAction={() => setShowNew2((v) => !v)}
-        confirmHint={passwordConfirmHint}
-        inputClassName={inputClass}
-        labelClassName="mb-1 block text-xs font-medium text-neutral-600"
-        disabled={formDisabled}
-        minLength={6}
-        autoComplete="new-password"
-      />
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
-      {saved ? <p className="text-sm text-emerald-800">비밀번호가 변경되었습니다.</p> : null}
+    <section className="glass-card overflow-hidden">
       <button
         type="button"
-        disabled={formDisabled}
-        onClick={() => void onSave()}
-        className="w-full rounded-2xl bg-[#222] py-2.5 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-950 disabled:opacity-60"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between px-4 py-3.5 text-left"
       >
-        {busy ? "변경 중…" : "비밀번호 저장"}
+        <span className="text-sm font-semibold text-foreground">학원 로그인 비밀번호</span>
+        <ChevronIcon open={open} />
       </button>
+      {open ? (
+        <div className="border-t border-black/[0.06] px-4 pb-4 pt-3 dark:border-white/10 space-y-4">
+          <p className="text-[11px] leading-relaxed text-neutral-600">
+            학원 포털 로그인(
+            <span className="font-mono">{academyId}</span>)에 쓰는 비밀번호를 변경합니다.
+          </p>
+          <PasswordInput
+            id="academy-cur-pw"
+            label={
+              <>
+                현재 비밀번호 <span className="text-red-600">*</span>
+              </>
+            }
+            value={currentPassword}
+            onChangeAction={setCurrentPassword}
+            visible={showCurrent}
+            onToggleVisibleAction={() => setShowCurrent((v) => !v)}
+            inputClassName={inputClass}
+            labelClassName="mb-1 block text-xs font-medium text-neutral-600"
+            disabled={formDisabled}
+            autoComplete="current-password"
+          />
+          <PasswordInput
+            id="academy-new-pw"
+            label={
+              <>
+                새 비밀번호 <span className="text-red-600">*</span>
+              </>
+            }
+            value={newPassword}
+            onChangeAction={setNewPassword}
+            visible={showNew}
+            onToggleVisibleAction={() => setShowNew((v) => !v)}
+            inputClassName={inputClass}
+            labelClassName="mb-1 block text-xs font-medium text-neutral-600"
+            disabled={formDisabled}
+            minLength={6}
+            autoComplete="new-password"
+          />
+          <PasswordInput
+            id="academy-new-pw2"
+            label={
+              <>
+                새 비밀번호 확인 <span className="text-red-600">*</span>
+              </>
+            }
+            value={newPassword2}
+            onChangeAction={setNewPassword2}
+            onBlurAction={() => setConfirmBlurred(true)}
+            visible={showNew2}
+            onToggleVisibleAction={() => setShowNew2((v) => !v)}
+            confirmHint={passwordConfirmHint}
+            inputClassName={inputClass}
+            labelClassName="mb-1 block text-xs font-medium text-neutral-600"
+            disabled={formDisabled}
+            minLength={6}
+            autoComplete="new-password"
+          />
+          {error ? <p className="text-sm text-red-700">{error}</p> : null}
+          {saved ? <p className="text-sm text-emerald-800">비밀번호가 변경되었습니다.</p> : null}
+          <button
+            type="button"
+            disabled={formDisabled}
+            onClick={() => void onSave()}
+            className="w-full rounded-2xl bg-[#222] py-2.5 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-950 disabled:opacity-60"
+          >
+            {busy ? "변경 중…" : "비밀번호 저장"}
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }

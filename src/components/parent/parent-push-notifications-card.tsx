@@ -18,10 +18,14 @@ import {
 
 const shellClass = "glass-card overflow-hidden";
 
-export function ParentPushNotificationsCard() {
+export function ParentPushNotificationsCard({
+  defaultCollapsed,
+}: {
+  defaultCollapsed?: boolean;
+} = {}) {
   const headingId = useId();
   const panelId = useId();
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(!defaultCollapsed);
   const [uid, setUid] = useState<string | null>(null);
   const [remoteEnabled, setRemoteEnabled] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);

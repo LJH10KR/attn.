@@ -167,14 +167,13 @@ export default function OwnerSettingsPage() {
             </span>
           }
           showBack
-          onBackAction={() => router.push("/owner")}
+          onBackAction={() => router.back()}
           backAriaLabel="오너 대시보드로 돌아가기"
           onHomeAction={() => router.push("/")}
           bottomTabs={[
             {
               id: "home",
               label: "홈",
-              showLabel: false,
               iconAction: (active: boolean) => <HomeTabIcon active={active} />,
               active: true,
               onSelectAction: () => router.push("/"),
@@ -186,14 +185,15 @@ export default function OwnerSettingsPage() {
         />
 
         <div className="mt-5 space-y-4">
-          <OwnerPasswordSettingsCard disabled={logoutBusy} />
-          <OwnerGoogleLinkCard />
+          <OwnerPasswordSettingsCard disabled={logoutBusy} defaultCollapsed />
+          <OwnerGoogleLinkCard defaultCollapsed />
           {academies.map((a) => (
             <OwnerSessionTuitionSettingsCard
               key={`session-${a.id}`}
               academyId={a.id}
               academyName={a.name}
               disabled={logoutBusy}
+              defaultCollapsed
             />
           ))}
           {academies.map((a) => (
@@ -202,6 +202,7 @@ export default function OwnerSettingsPage() {
               academyId={a.id}
               academyName={a.name}
               disabled={logoutBusy}
+              defaultCollapsed
             />
           ))}
         </div>

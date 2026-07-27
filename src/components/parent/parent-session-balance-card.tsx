@@ -137,7 +137,7 @@ export function ParentSessionBalanceCard({
               href={settings.kakaoPayLink}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center justify-center w-full rounded-xl bg-[#FEE500] py-2.5 text-xs font-semibold text-[#3C1E1E] hover:bg-[#F6D800] active:bg-[#EDD000]"
+              className="flex items-center justify-center w-full rounded-[15px] bg-[#FEE500] py-2.5 text-xs font-semibold text-[#3C1E1E] hover:bg-[#F6D800] active:bg-[#EDD000]"
             >
               카카오페이로 납부하기
             </a>
@@ -155,7 +155,7 @@ export function ParentSessionBalanceCard({
                 <button
                   type="button"
                   onClick={() => void onCopy()}
-                  className="shrink-0 rounded-lg border border-neutral-300/70 bg-white/70 dark:bg-white/10 px-2.5 py-1.5 text-[10px] font-medium text-neutral-700 dark:text-neutral-300 hover:bg-white/90"
+                  className="shrink-0 rounded-[15px] border border-neutral-300/70 bg-white/70 dark:bg-white/10 px-2.5 py-1.5 text-[10px] font-medium text-neutral-700 dark:text-neutral-300 hover:bg-white/90"
                 >
                   {copied ? "복사됨" : "복사"}
                 </button>

@@ -110,7 +110,7 @@ export function PaymentReminderModal({
               <button
                 type="button"
                 onClick={() => void onCopy()}
-                className="shrink-0 rounded-xl border border-neutral-300/70 bg-white/70 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-white"
+                className="shrink-0 rounded-[15px] border border-neutral-300/70 bg-white/70 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-white"
               >
                 {copied ? "복사됨" : "복사"}
               </button>

@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { AcademyParentPanel } from "@/components/academy/academy-parent-panel";
+import { AcademyParentSignupLink } from "@/components/academy/academy-parent-signup-link";
 import { AcademyAttendanceLogPanel } from "@/components/academy/academy-attendance-log-panel";
 import { AcademyStudentPanel } from "@/components/academy/academy-student-panel";
 import { AcademyTeacherPanel } from "@/components/academy/academy-teacher-panel";
@@ -770,17 +771,7 @@ export function AcademyDashboard() {
             : () => router.push(`/academy/settings?id=${encodeURIComponent(academyId)}`)
         }
         settingsLabel="학원 설정"
-        menuIntro={
-          showBack && !kioskMode ? (
-            <span className="text-neutral-600 dark:text-neutral-400">
-              오너 계정에서 이 학원 대시보드를 보고 있어요.
-            </span>
-          ) : undefined
-        }
-        showBack={showBack && !kioskMode}
         hideBottomNav={kioskMode}
-        onBackAction={onBackToOwner}
-        backAriaLabel="오너 대시보드로 돌아가기"
         onHomeAction={kioskMode ? undefined : () => router.push("/")}
         onBellClickAction={() => setNotificationsOpen(true)}
         showBell={!kioskMode}
@@ -908,58 +899,60 @@ export function AcademyDashboard() {
           </section>
         ) : (
           <>
-        <h2 className="mb-2 text-sm font-semibold text-foreground">요약</h2>
-        <div className="grid grid-cols-3 gap-2">
-          {SUMMARY_STAT_ROWS.map((c) => {
-            const isActive = section === c.key;
-            const isHomeCards = section === "home";
-            const countValue =
-              summaryCounts !== null
-                ? String(summaryCounts[c.key])
-                : summaryCountsError
-                  ? "—"
-                  : "…";
-            return (
-              <button
-                key={c.key}
-                type="button"
-                onClick={() => navigateSection(c.key)}
-                className={`flex flex-col items-center justify-center py-4 px-2 transition ${
-                  isActive
-                    ? "rounded-[1.75rem] border border-[#222]/20 bg-[#222] text-white shadow-md dark:border-white/25 dark:bg-neutral-100 dark:text-neutral-950"
-                    : `glass-tile ${isHomeCards ? "glass-tile-hover" : ""}`
-                }`}
-              >
-                <span
-                  className={`text-[11px] font-medium ${
-                    isActive
-                      ? "text-white/90 dark:text-neutral-600"
-                      : "text-neutral-500 dark:text-neutral-400"
-                  }`}
-                >
-                  {c.label}
-                </span>
-                <span
-                  className={`mt-1 text-xl font-semibold tabular-nums ${
-                    isActive
-                      ? "text-white dark:text-neutral-950"
-                      : "text-foreground"
-                  }`}
-                >
-                  {countValue}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        {summaryCountsError ? (
-          <p className="mt-2 text-center text-[10px] text-red-600 dark:text-red-400">
-            {summaryCountsError}
-          </p>
-        ) : null}
-
         {section === "home" ? (
           <>
+          <h2 className="mb-2 text-sm font-semibold text-foreground">요약</h2>
+          <div className="grid grid-cols-3 gap-2">
+            {SUMMARY_STAT_ROWS.map((c) => {
+              const countValue =
+                summaryCounts !== null
+                  ? String(summaryCounts[c.key])
+                  : summaryCountsError
+                    ? "—"
+                    : "…";
+              return (
+                <button
+                  key={c.key}
+                  type="button"
+                  onClick={() => navigateSection(c.key)}
+                  className="glass-tile glass-tile-hover flex flex-col items-center justify-center px-2 py-4 transition"
+                >
+                  <span className="text-[11px] font-medium text-neutral-500 dark:text-neutral-400">
+                    {c.label}
+                  </span>
+                  <span className="mt-1 text-xl font-semibold tabular-nums text-foreground">
+                    {countValue}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {summaryCountsError ? (
+            <p className="mt-2 text-center text-[10px] text-red-600 dark:text-red-400">
+              {summaryCountsError}
+            </p>
+          ) : null}
+
+          {showBack ? (
+            <section className="mt-6">
+              <div className={`${glassCard} flex items-center justify-between gap-4 px-4 py-3`}>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground">오너 대시보드</p>
+                  <p className="mt-0.5 text-xs text-neutral-500">오너 계정에서 이 학원 대시보드를 열었습니다.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={onBackToOwner}
+                  className="shrink-0 rounded-[15px] bg-[#222] px-3 py-2 text-xs font-medium text-white dark:bg-neutral-100 dark:text-neutral-950"
+                >
+                  돌아가기
+                </button>
+              </div>
+            </section>
+          ) : null}
+          <section className="mt-4">
+            <AcademyParentSignupLink academyId={academyId} />
+          </section>
           <section className="mt-6">
             <div className={`${glassCard} flex items-center justify-between gap-4 px-4 py-3`}>
               <div className="min-w-0">

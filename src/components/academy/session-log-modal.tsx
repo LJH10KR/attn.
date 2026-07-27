@@ -239,7 +239,7 @@ export function SessionLogModal({
             ref={closeRef}
             type="button"
             onClick={onClose}
-            className="shrink-0 rounded-xl border border-neutral-300/80 bg-white/70 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-white/90"
+            className="shrink-0 rounded-[15px] border border-neutral-300/80 bg-white/70 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-white/90"
           >
             닫기
           </button>
@@ -251,7 +251,7 @@ export function SessionLogModal({
             type="button"
             onClick={() => goMonth(-1)}
             disabled={busy}
-            className="rounded-lg border border-neutral-300/70 bg-white/55 px-3 py-1.5 text-xs font-medium hover:bg-white/90 disabled:opacity-40"
+            className="rounded-[15px] border border-neutral-300/70 bg-white/55 px-3 py-1.5 text-xs font-medium hover:bg-white/90 disabled:opacity-40"
           >
             ‹ 이전
           </button>
@@ -262,7 +262,7 @@ export function SessionLogModal({
             type="button"
             onClick={() => goMonth(1)}
             disabled={busy || isCurrentMonth}
-            className="rounded-lg border border-neutral-300/70 bg-white/55 px-3 py-1.5 text-xs font-medium hover:bg-white/90 disabled:opacity-40"
+            className="rounded-[15px] border border-neutral-300/70 bg-white/55 px-3 py-1.5 text-xs font-medium hover:bg-white/90 disabled:opacity-40"
           >
             다음 ›
           </button>
@@ -310,7 +310,7 @@ export function SessionLogModal({
                           <button
                             type="button"
                             disabled={cancelBusy}
-                            className="rounded-lg border border-neutral-300/70 bg-white/80 px-2.5 py-1 text-[11px] font-medium text-neutral-700 hover:bg-white disabled:opacity-50"
+                            className="rounded-[15px] border border-neutral-300/70 bg-white/80 px-2.5 py-1 text-[11px] font-medium text-neutral-700 hover:bg-white disabled:opacity-50"
                             onClick={() => setConfirmId(null)}
                           >
                             아니요
@@ -318,7 +318,7 @@ export function SessionLogModal({
                           <button
                             type="button"
                             disabled={cancelBusy}
-                            className="rounded-lg border border-red-300 bg-red-500 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-red-600 disabled:opacity-50"
+                            className="rounded-[15px] border border-red-300 bg-red-500 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-red-600 disabled:opacity-50"
                             onClick={() => void cancelLog(log)}
                           >
                             {cancelBusy ? "취소 중…" : "확인"}
@@ -328,7 +328,7 @@ export function SessionLogModal({
                         <button
                           type="button"
                           disabled={cancelBusy}
-                          className="rounded-lg border border-neutral-300/70 bg-white/70 px-2.5 py-1 text-[11px] font-medium text-neutral-700 hover:bg-white/90 disabled:opacity-40"
+                          className="rounded-[15px] border border-neutral-300/70 bg-white/70 px-2.5 py-1 text-[11px] font-medium text-neutral-700 hover:bg-white/90 disabled:opacity-40"
                           onClick={() => setConfirmId(log.id)}
                         >
                           차감 취소
@@ -349,7 +349,7 @@ export function SessionLogModal({
               type="button"
               disabled={page === 1}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="rounded-lg border border-neutral-300/70 bg-white/55 px-2.5 py-1.5 text-[11px] font-medium hover:bg-white/90 disabled:opacity-40"
+              className="rounded-[15px] border border-neutral-300/70 bg-white/55 px-2.5 py-1.5 text-[11px] font-medium hover:bg-white/90 disabled:opacity-40"
             >
               ← 이전
             </button>
@@ -363,7 +363,7 @@ export function SessionLogModal({
                   key={n}
                   type="button"
                   onClick={() => setPage(n as number)}
-                  className={`min-w-[28px] rounded-lg border px-2 py-1.5 text-[11px] font-medium ${
+                  className={`min-w-[28px] rounded-[15px] border px-2 py-1.5 text-[11px] font-medium ${
                     page === n
                       ? "border-violet-400 bg-violet-600 text-white"
                       : "border-neutral-300/70 bg-white/55 text-neutral-700 hover:bg-white/90"
@@ -377,7 +377,7 @@ export function SessionLogModal({
               type="button"
               disabled={page === totalPages}
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              className="rounded-lg border border-neutral-300/70 bg-white/55 px-2.5 py-1.5 text-[11px] font-medium hover:bg-white/90 disabled:opacity-40"
+              className="rounded-[15px] border border-neutral-300/70 bg-white/55 px-2.5 py-1.5 text-[11px] font-medium hover:bg-white/90 disabled:opacity-40"
             >
               다음 →
             </button>

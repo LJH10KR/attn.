@@ -42,7 +42,7 @@ const inputClass =
   "min-w-0 w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-2.5 text-sm text-foreground shadow-inner outline-none placeholder:text-neutral-400 focus:border-[#4a90e2]/50 focus:bg-white/70";
 
 const miniBtnClass =
-  "rounded-lg border border-neutral-300/70 bg-white/55 px-2 py-1 text-[10px] font-medium text-foreground hover:bg-white/90 disabled:opacity-45";
+  "rounded-[15px] border border-neutral-300/70 bg-white/55 px-2 py-1 text-[10px] font-medium text-foreground hover:bg-white/90 disabled:opacity-45";
 
 export type StudentRowVM = {
   id: string;
@@ -1753,20 +1753,11 @@ export function AcademyParentStudentList({
                   {s.weeklySessionCount != null ? (
                     <>
                       <button type="button" className={`${miniBtnClass} border-violet-300/70 bg-violet-50/70 text-violet-800 hover:bg-violet-100`} disabled={sessionCompleteBusy || chargeBusy} onClick={() => setSessionConfirmTarget(s)}>수업 완료</button>
-                      <button type="button" className={`${miniBtnClass} border-violet-400/60 bg-violet-700 text-white hover:bg-violet-800`} disabled={sessionCompleteBusy || chargeBusy} onClick={() => setChargeTarget(s)}>충전</button>
+                      <button type="button" className="rounded-[15px] border border-violet-400/60 bg-violet-700 px-2 py-1 text-[10px] font-medium text-white hover:bg-violet-800 disabled:opacity-45" disabled={sessionCompleteBusy || chargeBusy} onClick={() => setChargeTarget(s)}>충전</button>
                     </>
                   ) : null}
                 </div>
               </div>
-              <button
-                type="button"
-                className="flex w-full items-center justify-center border-t border-white/40 py-1 hover:bg-black/[0.03] dark:hover:bg-white/[0.03]"
-                onClick={() => setExpandedId((prev) => (prev === s.id ? null : s.id))}
-                aria-expanded={expandedId === s.id}
-                aria-label="더 보기"
-              >
-                <ChevronRightGlyph className={`transition-transform duration-150 text-neutral-400 ${expandedId === s.id ? "-rotate-90" : "rotate-90"}`} />
-              </button>
               {expandedId === s.id ? (
                 <div className="flex flex-wrap gap-1 border-t border-white/40 px-3 py-2">
                   {s.weeklySessionCount != null ? (
@@ -1777,6 +1768,15 @@ export function AcademyParentStudentList({
                   <button type="button" className={`${miniBtnClass} border-red-200/80 text-red-600 hover:bg-red-50`} onClick={() => { setDeleteTarget(s); setExpandedId(null); }}>삭제</button>
                 </div>
               ) : null}
+              <button
+                type="button"
+                className="flex w-full items-center justify-center border-t border-white/40 py-1 hover:bg-black/[0.03] dark:hover:bg-white/[0.03]"
+                onClick={() => setExpandedId((prev) => (prev === s.id ? null : s.id))}
+                aria-expanded={expandedId === s.id}
+                aria-label="더 보기"
+              >
+                <ChevronRightGlyph className={`transition-transform duration-150 text-neutral-400 ${expandedId === s.id ? "-rotate-90" : "rotate-90"}`} />
+              </button>
             </li>
           ))}
         </ul>
@@ -2193,7 +2193,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
           <button
             type="button"
             onClick={() => setDefaultTuitionModalOpen(true)}
-            className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-1.5 text-[11px] font-medium text-neutral-700 hover:bg-white/90"
+            className="rounded-[15px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-neutral-700 hover:bg-white/90"
           >
             기본 원비 설정
           </button>
@@ -2296,20 +2296,30 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                     </span>
                   </button>
                   <div className="mt-2 flex flex-wrap gap-1.5">
-                    <button type="button" className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 disabled:opacity-40" disabled={notifyBusyKey !== null} onClick={() => void sendAttendanceNotify(s.id, "present")}>
+                    <button type="button" className="rounded-[15px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 disabled:opacity-40" disabled={notifyBusyKey !== null} onClick={() => void sendAttendanceNotify(s.id, "present")}>
                       {notifyBusyKey === `${s.id}-present` ? "전송 중…" : "출석"}
                     </button>
-                    <button type="button" className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 disabled:opacity-40" disabled={notifyBusyKey !== null} onClick={() => void sendAttendanceNotify(s.id, "absent")}>
+                    <button type="button" className="rounded-[15px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 disabled:opacity-40" disabled={notifyBusyKey !== null} onClick={() => void sendAttendanceNotify(s.id, "absent")}>
                       {notifyBusyKey === `${s.id}-absent` ? "전송 중…" : "결석"}
                     </button>
                     {s.weeklySessionCount != null ? (
                       <>
-                        <button type="button" className="rounded-xl border border-violet-300/70 bg-violet-50/70 px-3 py-2 text-[11px] font-medium text-violet-800 shadow-sm hover:bg-violet-100" disabled={sessionCompleteBusy || chargeBusy} onClick={() => setSessionConfirmTarget(s)}>수업 완료</button>
-                        <button type="button" className="rounded-xl border border-violet-400/60 bg-violet-700 px-3 py-2 text-[11px] font-medium text-white shadow-sm hover:bg-violet-800" disabled={sessionCompleteBusy || chargeBusy} onClick={() => setChargeTarget(s)}>충전</button>
+                        <button type="button" className="rounded-[15px] border border-violet-300/70 bg-violet-50/70 px-3 py-2 text-[11px] font-medium text-violet-800 shadow-sm hover:bg-violet-100" disabled={sessionCompleteBusy || chargeBusy} onClick={() => setSessionConfirmTarget(s)}>수업 완료</button>
+                        <button type="button" className="rounded-[15px] border border-violet-400/60 bg-violet-700 px-3 py-2 text-[11px] font-medium text-white shadow-sm hover:bg-violet-800" disabled={sessionCompleteBusy || chargeBusy} onClick={() => setChargeTarget(s)}>충전</button>
                       </>
                     ) : null}
                   </div>
                 </div>
+                {expandedId === s.id ? (
+                  <div className="flex flex-wrap gap-1.5 border-t border-white/40 px-2 py-2 sm:px-3.5">
+                    {s.weeklySessionCount != null ? (
+                      <button type="button" className="rounded-[15px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90" onClick={() => setLogModalTarget(s)}>기록</button>
+                    ) : null}
+                    <button type="button" className="rounded-[15px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90" onClick={() => setTuitionModalTarget(s)}>원비</button>
+                    <button type="button" className="rounded-[15px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90" onClick={() => { openEdit(s); setExpandedId(null); }}>수정</button>
+                    <button type="button" className="rounded-[15px] border border-red-200/80 bg-white/55 px-3 py-2 text-[11px] font-medium text-red-600 shadow-sm hover:bg-red-50" onClick={() => { setTeacherModalStudentId(null); setDeleteTarget(s); setExpandedId(null); }}>삭제</button>
+                  </div>
+                ) : null}
                 <button
                   type="button"
                   className="flex w-full items-center justify-center border-t border-white/40 py-1 hover:bg-black/[0.02] dark:hover:bg-white/[0.03]"
@@ -2319,16 +2329,6 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                 >
                   <ChevronRightGlyph className={`transition-transform duration-150 text-neutral-400 ${expandedId === s.id ? "-rotate-90" : "rotate-90"}`} />
                 </button>
-                {expandedId === s.id ? (
-                  <div className="flex flex-wrap gap-1.5 border-t border-white/40 px-2 py-2 sm:px-3.5">
-                    {s.weeklySessionCount != null ? (
-                      <button type="button" className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90" onClick={() => setLogModalTarget(s)}>기록</button>
-                    ) : null}
-                    <button type="button" className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90" onClick={() => setTuitionModalTarget(s)}>원비</button>
-                    <button type="button" className="rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90" onClick={() => { openEdit(s); setExpandedId(null); }}>수정</button>
-                    <button type="button" className="rounded-xl border border-red-200/80 bg-white/55 px-3 py-2 text-[11px] font-medium text-red-600 shadow-sm hover:bg-red-50" onClick={() => { setTeacherModalStudentId(null); setDeleteTarget(s); setExpandedId(null); }}>삭제</button>
-                  </div>
-                ) : null}
               </div>
             );
           })

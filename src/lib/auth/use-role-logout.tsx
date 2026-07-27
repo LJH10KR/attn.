@@ -24,7 +24,7 @@ export function useRoleLogout({
   extraBadgeUserIds,
   beforeSignOut,
   modalTitle = "로그아웃 중",
-  modalDescription = "알림을 정리하고 안전하게 로그아웃하고 있어요.",
+  modalDescription = "안전하게 로그아웃 중이에요.",
 }: UseRoleLogoutOptions) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);

@@ -15,6 +15,7 @@ import {
   TeacherPasswordSettingsCard,
 } from "@/components/teacher/teacher-account-settings-cards";
 import { TeacherGoogleLinkCard } from "@/components/teacher/teacher-google-link-card";
+import { SettingsAccordionItem } from "@/components/ui/settings-accordion-item";
 import {
   getFirebaseAuth,
   getFirebaseDb,
@@ -27,7 +28,6 @@ import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { doc, onSnapshot } from "firebase/firestore";
 
-const glassCard = "glass-card";
 const inputClass =
   "w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3 text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50";
 
@@ -177,14 +177,13 @@ export default function TeacherSettingsPage() {
             </span>
           }
           showBack
-          onBackAction={() => router.push("/teacher")}
+          onBackAction={() => router.back()}
           backAriaLabel="선생님 대시보드로 돌아가기"
           onHomeAction={() => router.push("/")}
           bottomTabs={[
             {
               id: "home",
               label: "홈",
-              showLabel: false,
               iconAction: (active: boolean) => <HomeTabIcon active={active} />,
               active: true,
               onSelectAction: () => router.push("/"),
@@ -196,8 +195,7 @@ export default function TeacherSettingsPage() {
         />
 
         <div className="mt-5 space-y-4">
-          <section className={`space-y-4 p-4 ${glassCard}`}>
-            <h2 className="text-sm font-semibold text-foreground">프로필</h2>
+          <SettingsAccordionItem title="프로필">
             <div>
               <label
                 className="mb-1 block text-xs font-medium text-neutral-600"
@@ -242,7 +240,7 @@ export default function TeacherSettingsPage() {
             >
               {busy ? "저장 중…" : "프로필 저장"}
             </button>
-          </section>
+          </SettingsAccordionItem>
 
           {academyId ? (
             <TeacherLoginIdSettingsCard
@@ -250,16 +248,18 @@ export default function TeacherSettingsPage() {
               currentLoginId={loginId}
               disabled={formDisabled}
               onSavedAction={setLoginId}
+              defaultCollapsed
             />
           ) : null}
 
-          <TeacherPasswordSettingsCard disabled={formDisabled} />
+          <TeacherPasswordSettingsCard disabled={formDisabled} defaultCollapsed />
 
           {academyId ? (
             <TeacherGoogleLinkCard
               loginId={loginId || attnId}
               googleLinked={googleLinked}
               googleEmail={googleEmail}
+              defaultCollapsed
             />
           ) : null}
         </div>

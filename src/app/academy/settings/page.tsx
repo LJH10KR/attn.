@@ -17,8 +17,7 @@ import { fetchIsOwner } from "@/lib/firebase/owner-profile";
 import { FirebaseError } from "firebase/app";
 import { AcademyPortalPasswordSettingsCard } from "@/components/account/password-settings-cards";
 import { SlideSwitch } from "@/components/ui/slide-switch";
-
-const glassCard = "glass-card";
+import { SettingsAccordionItem } from "@/components/ui/settings-accordion-item";
 
 function callableMessage(err: unknown, fallback: string): string {
   if (err instanceof FirebaseError && err.message) return err.message;
@@ -153,7 +152,7 @@ function AcademySettingsInner() {
         affiliationLabel="출석 키오스크"
         profile={authProfile}
         showBack
-        onBackAction={() => router.push(backHref)}
+        onBackAction={() => router.back()}
         backAriaLabel="학원 대시보드로"
         onHomeAction={() => router.push("/")}
         onLogoutAction={() => router.push(backHref)}
@@ -178,19 +177,18 @@ function AcademySettingsInner() {
           <p className="text-sm text-center text-neutral-600 dark:text-neutral-400">{toast}</p>
         ) : null}
 
-        <AcademyPortalPasswordSettingsCard academyId={academyId} disabled={busy} />
+        <AcademyPortalPasswordSettingsCard academyId={academyId} disabled={busy} defaultCollapsed />
 
-        <section className={`p-5 ${glassCard}`}>
-          <h2 className="text-sm font-semibold text-foreground">키오스크 종료 PIN</h2>
-          <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+        <SettingsAccordionItem title="키오스크 종료 PIN">
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">
             출석 키오스크를 끌 때 입력하는 4자리 PIN입니다.
           </p>
           {settings?.exitPinLocked ? (
-            <p className="mt-3 text-sm text-red-600 dark:text-red-400">
+            <p className="text-sm text-red-600 dark:text-red-400">
               종료 PIN이 잠겼습니다. 아래에서 잠금을 해제한 뒤 PIN을 다시 설정해 주세요.
             </p>
           ) : null}
-          <div className="mt-4 flex flex-col gap-2">
+          <div className="flex flex-col gap-2">
             <button
               type="button"
               disabled={busy}
@@ -216,14 +214,13 @@ function AcademySettingsInner() {
               </button>
             ) : null}
           </div>
-        </section>
+        </SettingsAccordionItem>
 
-        <section className={`p-5 ${glassCard}`}>
-          <h2 className="text-sm font-semibold text-foreground">출석 PIN</h2>
-          <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+        <SettingsAccordionItem title="출석 PIN">
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">
             켜면 학부모가 자녀별 출석 PIN을 설정해야 키오스크에서 출석할 수 있습니다.
           </p>
-          <div className="mt-4 flex items-center justify-between gap-3">
+          <div className="flex items-center justify-between gap-3">
             <span className="text-sm text-neutral-800 dark:text-neutral-200">
               {settings?.requireStudentCheckInPin ? "출석 PIN 사용 중" : "출석 PIN 사용 안 함"}
             </span>
@@ -236,7 +233,7 @@ function AcademySettingsInner() {
               }
             />
           </div>
-        </section>
+        </SettingsAccordionItem>
       </main>
 
       <PinPadModal
