@@ -179,22 +179,19 @@ type AcademySummaryCounts = {
   students: number;
 };
 
-function IconMonitor({ active }: { active?: boolean }) {
+function IconPencil({ active }: { active?: boolean }) {
   const stroke = active ? "#171717" : "#666";
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <rect
-        x="3"
-        y="4"
-        width="18"
-        height="12"
-        rx="2"
+      <path
+        d="M4 20l4-1L19.5 7.5a2.121 2.121 0 00-3-3L5 16l-1 4z"
         stroke={stroke}
         strokeWidth="1.6"
+        strokeLinejoin="round"
         fill={active ? "rgba(0,0,0,0.06)" : "none"}
       />
       <path
-        d="M8 19h8M12 16v3"
+        d="M16.5 4.5l3 3"
         stroke={stroke}
         strokeWidth="1.6"
         strokeLinecap="round"
@@ -203,43 +200,47 @@ function IconMonitor({ active }: { active?: boolean }) {
   );
 }
 
-function IconPerson({ active }: { active?: boolean }) {
+function IconGroup({ active }: { active?: boolean }) {
   const stroke = active ? "#171717" : "#666";
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <circle cx="12" cy="8.5" r="3.2" stroke={stroke} strokeWidth="1.6" />
+      <circle cx="9" cy="8" r="3" stroke={stroke} strokeWidth="1.6" />
       <path
-        d="M6.5 19c.8-3 2.8-5 5.5-5s4.7 2 5.5 5"
+        d="M3 19c.7-2.7 2.6-4.5 6-4.5s5.3 1.8 6 4.5"
         stroke={stroke}
         strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <circle cx="17" cy="8" r="2.2" stroke={stroke} strokeWidth="1.4" />
+      <path
+        d="M20 19c-.4-1.8-1.5-3-3-3.5"
+        stroke={stroke}
+        strokeWidth="1.4"
         strokeLinecap="round"
       />
     </svg>
   );
 }
 
-function IconBackpack({ active }: { active?: boolean }) {
+function IconGraduationCap({ active }: { active?: boolean }) {
   const stroke = active ? "#171717" : "#666";
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
       <path
-        d="M8 7V6a4 4 0 018 0v1"
+        d="M12 4L2 9l10 5 10-5-10-5z"
+        stroke={stroke}
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+        fill={active ? "rgba(0,0,0,0.06)" : "none"}
+      />
+      <path
+        d="M6 11.5V17c0 1.657 2.686 3 6 3s6-1.343 6-3v-5.5"
         stroke={stroke}
         strokeWidth="1.6"
         strokeLinecap="round"
       />
-      <rect
-        x="5"
-        y="7"
-        width="14"
-        height="13"
-        rx="3"
-        stroke={stroke}
-        strokeWidth="1.6"
-        fill={active ? "rgba(0,0,0,0.06)" : "none"}
-      />
       <path
-        d="M12 11v4"
+        d="M20 9v4"
         stroke={stroke}
         strokeWidth="1.6"
         strokeLinecap="round"
@@ -806,21 +807,21 @@ export function AcademyDashboard() {
           {
             id: "teachers",
             label: "선생님",
-            iconAction: (active: boolean) => <IconMonitor active={active} />,
+            iconAction: (active: boolean) => <IconPencil active={active} />,
             active: section === "teachers",
             onSelectAction: () => navigateSection("teachers"),
           },
           {
             id: "parents",
             label: "학부모",
-            iconAction: (active: boolean) => <IconPerson active={active} />,
+            iconAction: (active: boolean) => <IconGroup active={active} />,
             active: section === "parents",
             onSelectAction: () => navigateSection("parents"),
           },
           {
             id: "students",
             label: "학생",
-            iconAction: (active: boolean) => <IconBackpack active={active} />,
+            iconAction: (active: boolean) => <IconGraduationCap active={active} />,
             active: section === "students",
             onSelectAction: () => navigateSection("students"),
           },
