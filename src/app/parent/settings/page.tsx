@@ -7,7 +7,7 @@ import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { KrPhoneInput } from "@/components/ui/kr-phone-input";
-import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
+import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
@@ -205,14 +205,12 @@ export default function ParentSettingsPage() {
           onBackAction={() => router.push("/parent")}
           backAriaLabel="학부모 대시보드로 돌아가기"
           onHomeAction={() => router.push("/")}
-          showBellOnTitle={false}
-          showBellInBottomBar={false}
           bottomTabs={[
             {
               id: "home",
               label: "홈",
               showLabel: false,
-              iconAction: (active: boolean) => <AttnTabLogo active={active} />,
+              iconAction: (active: boolean) => <HomeTabIcon active={active} />,
               active: true,
               onSelectAction: () => router.push("/"),
             },

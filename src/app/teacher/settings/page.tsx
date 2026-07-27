@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { KrPhoneInput } from "@/components/ui/kr-phone-input";
 import { formatKrPhoneDisplay } from "@/lib/phone/kr-phone";
-import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
+import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import {
@@ -180,14 +180,12 @@ export default function TeacherSettingsPage() {
           onBackAction={() => router.push("/teacher")}
           backAriaLabel="선생님 대시보드로 돌아가기"
           onHomeAction={() => router.push("/")}
-          showBellOnTitle={false}
-          showBellInBottomBar={false}
           bottomTabs={[
             {
               id: "home",
               label: "홈",
               showLabel: false,
-              iconAction: (active: boolean) => <AttnTabLogo active={active} />,
+              iconAction: (active: boolean) => <HomeTabIcon active={active} />,
               active: true,
               onSelectAction: () => router.push("/"),
             },

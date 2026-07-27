@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { collection, doc, onSnapshot, query, where } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
-import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
+import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { OwnerPasswordSettingsCard } from "@/components/account/password-settings-cards";
@@ -170,14 +170,12 @@ export default function OwnerSettingsPage() {
           onBackAction={() => router.push("/owner")}
           backAriaLabel="오너 대시보드로 돌아가기"
           onHomeAction={() => router.push("/")}
-          showBellOnTitle={false}
-          showBellInBottomBar={false}
           bottomTabs={[
             {
               id: "home",
               label: "홈",
               showLabel: false,
-              iconAction: (active: boolean) => <AttnTabLogo active={active} />,
+              iconAction: (active: boolean) => <HomeTabIcon active={active} />,
               active: true,
               onSelectAction: () => router.push("/"),
             },

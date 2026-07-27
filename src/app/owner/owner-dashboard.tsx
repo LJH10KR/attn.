@@ -15,7 +15,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
+import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { useRoleLogout } from "@/lib/auth/use-role-logout";
@@ -412,14 +412,12 @@ export function OwnerDashboard() {
         includeSettingsAction
         onSettingsAction={() => router.push("/owner/settings")}
         onHomeAction={() => router.push("/")}
-        showBellOnTitle={false}
-        showBellInBottomBar={false}
         bottomTabs={[
           {
             id: "home",
             label: "홈",
             showLabel: false,
-            iconAction: (active: boolean) => <AttnTabLogo active={active} />,
+            iconAction: (active: boolean) => <HomeTabIcon active={active} />,
             active: true,
             onSelectAction: () => router.push("/"),
           },

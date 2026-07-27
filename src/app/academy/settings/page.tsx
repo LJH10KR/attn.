@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { PinPadModal } from "@/components/academy/pin-pad-modal";
-import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
+import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import type { AcademyKioskSettingsPublic } from "@/lib/firebase/attn-schema";
@@ -155,8 +155,6 @@ function AcademySettingsInner() {
         showBack
         onBackAction={() => router.push(backHref)}
         backAriaLabel="학원 대시보드로"
-        showBellOnTitle={false}
-        showBellInBottomBar={false}
         onHomeAction={() => router.push("/")}
         onLogoutAction={() => router.push(backHref)}
         logoutLabel="닫기"
@@ -165,7 +163,7 @@ function AcademySettingsInner() {
             id: "home",
             label: "요약",
             showLabel: false,
-            iconAction: (active: boolean) => <AttnTabLogo active={active} />,
+            iconAction: (active: boolean) => <HomeTabIcon active={active} />,
             active: true,
             onSelectAction: () => router.push(backHref),
           },

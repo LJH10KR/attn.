@@ -30,12 +30,9 @@ type DashboardRoleHeaderProps = {
   menuIntro?: ReactNode;
   onHomeAction?: () => void;
   onBellClickAction?: () => void;
-  showBellOnTitle?: boolean;
-  showBellInBottomBar?: boolean;
   bellBadgeCount?: number;
   beforeBell?: ReactNode;
   bottomTabs?: DashboardBottomNavTab[];
-  /** true이면 하단 탭·프로필 바 전체를 숨깁니다(키오스크 등) */
   hideBottomNav?: boolean;
   includeSettingsAction?: boolean;
   onSettingsAction?: () => void;
@@ -57,8 +54,6 @@ export function DashboardRoleHeader({
   menuIntro,
   onHomeAction,
   onBellClickAction,
-  showBellOnTitle = false,
-  showBellInBottomBar = true,
   bellBadgeCount = 0,
   beforeBell,
   bottomTabs,
@@ -114,34 +109,27 @@ export function DashboardRoleHeader({
     <>
       <DashboardTopScrim />
       <DashboardTopHeader
-        title={title}
-        showBack={showBack}
-        onBackAction={onBackAction}
-        backAriaLabel={backAriaLabel}
-        backHint={backHint}
+        onHomeAction={onHomeAction}
         onBellClickAction={onBellClickAction}
-        showBell={showBellOnTitle}
         bellBadgeCount={bellBadgeCount}
         beforeBell={beforeBell}
+        affiliationLabel={affiliationLabel}
+        menuIntro={menuIntro}
+        menuActions={menuActions}
+        profile={profile}
       />
-      <DashboardTopHeaderSpacer
-        showSubline={Boolean(showBack && backHint)}
-      />
+      <DashboardTopHeaderSpacer />
 
       {hideBottomNav ? null : (
         <DashboardBottomNav
           title={title}
-          affiliationLabel={affiliationLabel}
-          showBack={false}
+          showBack={showBack}
+          onBackAction={onBackAction}
+          backAriaLabel={backAriaLabel}
+          backHint={backHint}
           onHomeClickAction={onHomeAction}
-          onBellClickAction={onBellClickAction}
-          showBellInBottomBar={showBellInBottomBar}
-          bellBadgeCount={bellBadgeCount}
           bottomTabs={bottomTabs}
-          menuIntro={menuIntro}
-          menuActions={menuActions}
           includeSrOnlyScreenTitle={false}
-          profile={profile}
         />
       )}
     </>

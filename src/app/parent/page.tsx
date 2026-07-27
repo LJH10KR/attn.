@@ -9,7 +9,7 @@ import {
   docToStudentRow,
   type StudentRowVM,
 } from "@/components/academy/academy-student-panel";
-import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
+import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardNotificationsModal } from "@/components/dashboard/dashboard-notifications-modal";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
@@ -539,8 +539,6 @@ export default function ParentDashboardPage() {
           includeSettingsAction
           onSettingsAction={() => router.push("/parent/settings")}
           onHomeAction={() => router.push("/")}
-          showBellOnTitle
-          showBellInBottomBar={false}
           onBellClickAction={() => setNotificationsOpen(true)}
           bellBadgeCount={parentBellCount}
           bottomTabs={[
@@ -548,7 +546,7 @@ export default function ParentDashboardPage() {
               id: "home",
               label: "홈",
               showLabel: false,
-              iconAction: (active: boolean) => <AttnTabLogo active={active} />,
+              iconAction: (active: boolean) => <HomeTabIcon active={active} />,
               active: true,
               onSelectAction: () => router.push("/"),
             },

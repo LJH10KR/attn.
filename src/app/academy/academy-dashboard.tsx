@@ -29,7 +29,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DashboardNotificationsModal } from "@/components/dashboard/dashboard-notifications-modal";
-import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
+import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
@@ -798,8 +798,6 @@ export function AcademyDashboard() {
         onBackAction={onBackToOwner}
         backAriaLabel="오너 대시보드로 돌아가기"
         onHomeAction={() => router.push("/")}
-        showBellOnTitle
-        showBellInBottomBar={false}
         onBellClickAction={() => setNotificationsOpen(true)}
         bellBadgeCount={academyBellCount}
         bottomTabs={[
@@ -807,7 +805,7 @@ export function AcademyDashboard() {
             id: "home",
             label: "요약",
             showLabel: false,
-            iconAction: (active: boolean) => <AttnTabLogo active={active} />,
+            iconAction: (active: boolean) => <HomeTabIcon active={active} />,
             active: section === "home",
             onSelectAction: () => navigateSection("home"),
           },
