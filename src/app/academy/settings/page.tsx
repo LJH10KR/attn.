@@ -18,6 +18,8 @@ import { FirebaseError } from "firebase/app";
 import { AcademyPortalPasswordSettingsCard } from "@/components/account/password-settings-cards";
 import { SlideSwitch } from "@/components/ui/slide-switch";
 import { SettingsAccordionItem } from "@/components/ui/settings-accordion-item";
+import { OwnerTuitionSettingsCard } from "@/components/owner/owner-tuition-settings-card";
+import { OwnerSessionTuitionSettingsCard } from "@/components/owner/owner-session-tuition-settings-card";
 
 function callableMessage(err: unknown, fallback: string): string {
   if (err instanceof FirebaseError && err.message) return err.message;
@@ -234,6 +236,20 @@ function AcademySettingsInner() {
             />
           </div>
         </SettingsAccordionItem>
+
+        <OwnerSessionTuitionSettingsCard
+          academyId={academyId}
+          academyName=""
+          disabled={busy}
+          defaultCollapsed
+        />
+
+        <OwnerTuitionSettingsCard
+          academyId={academyId}
+          academyName=""
+          disabled={busy}
+          defaultCollapsed
+        />
       </main>
 
       <PinPadModal
