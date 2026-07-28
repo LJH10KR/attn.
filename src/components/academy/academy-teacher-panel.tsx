@@ -126,7 +126,7 @@ function SearchIcon() {
 }
 
 const actionBtnClass =
-  "rounded-[18px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45";
+  "rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45";
 
 function DeleteTeacherConfirmModal({
   row,
@@ -576,7 +576,7 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
           <button
             type="button"
             onClick={() => setProvisionOpen(true)}
-            className="rounded-full bg-[#222] dark:bg-neutral-100 px-3.5 py-2 text-xs font-medium text-white dark:text-neutral-950 shadow-sm hover:bg-[#333] dark:hover:bg-white"
+            className="rounded-[8px] bg-[#222] dark:bg-neutral-100 px-3 py-2 text-[11px] font-medium text-white dark:text-neutral-950 shadow-sm hover:bg-[#333] dark:hover:bg-white"
           >
             + 선생님 등록
           </button>

@@ -587,7 +587,7 @@ export default function AdminSeedPage() {
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
-                            className="rounded-[18px] border border-neutral-300/80 bg-white/70 px-3 py-1.5 text-[11px] font-medium text-neutral-800 hover:bg-white disabled:opacity-50 dark:border-white/12 dark:bg-white/[0.08] dark:text-neutral-200"
+                            className="rounded-[8px] border border-neutral-300/80 bg-white/70 px-3 py-1.5 text-[11px] font-medium text-neutral-800 hover:bg-white disabled:opacity-50 dark:border-white/12 dark:bg-white/[0.08] dark:text-neutral-200"
                             disabled={
                               metaReconcileBusyAcademyId === a.academyId ||
                               cascadeBusyAcademyId === a.academyId
@@ -604,7 +604,7 @@ export default function AdminSeedPage() {
                           </button>
                           <button
                             type="button"
-                            className="rounded-[18px] bg-red-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                            className="rounded-[8px] bg-red-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-red-700 disabled:opacity-50"
                             disabled={
                               cascadeBusyAcademyId === a.academyId ||
                               metaReconcileBusyAcademyId === a.academyId
@@ -669,7 +669,7 @@ export default function AdminSeedPage() {
                                         t.displayName || t.email || t.docId,
                                       )
                                     }
-                                    className="shrink-0 rounded-[18px] border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-800 hover:bg-red-100 disabled:opacity-50 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200"
+                                    className="shrink-0 rounded-[8px] border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-800 hover:bg-red-100 disabled:opacity-50 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200"
                                   >
                                     {memberDeleteKey === busyKey ? "삭제 중…" : "삭제"}
                                   </button>
@@ -713,7 +713,7 @@ export default function AdminSeedPage() {
                                         p.displayName || p.email || p.docId,
                                       )
                                     }
-                                    className="shrink-0 rounded-[18px] border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-800 hover:bg-red-100 disabled:opacity-50 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200"
+                                    className="shrink-0 rounded-[8px] border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-800 hover:bg-red-100 disabled:opacity-50 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200"
                                   >
                                     {memberDeleteKey === busyKey ? "삭제 중…" : "삭제"}
                                   </button>

@@ -28,7 +28,7 @@ export function AcademyParentSignupLink({ academyId }: { academyId: string }) {
       <button
         type="button"
         onClick={() => void onCopy()}
-        className="shrink-0 rounded-[18px] bg-[#222] px-3 py-2 text-xs font-medium text-white dark:bg-neutral-100 dark:text-neutral-950"
+        className="shrink-0 rounded-[8px] bg-[#222] px-3 py-2 text-xs font-medium text-white dark:bg-neutral-100 dark:text-neutral-950"
       >
         {copied ? "복사됨" : "링크 복사"}
       </button>

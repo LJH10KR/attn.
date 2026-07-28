@@ -409,7 +409,7 @@ function ParentJoinForm() {
             <button
               type="button"
               onClick={() => void onCopyLoginId()}
-              className="shrink-0 rounded-[18px] p-2 text-neutral-500 transition hover:bg-black/5 hover:text-foreground"
+              className="shrink-0 rounded-[8px] p-2 text-neutral-500 transition hover:bg-black/5 hover:text-foreground"
               aria-label="로그인 ID 복사"
             >
               <ClipboardIcon />

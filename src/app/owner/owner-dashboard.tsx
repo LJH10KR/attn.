@@ -432,7 +432,7 @@ export function OwnerDashboard() {
           <button
             type="button"
             onClick={() => openCreate(academies.length === 0 ? "first" : "add")}
-            className="rounded-full bg-[#222] dark:bg-neutral-100 px-4 py-2 text-xs font-medium text-white dark:text-neutral-950 shadow-md hover:bg-[#333] dark:hover:bg-white"
+            className="rounded-[8px] bg-[#222] dark:bg-neutral-100 px-3 py-2 text-[11px] font-medium text-white dark:text-neutral-950 shadow-md hover:bg-[#333] dark:hover:bg-white"
           >
             + 학원 등록
           </button>
@@ -484,7 +484,7 @@ export function OwnerDashboard() {
                 <div className="mt-4 flex flex-col gap-2">
                   <Link
                     href={`/academy?id=${encodeURIComponent(a.id)}&from=owner`}
-                    className="w-full rounded-[18px] bg-[#222] dark:bg-neutral-100 py-2.5 text-center text-xs font-medium text-white dark:text-neutral-950 shadow-sm hover:bg-[#333] dark:hover:bg-white"
+                    className="w-full rounded-[8px] bg-[#222] dark:bg-neutral-100 py-2.5 text-center text-xs font-medium text-white dark:text-neutral-950 shadow-sm hover:bg-[#333] dark:hover:bg-white"
                   >
                     학원 대시보드
                   </Link>
@@ -492,14 +492,14 @@ export function OwnerDashboard() {
                     <button
                       type="button"
                       onClick={() => openEdit(a)}
-                      className="flex-1 rounded-[18px] border border-neutral-300/60 bg-white/40 py-2 text-xs font-medium text-foreground hover:bg-white/70"
+                      className="flex-1 rounded-[8px] border border-neutral-300/60 bg-white/40 py-2 text-xs font-medium text-foreground hover:bg-white/70"
                     >
                       수정
                     </button>
                     <button
                       type="button"
                       onClick={() => openDelete(a)}
-                      className="flex-1 rounded-[18px] border border-red-200/60 bg-red-500/5 py-2 text-xs font-medium text-red-800 hover:bg-red-500/10"
+                      className="flex-1 rounded-[8px] border border-red-200/60 bg-red-500/5 py-2 text-xs font-medium text-red-800 hover:bg-red-500/10"
                     >
                       삭제
                     </button>
