@@ -194,7 +194,7 @@ export default function TeacherSettingsPage() {
           profile={headerProfile}
         />
 
-        <div className="mt-5 space-y-4">
+        <div className="mt-[26px] space-y-4">
           <SettingsAccordionItem title="프로필">
             <div>
               <label

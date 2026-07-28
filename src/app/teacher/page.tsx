@@ -425,13 +425,13 @@ export default function TeacherDashboardPage() {
           수정·삭제는 학원 대시보드에서 진행됩니다.
         </p> */}
 
-        <div className="mt-5 mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="mt-[26px] mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-foreground">전담 학생</h2>
           <button
             type="button"
             onClick={() => void refreshAssignedStudents()}
             disabled={listRefreshBusy || !academyId}
-            className="rounded-[15px] border border-neutral-300/80 bg-white/70 px-3 py-2 text-[11px] font-medium text-neutral-800 hover:bg-white disabled:opacity-50"
+            className="rounded-[18px] border border-neutral-300/80 bg-white/70 px-3 py-2 text-[11px] font-medium text-neutral-800 hover:bg-white disabled:opacity-50"
           >
             {listRefreshBusy ? "불러오는 중…" : "목록 새로고침"}
           </button>
@@ -489,7 +489,7 @@ export default function TeacherDashboardPage() {
                     type="button"
                     disabled={notifyBusyKey !== null}
                     onClick={() => void sendAttendanceNotify(s.id, "present")}
-                    className="rounded-[15px] border border-emerald-400/60 bg-emerald-500/15 px-3 py-2 text-[11px] font-medium text-emerald-950 hover:bg-emerald-500/25 disabled:opacity-50"
+                    className="rounded-[18px] border border-emerald-400/60 bg-emerald-500/15 px-3 py-2 text-[11px] font-medium text-emerald-950 hover:bg-emerald-500/25 disabled:opacity-50"
                   >
                     {notifyBusyKey === `${s.id}-present`
                       ? "전송 중…"
@@ -499,7 +499,7 @@ export default function TeacherDashboardPage() {
                     type="button"
                     disabled={notifyBusyKey !== null}
                     onClick={() => void sendAttendanceNotify(s.id, "absent")}
-                    className="rounded-[15px] border border-amber-400/60 bg-amber-500/12 px-3 py-2 text-[11px] font-medium text-amber-950 hover:bg-amber-500/22 disabled:opacity-50"
+                    className="rounded-[18px] border border-amber-400/60 bg-amber-500/12 px-3 py-2 text-[11px] font-medium text-amber-950 hover:bg-amber-500/22 disabled:opacity-50"
                   >
                     {notifyBusyKey === `${s.id}-absent`
                       ? "전송 중…"

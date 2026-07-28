@@ -55,7 +55,7 @@ body {
 
 /* 리퀴드 글래스 패널 — 라이트/다크에서 동일한 블러·채도, 토큰만 전환 */
 .glass-card {
-  border-radius: 15px;
+  border-radius: 18px;
   border: 1px solid var(--glass-border);
   background: var(--glass-fill);
   box-shadow: var(--glass-shadow), var(--glass-inset);
@@ -64,11 +64,11 @@ body {
 }
 
 .glass-card-lg {
-  border-radius: 15px;
+  border-radius: 18px;
 }
 
 .glass-card-hero {
-  border-radius: 15px;
+  border-radius: 18px;
   border: 1px solid var(--glass-border);
   background: var(--glass-fill);
   box-shadow: var(--glass-shadow), var(--glass-inset);
@@ -77,7 +77,7 @@ body {
 }
 
 .glass-card-soft {
-  border-radius: 15px;
+  border-radius: 18px;
   border: 1px solid var(--glass-border);
   background: var(--glass-fill);
   box-shadow: var(--glass-shadow), var(--glass-inset);
@@ -86,7 +86,7 @@ body {
 }
 
 .glass-tile {
-  border-radius: 15px;
+  border-radius: 18px;
   border: 1px solid var(--glass-border);
   background: var(--glass-fill);
   box-shadow: var(--glass-tile-shadow), var(--glass-inset);

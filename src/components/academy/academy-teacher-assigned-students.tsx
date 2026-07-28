@@ -26,7 +26,7 @@ import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 const glassCard = "glass-card";
 
 const miniBtnClass =
-  "rounded-[15px] border border-neutral-300/70 bg-white/55 px-2 py-1 text-[10px] font-medium text-foreground hover:bg-white/90 disabled:opacity-45";
+  "rounded-[18px] border border-neutral-300/70 bg-white/55 px-2 py-1 text-[10px] font-medium text-foreground hover:bg-white/90 disabled:opacity-45";
 
 function fsErr(err: unknown): string {
   if (err instanceof FirebaseError) {

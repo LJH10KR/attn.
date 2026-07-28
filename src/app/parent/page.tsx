@@ -558,13 +558,13 @@ export default function ParentDashboardPage() {
           연결된 자녀 학생 정보를 확인할 수 있습니다.
         </p> */}
 
-        <div className="mt-5 mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="mt-[26px] mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-foreground">자녀 학생</h2>
           <button
             type="button"
             onClick={() => void refreshChildrenList()}
             disabled={listRefreshBusy || !academyId}
-            className="rounded-[15px] border border-neutral-300/80 bg-white/70 px-3 py-2 text-[11px] font-medium text-neutral-800 hover:bg-white disabled:opacity-50"
+            className="rounded-[18px] border border-neutral-300/80 bg-white/70 px-3 py-2 text-[11px] font-medium text-neutral-800 hover:bg-white disabled:opacity-50"
           >
             {listRefreshBusy ? "불러오는 중…" : "목록 새로고침"}
           </button>

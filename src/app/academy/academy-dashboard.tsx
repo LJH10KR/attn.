@@ -886,7 +886,7 @@ export function AcademyDashboard() {
         onCompleteAction={(pin) => void verifyExitPinAndOff(pin)}
       />
 
-      <main className="mx-auto max-w-lg px-4 pt-4">
+      <main className="mx-auto max-w-lg px-4 pt-[26px]">
         {kioskMode ? (
           <section className="mt-2">
             <AcademyKioskPanel
@@ -943,7 +943,7 @@ export function AcademyDashboard() {
                 <button
                   type="button"
                   onClick={onBackToOwner}
-                  className="shrink-0 rounded-[15px] bg-[#222] px-3 py-2 text-xs font-medium text-white dark:bg-neutral-100 dark:text-neutral-950"
+                  className="shrink-0 rounded-[18px] bg-[#222] px-3 py-2 text-xs font-medium text-white dark:bg-neutral-100 dark:text-neutral-950"
                 >
                   돌아가기
                 </button>

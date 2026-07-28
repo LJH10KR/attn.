@@ -426,7 +426,7 @@ export function OwnerDashboard() {
         profile={headerProfile}
       />
 
-      <main className="mx-auto max-w-lg px-4 pt-5">
+      <main className="mx-auto max-w-lg px-4 pt-[26px]">
         <div className="mb-5 flex items-center justify-between gap-3">
           <h2 className="text-base font-semibold text-foreground">내 학원</h2>
           <button
@@ -484,7 +484,7 @@ export function OwnerDashboard() {
                 <div className="mt-4 flex flex-col gap-2">
                   <Link
                     href={`/academy?id=${encodeURIComponent(a.id)}&from=owner`}
-                    className="w-full rounded-[15px] bg-[#222] dark:bg-neutral-100 py-2.5 text-center text-xs font-medium text-white dark:text-neutral-950 shadow-sm hover:bg-[#333] dark:hover:bg-white"
+                    className="w-full rounded-[18px] bg-[#222] dark:bg-neutral-100 py-2.5 text-center text-xs font-medium text-white dark:text-neutral-950 shadow-sm hover:bg-[#333] dark:hover:bg-white"
                   >
                     학원 대시보드
                   </Link>
@@ -492,14 +492,14 @@ export function OwnerDashboard() {
                     <button
                       type="button"
                       onClick={() => openEdit(a)}
-                      className="flex-1 rounded-[15px] border border-neutral-300/60 bg-white/40 py-2 text-xs font-medium text-foreground hover:bg-white/70"
+                      className="flex-1 rounded-[18px] border border-neutral-300/60 bg-white/40 py-2 text-xs font-medium text-foreground hover:bg-white/70"
                     >
                       수정
                     </button>
                     <button
                       type="button"
                       onClick={() => openDelete(a)}
-                      className="flex-1 rounded-[15px] border border-red-200/60 bg-red-500/5 py-2 text-xs font-medium text-red-800 hover:bg-red-500/10"
+                      className="flex-1 rounded-[18px] border border-red-200/60 bg-red-500/5 py-2 text-xs font-medium text-red-800 hover:bg-red-500/10"
                     >
                       삭제
                     </button>

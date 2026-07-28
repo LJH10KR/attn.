@@ -137,7 +137,7 @@ function SearchIcon() {
 }
 
 const actionBtnClass =
-  "rounded-[15px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45";
+  "rounded-[18px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45";
 
 function RegisterChildModal({
   parentRow,
@@ -970,7 +970,7 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
                     <button
                       type="button"
                       onClick={() => setStudentProvisionParentId(t.id)}
-                      className="mb-3 w-full rounded-[15px] border border-neutral-300/70 bg-white/50 py-2 text-xs font-medium text-foreground"
+                      className="mb-3 w-full rounded-[18px] border border-neutral-300/70 bg-white/50 py-2 text-xs font-medium text-foreground"
                     >
                       자녀 등록
                     </button>

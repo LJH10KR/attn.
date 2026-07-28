@@ -169,7 +169,7 @@ function AcademySettingsInner() {
         ]}
       />
 
-      <main className="mx-auto max-w-lg px-4 pt-2 space-y-4">
+      <main className="mx-auto max-w-lg px-4 pt-[26px] space-y-4">
         {loadError ? (
           <p className="text-sm text-red-600 dark:text-red-400">{loadError}</p>
         ) : null}

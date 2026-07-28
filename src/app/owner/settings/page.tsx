@@ -184,7 +184,7 @@ export default function OwnerSettingsPage() {
           profile={headerProfile}
         />
 
-        <div className="mt-5 space-y-4">
+        <div className="mt-[26px] space-y-4">
           <OwnerPasswordSettingsCard disabled={logoutBusy} defaultCollapsed />
           <OwnerGoogleLinkCard defaultCollapsed />
           {academies.map((a) => (

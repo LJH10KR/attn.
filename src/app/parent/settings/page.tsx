@@ -225,7 +225,7 @@ export default function ParentSettingsPage() {
           </p>
         ) : null}
 
-        <div className="space-y-4 mt-5">
+        <div className="space-y-4 mt-[26px]">
           <SettingsAccordionItem title="프로필">
             <div>
               <label

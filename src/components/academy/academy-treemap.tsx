@@ -148,10 +148,10 @@ export function AcademyTreemap({
           embedded
             ? footerOutside
               ? /* 카드 전체가 차트만 — glass-card와 동일 반경 */
-                "relative w-full overflow-hidden rounded-[1.75rem] bg-neutral-400/10 dark:bg-white/[0.06]"
-              : /* glass-card(1.75rem) 상단 + 내부 푸터 */
-                "relative w-full overflow-hidden rounded-t-[1.75rem] bg-neutral-400/10 dark:bg-white/[0.06]"
-            : "relative w-full overflow-hidden rounded-2xl border border-[#1a1a1a]/25 bg-[#0f0f0f]/[0.03]"
+                "relative w-full overflow-hidden rounded-[18px] bg-neutral-400/10 dark:bg-white/[0.06]"
+              : /* glass-card(15px) 상단 + 내부 푸터 */
+                "relative w-full overflow-hidden rounded-t-[15px] bg-neutral-400/10 dark:bg-white/[0.06]"
+            : "relative w-full overflow-hidden rounded-[18px] border border-[#1a1a1a]/25 bg-[#0f0f0f]/[0.03]"
         }
         style={{ height: size.h }}
       >
