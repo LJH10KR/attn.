@@ -644,6 +644,7 @@ export const activateParent = onCall(async (request) => {
   await admin.auth().setCustomUserClaims(parentAuthUid, {
     role: "parent",
     academyId,
+    membershipStatus: "active",
   });
 
   await admin.auth().updateUser(parentAuthUid, { disabled: false });

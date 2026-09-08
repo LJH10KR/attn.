@@ -162,6 +162,26 @@ export async function reconcileUserActivationMirror(
     return { teacher, parent };
   }
 
+  /**
+   * 클라이언트가 매 로그인마다 콜러블로 재확인하지 않고 ID 토큰 클레임만으로
+   * 역할을 판별할 수 있도록, 미러 갱신 시점에 Custom Claims도 함께 최신화한다.
+   * 우선순위는 클라이언트 `resolveKnownSessionDashboardPath`와 동일하게 teacher > parent.
+   * 멤버십이 전혀 없으면(owner/academy 계정일 수 있음) 기존 클레임을 건드리지 않는다.
+   */
+  if (teacher.primaryStatus !== null) {
+    await admin.auth().setCustomUserClaims(authUid, {
+      role: "teacher",
+      academyId: teacher.primaryAcademyId,
+      membershipStatus: teacher.primaryStatus,
+    });
+  } else if (parent.primaryStatus !== null) {
+    await admin.auth().setCustomUserClaims(authUid, {
+      role: "parent",
+      academyId: parent.primaryAcademyId,
+      membershipStatus: parent.primaryStatus,
+    });
+  }
+
   const noMembership = teacher.primaryStatus === null && parent.primaryStatus === null;
   if (noMembership) {
     const ownsAcademy = await db

@@ -563,6 +563,7 @@ export const activateTeacher = onCall(async (request) => {
   await admin.auth().setCustomUserClaims(teacherAuthUid, {
     role: "teacher",
     academyId,
+    membershipStatus: "active",
   });
 
   await admin.auth().updateUser(teacherAuthUid, { disabled: false });

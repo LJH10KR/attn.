@@ -82,6 +82,32 @@ async function tryReadActivationRoleFromMirror(
   }
 }
 
+/**
+ * ID 토큰 Custom Claims(`role`/`academyId`/`membershipStatus`)만으로 활성 상태를 판별.
+ * 미러 문서(Firestore)·콜러블(Cloud Function)보다 왕복이 없어 가장 빠르다.
+ * 클레임은 멤버십 문서 쓰기 시 트리거가 항상 최신화하지만(`reconcileUserActivationMirror`),
+ * 실제 데이터 읽기는 여전히 보안 규칙이 라이브 멤버십 상태로 검사하므로
+ * 클레임이 잠깐 stale해도 잘못된 데이터 접근으로 이어지지 않는다.
+ */
+async function tryReadActivationRoleFromClaims(
+  user: User,
+  role: "teacher" | "parent",
+): Promise<RoleActivationState | null> {
+  try {
+    const { claims } = await user.getIdTokenResult();
+    if (claims.role !== role) return null;
+    if (typeof claims.academyId !== "string" || !claims.academyId) return null;
+    if (typeof claims.membershipStatus !== "string" || !claims.membershipStatus) return null;
+    return normalizeActivationState({
+      anyActive: claims.membershipStatus === "active",
+      primaryStatus: claims.membershipStatus,
+      primaryAcademyId: claims.academyId,
+    });
+  } catch {
+    return null;
+  }
+}
+
 function normalizeActivationState(data: {
   anyActive?: boolean;
   primaryStatus?: string | null;
@@ -233,6 +259,12 @@ export async function resolveTeacherActivationState(
     if (inFlight) return inFlight;
   }
   const task = (async (): Promise<RoleActivationState> => {
+    const fromClaims = await tryReadActivationRoleFromClaims(user, "teacher");
+    if (fromClaims) {
+      teacherActivationCacheByUid.set(uid, { state: fromClaims, cachedAt: Date.now() });
+      return fromClaims;
+    }
+
     if (isActivationMirrorClientReadEnabled()) {
       const fromMirror = await tryReadActivationRoleFromMirror(user, "teacher");
       if (fromMirror) {
@@ -285,6 +317,12 @@ export async function resolveParentActivationState(
     if (inFlight) return inFlight;
   }
   const task = (async (): Promise<RoleActivationState> => {
+    const fromClaims = await tryReadActivationRoleFromClaims(user, "parent");
+    if (fromClaims) {
+      parentActivationCacheByUid.set(uid, { state: fromClaims, cachedAt: Date.now() });
+      return fromClaims;
+    }
+
     if (isActivationMirrorClientReadEnabled()) {
       const fromMirror = await tryReadActivationRoleFromMirror(user, "parent");
       if (fromMirror) {
