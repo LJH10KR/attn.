@@ -5,7 +5,8 @@ import { httpsCallable } from "firebase/functions";
 import {
   collection,
   doc,
-  onSnapshot,
+  getDoc,
+  getDocs,
   query,
   serverTimestamp,
   updateDoc,
@@ -18,6 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
+import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
 import { useRoleLogout } from "@/lib/auth/use-role-logout";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
@@ -29,6 +31,7 @@ import {
 import { fetchIsOwner } from "@/lib/firebase/owner-profile";
 import { COLLECTIONS, type Academy } from "@/lib/firebase/attn-schema";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
+import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
 import { AcademyRegistrationOverlay } from "@/components/owner/academy-registration-overlay";
 import { attnIdSortKey, compareAttnIdAsc } from "@/lib/attn-id-sort";
 import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
@@ -94,11 +97,12 @@ export function OwnerDashboard() {
   const [deleteTarget, setDeleteTarget] = useState<AcademyRow | null>(null);
   const [registrationOpen, setRegistrationOpen] = useState(false);
   const [registrationVariant, setRegistrationVariant] = useState<"first" | "add">("add");
-  /** Firestore 학원 목록 첫 스냅샷 수신 전에는 true로 두지 않음(빈 배열 레이스 방지) */
+  /** 학원 목록 첫 조회 완료 전에는 true로 두지 않음(빈 배열 레이스 방지) */
   const [academiesListReady, setAcademiesListReady] = useState(false);
   const ownerInitGenerationRef = useRef(0);
   const ownerListLoadedUidRef = useRef<string | null>(null);
   const autoRegistrationPromptedRef = useRef(false);
+  const [ownerUid, setOwnerUid] = useState<string | null>(null);
   const [ownerDisplayName, setOwnerDisplayName] = useState<string | null>(null);
   const [ownerPhone, setOwnerPhone] = useState<string | null>(null);
 
@@ -112,16 +116,13 @@ export function OwnerDashboard() {
       return;
     }
     const auth = getFirebaseAuth();
-    let unsubAcademies: (() => void) | undefined;
-    let unsubUser: (() => void) | undefined;
 
     const unsubAuth = auth.onAuthStateChanged(async (user) => {
       if (!user) {
         ownerInitGenerationRef.current += 1;
         ownerListLoadedUidRef.current = null;
         setGate("auth");
-        unsubAcademies?.();
-        unsubUser?.();
+        setOwnerUid(null);
         setAcademies([]);
         setAcademiesListReady(false);
         setOwnerDisplayName(null);
@@ -144,57 +145,14 @@ export function OwnerDashboard() {
       }
       if (!isOwner) {
         setGate("forbidden");
-        unsubAcademies?.();
-        unsubUser?.();
+        setOwnerUid(null);
         setAcademies([]);
         setAcademiesListReady(false);
         return;
       }
       setGate("ok");
-      const db = getFirebaseDb();
-      unsubUser?.();
-      unsubUser = onSnapshot(doc(db, COLLECTIONS.users, uid), (snap) => {
-        const d = snap.data();
-        setOwnerDisplayName(
-          typeof d?.displayName === "string" ? d.displayName : null,
-        );
-        const rawPhone = typeof d?.phone === "string" ? d.phone.trim() : "";
-        setOwnerPhone(rawPhone || null);
-      });
-      const q = query(
-        collection(db, COLLECTIONS.academies),
-        where("ownerUid", "==", uid),
-      );
-      unsubAcademies?.();
-      unsubAcademies = onSnapshot(
-        q,
-        (snap) => {
-          if (gen !== ownerInitGenerationRef.current || auth.currentUser?.uid !== uid) {
-            return;
-          }
-          setListError(null);
-          const rows: AcademyRow[] = [];
-          snap.forEach((d) => {
-            rows.push({ id: d.id, ...(d.data() as Academy) });
-          });
-          rows.sort((a, b) => compareAttnIdAsc(attnIdSortKey(a), attnIdSortKey(b)));
-          setAcademies(rows);
-          setAcademiesListReady(true);
-          ownerListLoadedUidRef.current = uid;
-        },
-        (err) => {
-          if (gen !== ownerInitGenerationRef.current || auth.currentUser?.uid !== uid) {
-            return;
-          }
-          const code = err instanceof FirebaseError ? err.code : "";
-          setListError(
-            code === "permission-denied"
-              ? "학원 목록을 불러올 권한이 없습니다."
-              : "학원 목록을 불러오지 못했습니다.",
-          );
-          setAcademiesListReady(true);
-        },
-      );
+      ownerListLoadedUidRef.current = uid;
+      setOwnerUid(uid);
     });
 
     return () => {
@@ -202,10 +160,76 @@ export function OwnerDashboard() {
       ownerListLoadedUidRef.current = null;
       autoRegistrationPromptedRef.current = false;
       unsubAuth();
-      unsubAcademies?.();
-      unsubUser?.();
     };
   }, [configured]);
+
+  // 표시 전용(이 화면에서 편집하지 않음) — 실시간 구독 불필요, 마운트 시 1회 조회로 충분
+  useEffect(() => {
+    if (!ownerUid) {
+      setOwnerDisplayName(null);
+      setOwnerPhone(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const db = getFirebaseDb();
+        const snap = await getDoc(doc(db, COLLECTIONS.users, ownerUid));
+        if (cancelled) return;
+        const d = snap.data();
+        setOwnerDisplayName(
+          typeof d?.displayName === "string" ? d.displayName : null,
+        );
+        const rawPhone = typeof d?.phone === "string" ? d.phone.trim() : "";
+        setOwnerPhone(rawPhone || null);
+      } catch {
+        if (!cancelled) {
+          setOwnerDisplayName(null);
+          setOwnerPhone(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ownerUid]);
+
+  const loadAcademies = useCallback(async () => {
+    if (!ownerUid) {
+      setAcademies([]);
+      setAcademiesListReady(true);
+      return;
+    }
+    try {
+      const db = getFirebaseDb();
+      const q = query(
+        collection(db, COLLECTIONS.academies),
+        where("ownerUid", "==", ownerUid),
+      );
+      const snap = await getDocs(q);
+      setListError(null);
+      const rows: AcademyRow[] = [];
+      snap.forEach((d) => {
+        rows.push({ id: d.id, ...(d.data() as Academy) });
+      });
+      rows.sort((a, b) => compareAttnIdAsc(attnIdSortKey(a), attnIdSortKey(b)));
+      setAcademies(rows);
+    } catch (err) {
+      const code = err instanceof FirebaseError ? err.code : "";
+      setListError(
+        code === "permission-denied"
+          ? "학원 목록을 불러올 권한이 없습니다."
+          : "학원 목록을 불러오지 못했습니다.",
+      );
+    } finally {
+      setAcademiesListReady(true);
+    }
+  }, [ownerUid]);
+
+  const { refresh: refreshAcademies, busy: academiesRefreshing } = useAcademyListPoll(
+    loadAcademies,
+    [ownerUid],
+  );
 
   const headerProfile = useMemo(
     () =>
@@ -304,6 +328,7 @@ export function OwnerDashboard() {
           portalPassword: editPortalPassword,
         });
       }
+      refreshAcademies();
       closeModal();
     } catch (err) {
       if (err instanceof FirebaseError) {
@@ -321,6 +346,7 @@ export function OwnerDashboard() {
     editTarget,
     formName,
     formStatus,
+    refreshAcademies,
   ]);
 
   const onDelete = useCallback(async () => {
@@ -332,6 +358,7 @@ export function OwnerDashboard() {
     try {
       const delFn = httpsCallable(getFirebaseFunctions(), "deleteOwnerAcademy");
       await delFn({ academyId: deleteTarget.id });
+      refreshAcademies();
       closeModal();
     } catch (err) {
       if (err instanceof FirebaseError) {
@@ -342,7 +369,7 @@ export function OwnerDashboard() {
     } finally {
       setBusy(false);
     }
-  }, [closeModal, deleteTarget]);
+  }, [closeModal, deleteTarget, refreshAcademies]);
 
   if (!configured) {
     return (
@@ -429,13 +456,19 @@ export function OwnerDashboard() {
       <main className="mx-auto max-w-lg px-4 pt-[26px]">
         <div className="mb-5 flex items-center justify-between gap-3">
           <h2 className="text-base font-semibold text-foreground">내 학원</h2>
-          <button
-            type="button"
-            onClick={() => openCreate(academies.length === 0 ? "first" : "add")}
-            className="rounded-[8px] bg-[#222] dark:bg-neutral-100 px-3 py-2 text-[11px] font-medium text-white dark:text-neutral-950 shadow-md hover:bg-[#333] dark:hover:bg-white"
-          >
-            + 학원 등록
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <AcademyPanelRefreshButton
+              busy={academiesRefreshing}
+              onRefreshAction={refreshAcademies}
+            />
+            <button
+              type="button"
+              onClick={() => openCreate(academies.length === 0 ? "first" : "add")}
+              className="rounded-[8px] bg-[#222] dark:bg-neutral-100 px-3 py-2 text-[11px] font-medium text-white dark:text-neutral-950 shadow-md hover:bg-[#333] dark:hover:bg-white"
+            >
+              + 학원 등록
+            </button>
+          </div>
         </div>
 
         {listError ? (
@@ -523,6 +556,7 @@ export function OwnerDashboard() {
         open={registrationOpen}
         variant={registrationVariant}
         onCloseAction={() => setRegistrationOpen(false)}
+        onAcademyCreatedAction={refreshAcademies}
       />
 
       {modal === "edit" ? (

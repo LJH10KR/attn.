@@ -24,6 +24,8 @@ type AcademyRegistrationOverlayProps = {
   /** 최초 등록 vs 추가 등록 */
   variant: "first" | "add";
   onCloseAction: () => void;
+  /** 학원(+선생님 발급까지) 생성이 성공적으로 끝났을 때 호출 — 목록 갱신용 */
+  onAcademyCreatedAction?: () => void;
 };
 
 const INPUT_STEPS = [
@@ -54,6 +56,7 @@ export function AcademyRegistrationOverlay({
   open,
   variant,
   onCloseAction,
+  onAcademyCreatedAction,
 }: AcademyRegistrationOverlayProps) {
   useBodyScrollLock(open);
 
@@ -160,12 +163,13 @@ export function AcademyRegistrationOverlay({
 
       setLoadPhase("done");
       setPhase("complete");
+      onAcademyCreatedAction?.();
     } catch (e) {
       setError(errMsg(e));
       setPhase("input");
       setLoadPhase("idle");
     }
-  }, [name, portalPassword, portalPassword2, teacherCount]);
+  }, [name, portalPassword, portalPassword2, teacherCount, onAcademyCreatedAction]);
 
   if (!open) {
     return null;
