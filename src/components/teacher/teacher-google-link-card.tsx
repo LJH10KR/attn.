@@ -71,6 +71,8 @@ export type TeacherGoogleLinkCardProps = {
   googleLinked?: boolean;
   googleEmail?: string;
   defaultCollapsed?: boolean;
+  /** 연동 성공 시 호출 — 회원 문서의 googleLinked 재조회용 */
+  onLinkedAction?: () => void;
 };
 
 export function TeacherGoogleLinkCard({
@@ -78,6 +80,7 @@ export function TeacherGoogleLinkCard({
   googleLinked,
   googleEmail: googleEmailStored,
   defaultCollapsed,
+  onLinkedAction,
 }: TeacherGoogleLinkCardProps) {
   const [user, setUser] = useState<User | null>(null);
   const [busy, setBusy] = useState(false);
@@ -117,7 +120,8 @@ export function TeacherGoogleLinkCard({
     const res = await fn({});
     const data = res.data as { googleEmail?: string };
     setLinkedEmail(data.googleEmail ?? googleProviderEmail(u));
-  }, []);
+    onLinkedAction?.();
+  }, [onLinkedAction]);
 
   const onLinkGoogle = useCallback(async () => {
     if (!configured) return;

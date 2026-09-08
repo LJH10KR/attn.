@@ -1,7 +1,7 @@
 "use client";
 
 import { FirebaseError } from "firebase/app";
-import { doc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { useCallback, useEffect, useState } from "react";
 import {
   academyTuitionSettingsPath,
@@ -55,11 +55,12 @@ export function OwnerTuitionSettingsCard({
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    const db = getFirebaseDb();
-    const ref = doc(db, academyTuitionSettingsPath(academyId));
-    return onSnapshot(
-      ref,
-      (snap) => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const db = getFirebaseDb();
+        const snap = await getDoc(doc(db, academyTuitionSettingsPath(academyId)));
+        if (cancelled) return;
         if (snap.exists()) {
           const d = snap.data() as AcademyTuitionSettingsDoc;
           setKakaoPayLink(d.kakaoPayLink ?? "");
@@ -67,10 +68,13 @@ export function OwnerTuitionSettingsCard({
           setAccountNumber(d.accountNumber ?? "");
           setAccountHolder(d.accountHolder ?? "");
         }
-        setLoaded(true);
-      },
-      () => setLoaded(true),
-    );
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [academyId]);
 
   const clearSaved = () => setSaved(false);

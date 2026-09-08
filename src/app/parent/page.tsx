@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, onSnapshot, setDoc, Timestamp } from "firebase/firestore";
+import { doc, getDoc, setDoc, Timestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -310,16 +310,20 @@ export default function ParentDashboardPage() {
     if (!authUid || !ready) {
       return;
     }
-    const db = getFirebaseDb();
-    const ref = doc(db, "users", authUid);
-    const unsub = onSnapshot(
-      ref,
-      (snap) => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const db = getFirebaseDb();
+        const snap = await getDoc(doc(db, "users", authUid));
+        if (cancelled) return;
         setHideIosPwaHint(snap.data()?.attn_hide_ios_pwa_hint === true);
-      },
-      () => setHideIosPwaHint(false),
-    );
-    return () => unsub();
+      } catch {
+        if (!cancelled) setHideIosPwaHint(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [authUid, ready]);
 
   useEffect(() => {
@@ -444,33 +448,38 @@ export default function ParentDashboardPage() {
 
   useEffect(() => {
     if (!academyId) return;
-    const db = getFirebaseDb();
-    const uid = getFirebaseAuth().currentUser?.uid;
-    const unsubAcademy = onSnapshot(
-      doc(db, "academies", academyId),
-      (snap) => {
+    let cancelled = false;
+    void (async () => {
+      const db = getFirebaseDb();
+      const uid = getFirebaseAuth().currentUser?.uid;
+
+      try {
+        const snap = await getDoc(doc(db, "academies", academyId));
+        if (cancelled) return;
         const n = snap.data()?.name;
         setAcademyName(typeof n === "string" ? n : null);
-      },
-      () => setAcademyName(null),
-    );
-    const unsubParent = uid
-      ? onSnapshot(doc(db, "academies", academyId, "parents", uid), (snap) => {
-          const d = snap.data();
-          setMemberDisplayName(
-            typeof d?.displayName === "string" ? d.displayName : null,
-          );
-          const rawPhone = typeof d?.phone === "string" ? d.phone.trim() : "";
-          setMemberPhone(rawPhone || null);
-          setGoogleLinked(d?.googleLinked === true);
-          setGoogleEmail(
-            typeof d?.googleEmail === "string" ? d.googleEmail.trim() || null : null,
-          );
-        })
-      : () => {};
-    const unsubTuition = onSnapshot(
-      doc(db, academyTuitionSettingsPath(academyId)),
-      (snap) => {
+      } catch {
+        if (!cancelled) setAcademyName(null);
+      }
+
+      if (uid) {
+        const snap = await getDoc(doc(db, "academies", academyId, "parents", uid));
+        if (cancelled) return;
+        const d = snap.data();
+        setMemberDisplayName(
+          typeof d?.displayName === "string" ? d.displayName : null,
+        );
+        const rawPhone = typeof d?.phone === "string" ? d.phone.trim() : "";
+        setMemberPhone(rawPhone || null);
+        setGoogleLinked(d?.googleLinked === true);
+        setGoogleEmail(
+          typeof d?.googleEmail === "string" ? d.googleEmail.trim() || null : null,
+        );
+      }
+
+      try {
+        const snap = await getDoc(doc(db, academyTuitionSettingsPath(academyId)));
+        if (cancelled) return;
         if (snap.exists()) {
           const d = snap.data();
           setTuitionSettings({
@@ -482,13 +491,12 @@ export default function ParentDashboardPage() {
         } else {
           setTuitionSettings(null);
         }
-      },
-      () => setTuitionSettings(null),
-    );
+      } catch {
+        if (!cancelled) setTuitionSettings(null);
+      }
+    })();
     return () => {
-      unsubAcademy();
-      unsubParent();
-      unsubTuition();
+      cancelled = true;
     };
   }, [academyId]);
 

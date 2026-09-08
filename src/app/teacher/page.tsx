@@ -3,7 +3,7 @@
 import { FirebaseError } from "firebase/app";
 import { formatKrPhoneDisplay } from "@/lib/phone/kr-phone";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, onSnapshot, Timestamp } from "firebase/firestore";
+import { doc, getDoc, Timestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -325,33 +325,37 @@ export default function TeacherDashboardPage() {
 
   useEffect(() => {
     if (!academyId) return;
-    const db = getFirebaseDb();
-    const uid = getFirebaseAuth().currentUser?.uid;
-    const unsubAcademy = onSnapshot(
-      doc(db, "academies", academyId),
-      (snap) => {
+    let cancelled = false;
+    void (async () => {
+      const db = getFirebaseDb();
+      const uid = getFirebaseAuth().currentUser?.uid;
+
+      try {
+        const snap = await getDoc(doc(db, "academies", academyId));
+        if (cancelled) return;
         const n = snap.data()?.name;
         setAcademyName(typeof n === "string" ? n : null);
-      },
-      () => setAcademyName(null),
-    );
-    const unsubMember = uid
-      ? onSnapshot(doc(db, "academies", academyId, "teachers", uid), (snap) => {
-          const d = snap.data();
-          setMemberDisplayName(
-            typeof d?.displayName === "string" ? d.displayName : null,
-          );
-          const rawPhone = typeof d?.phone === "string" ? d.phone.trim() : "";
-          setMemberPhone(rawPhone || null);
-          setGoogleLinked(d?.googleLinked === true);
-          setGoogleEmail(
-            typeof d?.googleEmail === "string" ? d.googleEmail.trim() || null : null,
-          );
-        })
-      : () => {};
+      } catch {
+        if (!cancelled) setAcademyName(null);
+      }
+
+      if (uid) {
+        const snap = await getDoc(doc(db, "academies", academyId, "teachers", uid));
+        if (cancelled) return;
+        const d = snap.data();
+        setMemberDisplayName(
+          typeof d?.displayName === "string" ? d.displayName : null,
+        );
+        const rawPhone = typeof d?.phone === "string" ? d.phone.trim() : "";
+        setMemberPhone(rawPhone || null);
+        setGoogleLinked(d?.googleLinked === true);
+        setGoogleEmail(
+          typeof d?.googleEmail === "string" ? d.googleEmail.trim() || null : null,
+        );
+      }
+    })();
     return () => {
-      unsubAcademy();
-      unsubMember();
+      cancelled = true;
     };
   }, [academyId]);
 

@@ -2,7 +2,7 @@
 
 import { FirebaseError } from "firebase/app";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, onSnapshot, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -24,6 +24,7 @@ import {
   getFirebaseFunctions,
 } from "@/lib/firebase/client-app";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
+import { useDashboardRefetchOnFocus } from "@/lib/firebase/use-dashboard-refetch-on-focus";
 import { formatKrPhoneDisplay } from "@/lib/phone/kr-phone";
 import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
@@ -99,42 +100,42 @@ export default function ParentSettingsPage() {
 
   useEffect(() => {
     if (!primaryAcademyId) return;
-    const db = getFirebaseDb();
-    const uid = getFirebaseAuth().currentUser?.uid;
-    const unsubAcademy = onSnapshot(
-      doc(db, "academies", primaryAcademyId),
-      (snap) => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const db = getFirebaseDb();
+        const snap = await getDoc(doc(db, "academies", primaryAcademyId));
+        if (cancelled) return;
         const n = snap.data()?.name;
         setAcademyName(typeof n === "string" ? n : null);
-      },
-      () => setAcademyName(null),
-    );
-    const unsubParent = uid
-      ? onSnapshot(
-          doc(db, "academies", primaryAcademyId, "parents", uid),
-          (snap) => {
-            const d = snap.data();
-            setDisplayName(
-              typeof d?.displayName === "string" ? d.displayName : "",
-            );
-            setPhone(formatKrPhoneDisplay(typeof d?.phone === "string" ? d.phone : ""));
-            setLoginId(typeof d?.loginId === "string" ? d.loginId : "");
-            setAttnId(typeof d?.attnId === "string" ? d.attnId : "");
-            setAuthProvider(
-              typeof d?.authProvider === "string" ? d.authProvider : "",
-            );
-            setGoogleEmail(
-              typeof d?.googleEmail === "string" ? d.googleEmail : "",
-            );
-            setGoogleLinked(d?.googleLinked === true);
-          },
-        )
-      : () => {};
+      } catch {
+        if (!cancelled) setAcademyName(null);
+      }
+    })();
     return () => {
-      unsubAcademy();
-      unsubParent();
+      cancelled = true;
     };
   }, [primaryAcademyId]);
+
+  const loadParentMember = useCallback(async () => {
+    if (!primaryAcademyId) return;
+    const uid = getFirebaseAuth().currentUser?.uid;
+    if (!uid) return;
+    const db = getFirebaseDb();
+    const snap = await getDoc(doc(db, "academies", primaryAcademyId, "parents", uid));
+    const d = snap.data();
+    setDisplayName(typeof d?.displayName === "string" ? d.displayName : "");
+    setPhone(formatKrPhoneDisplay(typeof d?.phone === "string" ? d.phone : ""));
+    setLoginId(typeof d?.loginId === "string" ? d.loginId : "");
+    setAttnId(typeof d?.attnId === "string" ? d.attnId : "");
+    setAuthProvider(typeof d?.authProvider === "string" ? d.authProvider : "");
+    setGoogleEmail(typeof d?.googleEmail === "string" ? d.googleEmail : "");
+    setGoogleLinked(d?.googleLinked === true);
+  }, [primaryAcademyId]);
+
+  const { refresh: refreshParentMember } = useDashboardRefetchOnFocus(loadParentMember, [
+    primaryAcademyId,
+  ]);
 
   const onSaveProfile = useCallback(async () => {
     setProfileError(null);
@@ -289,6 +290,7 @@ export default function ParentSettingsPage() {
               disabled={profileBusy || logoutBusy}
               registerMode={authProvider === "google"}
               defaultCollapsed
+              onSavedAction={refreshParentMember}
             />
           ) : null}
           {primaryAcademyId ? (
@@ -298,6 +300,7 @@ export default function ParentSettingsPage() {
               googleLinked={googleLinked}
               googleEmail={googleEmail}
               defaultCollapsed
+              onLinkedAction={refreshParentMember}
             />
           ) : null}
           <ParentPushNotificationsCard defaultCollapsed />

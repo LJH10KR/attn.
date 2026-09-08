@@ -55,6 +55,8 @@ export type MemberPasswordSettingsCardProps = {
   /** Google 전용 등 — 비밀번호 최초 등록 */
   registerMode?: boolean;
   defaultCollapsed?: boolean;
+  /** 저장 성공 시 호출 — registerMode 저장은 회원 문서의 authProvider를 바꿀 수 있어 상위에서 재조회하도록 */
+  onSavedAction?: () => void;
 };
 
 /** 선생님·학부모 — Callable로 비밀번호 변경 */
@@ -66,6 +68,7 @@ export function MemberPasswordSettingsCard({
   minLength = 6,
   registerMode = false,
   defaultCollapsed,
+  onSavedAction,
 }: MemberPasswordSettingsCardProps) {
   const [open, setOpen] = useState(!defaultCollapsed);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -117,12 +120,21 @@ export function MemberPasswordSettingsCard({
       setNewPassword("");
       setNewPassword2("");
       setConfirmBlurred(false);
+      onSavedAction?.();
     } catch (e) {
       setError(e instanceof FirebaseError ? e.message : "변경에 실패했습니다.");
     } finally {
       setBusy(false);
     }
-  }, [callableName, currentPassword, minLength, newPassword, newPassword2, registerMode]);
+  }, [
+    callableName,
+    currentPassword,
+    minLength,
+    newPassword,
+    newPassword2,
+    registerMode,
+    onSavedAction,
+  ]);
 
   const formDisabled = disabled || busy;
 

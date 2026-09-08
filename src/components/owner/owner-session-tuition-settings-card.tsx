@@ -1,7 +1,7 @@
 "use client";
 
 import { FirebaseError } from "firebase/app";
-import { doc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { useCallback, useEffect, useState } from "react";
 import {
   academySessionTuitionSettingsPath,
@@ -63,19 +63,23 @@ export function OwnerSessionTuitionSettingsCard({
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    const db = getFirebaseDb();
-    const ref = doc(db, academySessionTuitionSettingsPath(academyId));
-    return onSnapshot(
-      ref,
-      (snap) => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const db = getFirebaseDb();
+        const snap = await getDoc(doc(db, academySessionTuitionSettingsPath(academyId)));
+        if (cancelled) return;
         if (snap.exists()) {
           const d = snap.data() as AcademySessionTuitionSettingsDoc;
           setDefaultType(d.defaultTuitionType === "session_based" ? "session_based" : "monthly_fixed");
         }
-        setLoaded(true);
-      },
-      () => setLoaded(true),
-    );
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [academyId]);
 
   const onSave = useCallback(async () => {

@@ -22,11 +22,12 @@ import {
   getFirebaseFunctions,
 } from "@/lib/firebase/client-app";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
+import { useDashboardRefetchOnFocus } from "@/lib/firebase/use-dashboard-refetch-on-focus";
 import { resolveTeacherActivationState } from "@/lib/firebase/resolve-session-dashboard";
 import { useRoleLogout } from "@/lib/auth/use-role-logout";
 import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 
 const inputClass =
   "w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3 text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50";
@@ -78,30 +79,41 @@ export default function TeacherSettingsPage() {
     });
   }, [router]);
 
-  useEffect(() => {
+  const loadTeacherMember = useCallback(async () => {
     if (!academyId) return;
     const uid = getFirebaseAuth().currentUser?.uid;
     if (!uid) return;
     const db = getFirebaseDb();
-    const unsubMember = onSnapshot(
-      doc(db, "academies", academyId, "teachers", uid),
-      (snap) => {
-        const d = snap.data();
-        setDisplayName(typeof d?.displayName === "string" ? d.displayName : "");
-        setPhone(formatKrPhoneDisplay(typeof d?.phone === "string" ? d.phone : ""));
-        setAttnId(typeof d?.attnId === "string" ? d.attnId : "");
-        setLoginId(typeof d?.loginId === "string" ? d.loginId : "");
-        setGoogleLinked(d?.googleLinked === true);
-        setGoogleEmail(typeof d?.googleEmail === "string" ? d.googleEmail : "");
-      },
-    );
-    const unsubAcademy = onSnapshot(doc(db, "academies", academyId), (snap) => {
-      const n = snap.data()?.name;
-      setAcademyName(typeof n === "string" ? n : null);
-    });
+    const snap = await getDoc(doc(db, "academies", academyId, "teachers", uid));
+    const d = snap.data();
+    setDisplayName(typeof d?.displayName === "string" ? d.displayName : "");
+    setPhone(formatKrPhoneDisplay(typeof d?.phone === "string" ? d.phone : ""));
+    setAttnId(typeof d?.attnId === "string" ? d.attnId : "");
+    setLoginId(typeof d?.loginId === "string" ? d.loginId : "");
+    setGoogleLinked(d?.googleLinked === true);
+    setGoogleEmail(typeof d?.googleEmail === "string" ? d.googleEmail : "");
+  }, [academyId]);
+
+  const { refresh: refreshTeacherMember } = useDashboardRefetchOnFocus(loadTeacherMember, [
+    academyId,
+  ]);
+
+  useEffect(() => {
+    if (!academyId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const db = getFirebaseDb();
+        const snap = await getDoc(doc(db, "academies", academyId));
+        if (cancelled) return;
+        const n = snap.data()?.name;
+        setAcademyName(typeof n === "string" ? n : null);
+      } catch {
+        if (!cancelled) setAcademyName(null);
+      }
+    })();
     return () => {
-      unsubMember();
-      unsubAcademy();
+      cancelled = true;
     };
   }, [academyId]);
 
@@ -260,6 +272,7 @@ export default function TeacherSettingsPage() {
               googleLinked={googleLinked}
               googleEmail={googleEmail}
               defaultCollapsed
+              onLinkedAction={refreshTeacherMember}
             />
           ) : null}
         </div>

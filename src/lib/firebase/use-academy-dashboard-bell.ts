@@ -1,6 +1,6 @@
 "use client";
 
-import { collection, getDocs, Timestamp } from "firebase/firestore";
+import { collection, getDocs, limit, orderBy, query, Timestamp } from "firebase/firestore";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DashboardNotificationRow } from "@/components/dashboard/dashboard-notifications-modal";
 import {
@@ -136,7 +136,13 @@ export function useAcademyDashboardBell(academyId: string | null) {
     }
     try {
       const db = getFirebaseDb();
-      const snap = await getDocs(collection(db, academyAdminInboxCollectionPath(academyId)));
+      const snap = await getDocs(
+        query(
+          collection(db, academyAdminInboxCollectionPath(academyId)),
+          orderBy("createdAt", "desc"),
+          limit(50),
+        ),
+      );
       setError(null);
       setInboxDocs(
         snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> })),

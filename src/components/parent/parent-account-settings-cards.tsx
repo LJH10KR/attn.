@@ -276,10 +276,12 @@ export function ParentPasswordSettingsCard({
   disabled,
   registerMode,
   defaultCollapsed,
+  onSavedAction,
 }: {
   disabled?: boolean;
   registerMode?: boolean;
   defaultCollapsed?: boolean;
+  onSavedAction?: () => void;
 }) {
   return (
     <MemberPasswordSettingsCard
@@ -293,6 +295,7 @@ export function ParentPasswordSettingsCard({
       disabled={disabled}
       registerMode={registerMode}
       defaultCollapsed={defaultCollapsed}
+      onSavedAction={onSavedAction}
     />
   );
 }

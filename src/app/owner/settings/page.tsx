@@ -3,7 +3,7 @@
 import { onAuthStateChanged } from "firebase/auth";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
@@ -60,13 +60,19 @@ export default function OwnerSettingsPage() {
     if (!configured || gate !== "ok") return;
     const uid = getFirebaseAuth().currentUser?.uid;
     if (!uid) return;
-    const db = getFirebaseDb();
-    return onSnapshot(doc(db, COLLECTIONS.users, uid), (snap) => {
+    let cancelled = false;
+    void (async () => {
+      const db = getFirebaseDb();
+      const snap = await getDoc(doc(db, COLLECTIONS.users, uid));
+      if (cancelled) return;
       const d = snap.data();
       setOwnerDisplayName(typeof d?.displayName === "string" ? d.displayName : null);
       const rawPhone = typeof d?.phone === "string" ? d.phone.trim() : "";
       setOwnerPhone(rawPhone || null);
-    });
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [configured, gate]);
 
   const headerProfile = useMemo(

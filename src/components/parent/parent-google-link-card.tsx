@@ -73,6 +73,8 @@ export type ParentGoogleLinkCardProps = {
   googleLinked?: boolean;
   googleEmail?: string;
   defaultCollapsed?: boolean;
+  /** 연동 성공 시 호출 — 회원 문서의 authProvider/googleLinked 재조회용 */
+  onLinkedAction?: () => void;
 };
 
 export function ParentGoogleLinkCard({
@@ -81,6 +83,7 @@ export function ParentGoogleLinkCard({
   googleLinked,
   googleEmail: googleEmailStored,
   defaultCollapsed,
+  onLinkedAction,
 }: ParentGoogleLinkCardProps) {
   const [user, setUser] = useState<User | null>(null);
   const [busy, setBusy] = useState(false);
@@ -115,7 +118,8 @@ export function ParentGoogleLinkCard({
     const res = await fn({});
     const data = res.data as { googleEmail?: string };
     setLinkedEmail(data.googleEmail ?? googleProviderEmail(u));
-  }, []);
+    onLinkedAction?.();
+  }, [onLinkedAction]);
 
   const onLinkGoogle = useCallback(async () => {
     if (!configured) return;

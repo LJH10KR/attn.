@@ -7,9 +7,9 @@ import {
   collection,
   deleteField,
   doc,
+  getDoc,
   getDocs,
   increment,
-  onSnapshot,
   query,
   runTransaction,
   serverTimestamp,
@@ -32,6 +32,7 @@ import { getFirebaseAuth, getFirebaseDb, getFirebaseFunctions } from "@/lib/fire
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
 import { SessionLogModal } from "@/components/academy/session-log-modal";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
+import { cachedRead } from "@/lib/firebase/cached-read";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 import { KrPhoneInput } from "@/components/ui/kr-phone-input";
 import { formatKrPhoneDisplay, phoneMatchesSearch } from "@/lib/phone/kr-phone";
@@ -450,10 +451,12 @@ function DefaultTuitionTypeModal({
   useBodyScrollLock(true);
 
   useEffect(() => {
-    const db = getFirebaseDb();
-    return onSnapshot(
-      doc(db, academySessionTuitionSettingsPath(academyId)),
-      (snap) => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const db = getFirebaseDb();
+        const snap = await getDoc(doc(db, academySessionTuitionSettingsPath(academyId)));
+        if (cancelled) return;
         if (snap.exists()) {
           const d = snap.data();
           setType(d.defaultTuitionType === "session_based" ? "session_based" : "monthly_fixed");
@@ -462,10 +465,13 @@ function DefaultTuitionTypeModal({
           if (typeof d.defaultWeeklySessionCount === "number") setWeeklyCountInput(String(d.defaultWeeklySessionCount));
           if (typeof d.defaultPricePerSession === "number") setPriceInput(String(d.defaultPricePerSession));
         }
-        setLoaded(true);
-      },
-      () => setLoaded(true),
-    );
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [academyId]);
 
   useEffect(() => {
@@ -797,15 +803,21 @@ function TuitionSettingModal({
 
   // 학원 기본 납부 방식 로드
   useEffect(() => {
-    const db = getFirebaseDb();
-    return onSnapshot(doc(db, academySessionTuitionSettingsPath(academyId)), (snap) => {
+    let cancelled = false;
+    void (async () => {
+      const db = getFirebaseDb();
+      const snap = await getDoc(doc(db, academySessionTuitionSettingsPath(academyId)));
+      if (cancelled) return;
       if (snap.exists()) {
         const d = snap.data();
         setAcademyDefaultType(
           d.defaultTuitionType === "session_based" ? "session_based" : "monthly_fixed",
         );
       }
-    });
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [academyId]);
 
   const effectiveType = selectedType ?? academyDefaultType;
@@ -1494,7 +1506,9 @@ export function AcademyParentStudentList({
     try {
       const db = getFirebaseDb();
       const [teachersSnap, studentsSnap] = await Promise.all([
-        getDocs(collection(db, "academies", academyId, "teachers")),
+        cachedRead(`teachers:${academyId}`, () =>
+          getDocs(collection(db, "academies", academyId, "teachers")),
+        ),
         getDocs(
           query(
             collection(db, "academies", academyId, "students"),
@@ -1884,7 +1898,9 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
       const db = getFirebaseDb();
       const [studentsSnap, teachersSnap, parentsSnap] = await Promise.all([
         getDocs(query(collection(db, "academies", academyId, "students"))),
-        getDocs(collection(db, "academies", academyId, "teachers")),
+        cachedRead(`teachers:${academyId}`, () =>
+          getDocs(collection(db, "academies", academyId, "teachers")),
+        ),
         getDocs(query(collection(db, "academies", academyId, "parents"))),
       ]);
       const list = studentsSnap.docs.map((d) =>
