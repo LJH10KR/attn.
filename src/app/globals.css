@@ -134,18 +134,34 @@ body {
   animation: attn-process-card-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
-@keyframes attn-boot-pulse {
-  0%,
-  100% {
-    opacity: 0.45;
-    transform: scale(0.97);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1);
-  }
+.attn-boot-wordmark-wrap {
+  position: relative;
+  display: inline-block;
+  font-size: 2.75rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
-.attn-boot-pulse {
-  animation: attn-boot-pulse 1.8s ease-in-out infinite;
+.attn-boot-wordmark-base {
+  color: var(--foreground);
+  opacity: 0.16;
+}
+
+.attn-boot-wordmark-fill {
+  position: absolute;
+  inset: 0;
+  color: #222;
+  clip-path: inset(calc(100% - var(--boot-progress, 0) * 1%) 0 0 0);
+  transition: clip-path 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: attn-boot-water-bob 2.6s ease-in-out infinite;
+}
+
+@keyframes attn-boot-water-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
 }

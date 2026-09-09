@@ -8,13 +8,13 @@ import { getFirebaseAuth } from "@/lib/firebase/client-app";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { redirectIfKnownSessionDashboard } from "@/lib/firebase/resolve-session-dashboard";
 import { getLastDashboardRoleHintPath } from "@/lib/auth/last-dashboard-role";
-import { useBootOverlay } from "@/components/boot/boot-overlay";
+import { BOOT_PROGRESS, useBootOverlay } from "@/components/boot/boot-overlay";
 
 type Phase = "checking" | "ready";
 
 export function HomeClient() {
   const router = useRouter();
-  const { show: showBootOverlay, hide: hideBootOverlay } = useBootOverlay();
+  const { show: showBootOverlay, hide: hideBootOverlay, setProgress } = useBootOverlay();
   const [phase, setPhase] = useState<Phase>(() => (isFirebaseConfigured() ? "checking" : "ready"));
 
   useEffect(() => {
@@ -42,19 +42,23 @@ export function HomeClient() {
         setPhase("ready");
         return;
       }
+      setProgress(BOOT_PROGRESS.AUTH_RESTORED);
       try {
         const result = await redirectIfKnownSessionDashboard(user, (path) => {
           if (!cancelled) router.replace(path);
         });
         // "redirected"면 오버레이는 그대로 유지 — 대상 대시보드 페이지가 자기 로딩이
         // 끝나는 시점에 hideBootOverlay()를 호출해 끊김 없이 이어진다.
+        if (!cancelled && result === "redirected") {
+          setProgress(BOOT_PROGRESS.ROLE_RESOLVED);
+        }
         if (!cancelled && result === "stay") {
           hideBootOverlay();
           setPhase("ready");
         }
       } catch {
         if (!cancelled) {
-          hideBootOverlay();
+          hideBootOverlay({ immediate: true });
           setPhase("ready");
         }
       }
@@ -64,7 +68,7 @@ export function HomeClient() {
       cancelled = true;
       unsub();
     };
-  }, [router, showBootOverlay, hideBootOverlay]);
+  }, [router, showBootOverlay, hideBootOverlay, setProgress]);
 
   if (phase === "checking") {
     return null;
