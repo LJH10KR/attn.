@@ -31,6 +31,7 @@ import {
 } from "@/lib/firebase/client-app";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { useParentDashboardBell } from "@/lib/firebase/use-parent-dashboard-bell";
+import { setLastDashboardRoleHint } from "@/lib/auth/last-dashboard-role";
 import { resolveParentActivationState } from "@/lib/firebase/resolve-session-dashboard";
 import { useRoleLogout } from "@/lib/auth/use-role-logout";
 import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
@@ -235,6 +236,7 @@ export default function ParentDashboardPage() {
         setAcademyId(aid);
         setInitError(null);
         setReady(true);
+        setLastDashboardRoleHint("parent");
         setListInitialLoading(true);
 
         try {

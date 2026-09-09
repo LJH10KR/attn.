@@ -23,6 +23,7 @@ import {
   getFirebaseFunctions,
 } from "@/lib/firebase/client-app";
 import { useAttendanceNotificationLog } from "@/lib/firebase/use-attendance-notification-log";
+import { setLastDashboardRoleHint } from "@/lib/auth/last-dashboard-role";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { resolveTeacherActivationState } from "@/lib/firebase/resolve-session-dashboard";
 import { useRoleLogout } from "@/lib/auth/use-role-logout";
@@ -174,6 +175,7 @@ export default function TeacherDashboardPage() {
         setAcademyId(aid);
         setInitError(null);
         setReady(true);
+        setLastDashboardRoleHint("teacher");
         setListInitialLoading(true);
 
         try {

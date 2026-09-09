@@ -579,7 +579,13 @@ export const listParentChildrenStudents = onCall(
 
     const db = admin.firestore();
     const parentRef = db.doc(`academies/${academyId}/parents/${uid}`);
-    const parentSnap = await parentRef.get();
+    const col = db.collection(`academies/${academyId}/students`);
+
+    const [parentSnap, snap, requireStudentCheckInPin] = await Promise.all([
+      parentRef.get(),
+      col.where("parentUserId", "==", uid).get(),
+      getRequireStudentCheckInPin(db, academyId),
+    ]);
     if (!parentSnap.exists || parentSnap.get("status") !== "active") {
       throw new HttpsError(
         "permission-denied",
@@ -587,13 +593,8 @@ export const listParentChildrenStudents = onCall(
       );
     }
 
-    const col = db.collection(`academies/${academyId}/students`);
-    const snap = await col.where("parentUserId", "==", uid).get();
-    const requireStudentCheckInPin = await getRequireStudentCheckInPin(db, academyId);
-
-    const pinSnaps = await Promise.all(
-      snap.docs.map((d) => db.doc(studentCheckInSecretPath(academyId, d.id)).get()),
-    );
+    const pinRefs = snap.docs.map((d) => db.doc(studentCheckInSecretPath(academyId, d.id)));
+    const pinSnaps = pinRefs.length ? await db.getAll(...pinRefs) : [];
     const students = snap.docs.map((d, i) => {
       const pinSnap = pinSnaps[i];
       const hasCheckInPin =

@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { getFirebaseAuth } from "@/lib/firebase/client-app";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { redirectIfKnownSessionDashboard } from "@/lib/firebase/resolve-session-dashboard";
+import { getLastDashboardRoleHintPath } from "@/lib/auth/last-dashboard-role";
 
 type Phase = "checking" | "ready";
 
@@ -18,6 +19,13 @@ export function HomeClient() {
     if (!isFirebaseConfigured()) {
       setPhase("ready");
       return;
+    }
+
+    // 인증 복원을 기다리는 동안 마지막 로그인 역할의 대시보드 라우트를 미리 받아둔다.
+    // 실제 진입 가능 여부는 각 대시보드 페이지가 항상 스스로 재확인하므로 안전하다.
+    const hintedPath = getLastDashboardRoleHintPath();
+    if (hintedPath) {
+      router.prefetch(hintedPath);
     }
 
     let cancelled = false;

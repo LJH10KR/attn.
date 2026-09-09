@@ -32,6 +32,7 @@ import { fetchIsOwner } from "@/lib/firebase/owner-profile";
 import { COLLECTIONS, type Academy } from "@/lib/firebase/attn-schema";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
+import { setLastDashboardRoleHint } from "@/lib/auth/last-dashboard-role";
 import { AcademyRegistrationOverlay } from "@/components/owner/academy-registration-overlay";
 import { attnIdSortKey, compareAttnIdAsc } from "@/lib/attn-id-sort";
 import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
@@ -151,6 +152,7 @@ export function OwnerDashboard() {
         return;
       }
       setGate("ok");
+      setLastDashboardRoleHint("owner");
       ownerListLoadedUidRef.current = uid;
       setOwnerUid(uid);
     });

@@ -480,16 +480,16 @@ export const listTeacherAssignedStudents = onCall(
 
     const db = admin.firestore();
     const teacherRef = db.doc(`academies/${academyId}/teachers/${uid}`);
-    const teacherSnap = await teacherRef.get();
-    if (!teacherSnap.exists || teacherSnap.get("status") !== "active") {
-      throw new HttpsError("permission-denied", "이 학원의 활성 선생님만 학생 목록을 조회할 수 있습니다.");
-    }
-
     const col = db.collection(`academies/${academyId}/students`);
-    const [byArrSnap, byLegacySnap] = await Promise.all([
+
+    const [teacherSnap, byArrSnap, byLegacySnap] = await Promise.all([
+      teacherRef.get(),
       col.where("assignedTeacherUids", "array-contains", uid).get(),
       col.where("assignedTeacherUid", "==", uid).get(),
     ]);
+    if (!teacherSnap.exists || teacherSnap.get("status") !== "active") {
+      throw new HttpsError("permission-denied", "이 학원의 활성 선생님만 학생 목록을 조회할 수 있습니다.");
+    }
 
     const byId = new Map<string, QueryDocumentSnapshot>();
     for (const d of byArrSnap.docs) {
