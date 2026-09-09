@@ -162,7 +162,10 @@ export default function TeacherDashboardPage() {
           return;
         }
 
-        const data = await resolveTeacherActivationState(user);
+        // 대시보드 진입 체크는 캐시를 건너뛰고 항상 최신 상태를 본다 — 클레임 우선 판별
+        // 덕분에 캐시 없이도 왕복이 거의 없어서 비용이 크지 않고, 활성화 직후처럼
+        // 상태가 방금 바뀐 경우에 45초짜리 캐시가 옛 상태를 돌려주는 걸 막는다.
+        const data = await resolveTeacherActivationState(user, { bypassCache: true });
         if (
           cancelled ||
           gen !== teacherInitGenerationRef.current ||
