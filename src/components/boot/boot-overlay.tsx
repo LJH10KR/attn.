@@ -29,6 +29,8 @@ const BootOverlayContext = createContext<BootOverlayContextValue | null>(null);
  */
 export const BOOT_PROGRESS = {
   START: 0,
+  /** 실제 진행률과 무관 — 시작하자마자 살짝 차올라 "지금 진행 중"임을 보여주는 최소 피드백 */
+  IDLE_HINT: 5,
   AUTH_RESTORED: 35,
   ROLE_RESOLVED: 70,
   DONE: 100,
@@ -39,7 +41,7 @@ type OverlayPhase = "hidden" | "visible" | "splashing" | "leaving";
 /** 어떤 경로도 오버레이를 못 끄는 예외 상황을 대비한 안전장치 */
 const FAILSAFE_TIMEOUT_MS = 8000;
 /** globals.css의 .attn-boot-wordmark-fill transition 시간과 맞춤 — 물이 끝까지 차오르는 시간 */
-const FILL_TRANSITION_MS = 800;
+const FILL_TRANSITION_MS = 1200;
 /** 물이 다 찬 뒤 튀어 오르는 연출(드롭릿)이 끝날 때까지 여유 */
 const SPLASH_TAIL_MS = 550;
 /** 페이드아웃 시간 */
@@ -93,16 +95,25 @@ export function BootOverlayProvider({ children }: { children: React.ReactNode })
   const [progress, setProgressState] = useState<number>(BOOT_PROGRESS.START);
   const failsafeRef = useRef<number | undefined>(undefined);
   const hideDelayRef = useRef<number | undefined>(undefined);
+  const idleHintFrameRef = useRef<number | undefined>(undefined);
 
   const clearTimers = useCallback(() => {
     window.clearTimeout(failsafeRef.current);
     window.clearTimeout(hideDelayRef.current);
+    if (idleHintFrameRef.current !== undefined) {
+      window.cancelAnimationFrame(idleHintFrameRef.current);
+      idleHintFrameRef.current = undefined;
+    }
   }, []);
 
   const show = useCallback(() => {
     clearTimers();
     setProgressState(BOOT_PROGRESS.START);
     setPhase("visible");
+    // 마운트 직후 한 프레임 뒤에 살짝 채워서, 0%에서도 "지금 시작됐다"는 게 눈에 보이도록 함
+    idleHintFrameRef.current = window.requestAnimationFrame(() => {
+      setProgressState(BOOT_PROGRESS.IDLE_HINT);
+    });
     failsafeRef.current = window.setTimeout(() => {
       setPhase("hidden");
     }, FAILSAFE_TIMEOUT_MS);
