@@ -8,11 +8,13 @@ import { getFirebaseAuth } from "@/lib/firebase/client-app";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { redirectIfKnownSessionDashboard } from "@/lib/firebase/resolve-session-dashboard";
 import { getLastDashboardRoleHintPath } from "@/lib/auth/last-dashboard-role";
+import { useBootOverlay } from "@/components/boot/boot-overlay";
 
 type Phase = "checking" | "ready";
 
 export function HomeClient() {
   const router = useRouter();
+  const { show: showBootOverlay, hide: hideBootOverlay } = useBootOverlay();
   const [phase, setPhase] = useState<Phase>(() => (isFirebaseConfigured() ? "checking" : "ready"));
 
   useEffect(() => {
@@ -20,6 +22,8 @@ export function HomeClient() {
       setPhase("ready");
       return;
     }
+
+    showBootOverlay();
 
     // 인증 복원을 기다리는 동안 마지막 로그인 역할의 대시보드 라우트를 미리 받아둔다.
     // 실제 진입 가능 여부는 각 대시보드 페이지가 항상 스스로 재확인하므로 안전하다.
@@ -34,6 +38,7 @@ export function HomeClient() {
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (cancelled) return;
       if (!user) {
+        hideBootOverlay();
         setPhase("ready");
         return;
       }
@@ -41,11 +46,17 @@ export function HomeClient() {
         const result = await redirectIfKnownSessionDashboard(user, (path) => {
           if (!cancelled) router.replace(path);
         });
+        // "redirected"면 오버레이는 그대로 유지 — 대상 대시보드 페이지가 자기 로딩이
+        // 끝나는 시점에 hideBootOverlay()를 호출해 끊김 없이 이어진다.
         if (!cancelled && result === "stay") {
+          hideBootOverlay();
           setPhase("ready");
         }
       } catch {
-        if (!cancelled) setPhase("ready");
+        if (!cancelled) {
+          hideBootOverlay();
+          setPhase("ready");
+        }
       }
     });
 
@@ -53,14 +64,10 @@ export function HomeClient() {
       cancelled = true;
       unsub();
     };
-  }, [router]);
+  }, [router, showBootOverlay, hideBootOverlay]);
 
   if (phase === "checking") {
-    return (
-      <div className="min-h-[100dvh] bg-background flex flex-col items-center justify-center gap-6 px-6">
-        <p className="text-sm text-neutral-500">불러오는 중…</p>
-      </div>
-    );
+    return null;
   }
 
   return (

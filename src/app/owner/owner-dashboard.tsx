@@ -33,6 +33,7 @@ import { COLLECTIONS, type Academy } from "@/lib/firebase/attn-schema";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
 import { setLastDashboardRoleHint } from "@/lib/auth/last-dashboard-role";
+import { useBootOverlay } from "@/components/boot/boot-overlay";
 import { AcademyRegistrationOverlay } from "@/components/owner/academy-registration-overlay";
 import { attnIdSortKey, compareAttnIdAsc } from "@/lib/attn-id-sort";
 import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
@@ -76,6 +77,7 @@ function ownerFirebaseErrorMessage(err: FirebaseError): string {
 
 export function OwnerDashboard() {
   const router = useRouter();
+  const { hide: hideBootOverlay } = useBootOverlay();
   const { profile: authProfile } = useAuthProfile();
   const { logout: onLogout, logoutBusy, logoutModal } = useRoleLogout({
     redirectTo: "/login/owner",
@@ -108,6 +110,11 @@ export function OwnerDashboard() {
   const [ownerPhone, setOwnerPhone] = useState<string | null>(null);
 
   useBodyScrollLock(modal !== null);
+
+  // 콜드부팅 스플래시 — 이 페이지가 어떤 형태로든 결론(ok/auth/forbidden)에 도달하면 넘겨받는다.
+  useEffect(() => {
+    if (gate !== "loading") hideBootOverlay();
+  }, [gate, hideBootOverlay]);
 
   const configured = isFirebaseConfigured();
 

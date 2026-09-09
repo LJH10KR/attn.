@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist_Mono } from "next/font/google";
 import { Noto_Sans_KR } from "next/font/google";
 import { headers } from "next/headers";
+import { BootOverlayProvider } from "@/components/boot/boot-overlay";
 import "./globals.css";
 
 const notoSansKr = Noto_Sans_KR({
@@ -34,7 +35,7 @@ export default async function RootLayout({
       <body
         className={`${notoSansKr.variable} ${geistMono.variable} font-sans antialiased`}
       >
-        {children}
+        <BootOverlayProvider>{children}</BootOverlayProvider>
       </body>
     </html>
   );

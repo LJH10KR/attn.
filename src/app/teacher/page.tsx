@@ -24,6 +24,7 @@ import {
 } from "@/lib/firebase/client-app";
 import { useAttendanceNotificationLog } from "@/lib/firebase/use-attendance-notification-log";
 import { setLastDashboardRoleHint } from "@/lib/auth/last-dashboard-role";
+import { useBootOverlay } from "@/components/boot/boot-overlay";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { resolveTeacherActivationState } from "@/lib/firebase/resolve-session-dashboard";
 import { useRoleLogout } from "@/lib/auth/use-role-logout";
@@ -79,6 +80,7 @@ function studentRowFromCallablePayload(
 
 export default function TeacherDashboardPage() {
   const router = useRouter();
+  const { hide: hideBootOverlay } = useBootOverlay();
   const { profile: authProfile } = useAuthProfile();
   const [ready, setReady] = useState(false);
   const [academyId, setAcademyId] = useState<string | null>(null);
@@ -102,6 +104,11 @@ export default function TeacherDashboardPage() {
 
   const teacherListLoadedUidRef = useRef<string | null>(null);
   const teacherInitGenerationRef = useRef(0);
+
+  // 콜드부팅 스플래시 — 이 페이지가 준비되면(정상 진입 또는 에러 모두 ready=true) 넘겨받는다.
+  useEffect(() => {
+    if (ready) hideBootOverlay();
+  }, [ready, hideBootOverlay]);
 
   useEffect(() => {
     const auth = getFirebaseAuth();

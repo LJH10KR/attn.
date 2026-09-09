@@ -32,6 +32,7 @@ import {
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { useParentDashboardBell } from "@/lib/firebase/use-parent-dashboard-bell";
 import { setLastDashboardRoleHint } from "@/lib/auth/last-dashboard-role";
+import { useBootOverlay } from "@/components/boot/boot-overlay";
 import { resolveParentActivationState } from "@/lib/firebase/resolve-session-dashboard";
 import { useRoleLogout } from "@/lib/auth/use-role-logout";
 import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
@@ -120,6 +121,7 @@ function studentRowFromCallablePayload(
 
 export default function ParentDashboardPage() {
   const router = useRouter();
+  const { hide: hideBootOverlay } = useBootOverlay();
   const { profile: authProfile } = useAuthProfile();
   const [ready, setReady] = useState(false);
   const [academyId, setAcademyId] = useState<string | null>(null);
@@ -160,6 +162,11 @@ export default function ParentDashboardPage() {
 
   const parentListLoadedUidRef = useRef<string | null>(null);
   const parentInitGenerationRef = useRef(0);
+
+  // 콜드부팅 스플래시 — 이 페이지가 준비되면(정상 진입 또는 에러 모두 ready=true) 넘겨받는다.
+  useEffect(() => {
+    if (ready) hideBootOverlay();
+  }, [ready, hideBootOverlay]);
 
   useEffect(() => {
     const auth = getFirebaseAuth();

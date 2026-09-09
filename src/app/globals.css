@@ -133,3 +133,19 @@ body {
 .attn-process-card-in {
   animation: attn-process-card-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
+
+@keyframes attn-boot-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.97);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.attn-boot-pulse {
+  animation: attn-boot-pulse 1.8s ease-in-out infinite;
+}
