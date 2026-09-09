@@ -223,9 +223,10 @@ export default function ParentDashboardPage() {
           return;
         }
 
-        // 대시보드 진입 체크는 캐시를 건너뛰고 항상 최신 상태를 본다 — 클레임 우선 판별
-        // 덕분에 캐시 없이도 왕복이 거의 없어서 비용이 크지 않고, 이메일 인증 직후처럼
-        // 상태가 방금 바뀐 경우에 45초짜리 캐시가 옛 상태를 돌려주는 걸 막는다.
+        // 대시보드 진입 체크는 캐시를 건너뛰고 항상 최신 상태를 본다 — 45초짜리 캐시가
+        // 옛 상태를 돌려주는 걸 막는다. "클레임 우선 판별"은 "active"만 즉시 신뢰하고
+        // 그 외에는 항상 미러/콜러블로 재확인하므로(Custom Claims 전파 지연 대응),
+        // 여기서 별도로 토큰을 강제 갱신할 필요는 없다.
         const data = await resolveParentActivationState(user, { bypassCache: true });
         if (
           cancelled ||

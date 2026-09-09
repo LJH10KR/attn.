@@ -85,9 +85,13 @@ async function tryReadActivationRoleFromMirror(
 /**
  * ID 토큰 Custom Claims(`role`/`academyId`/`membershipStatus`)만으로 활성 상태를 판별.
  * 미러 문서(Firestore)·콜러블(Cloud Function)보다 왕복이 없어 가장 빠르다.
- * 클레임은 멤버십 문서 쓰기 시 트리거가 항상 최신화하지만(`reconcileUserActivationMirror`),
- * 실제 데이터 읽기는 여전히 보안 규칙이 라이브 멤버십 상태로 검사하므로
- * 클레임이 잠깐 stale해도 잘못된 데이터 접근으로 이어지지 않는다.
+ *
+ * **`anyActive`가 아닌 결과는 반환하지 않는다.** `setCustomUserClaims()`는 호출 즉시
+ * 새 ID 토큰에 반영되지 않고 짧은(수 초) 전파 지연이 있을 수 있어서 — 예: 이메일 인증
+ * 직후 강제로 토큰을 새로 받아도 옛 클레임(`pending_email_verification`)이 잠깐 나올 수
+ * 있다 — "활성 아님"이라는 부정적 판정을 그대로 신뢰하면 방금 활성화된 사용자를 잘못
+ * 튕겨낼 위험이 있다. "active"라는 긍정적 판정만 즉시 신뢰하고(실제 데이터 접근은 어차피
+ * 보안 규칙이 라이브 상태로 재검사하니 안전), 그 외 상태는 항상 미러/콜러블로 다시 확인한다.
  */
 async function tryReadActivationRoleFromClaims(
   user: User,
@@ -97,10 +101,10 @@ async function tryReadActivationRoleFromClaims(
     const { claims } = await user.getIdTokenResult();
     if (claims.role !== role) return null;
     if (typeof claims.academyId !== "string" || !claims.academyId) return null;
-    if (typeof claims.membershipStatus !== "string" || !claims.membershipStatus) return null;
+    if (claims.membershipStatus !== "active") return null;
     return normalizeActivationState({
-      anyActive: claims.membershipStatus === "active",
-      primaryStatus: claims.membershipStatus,
+      anyActive: true,
+      primaryStatus: "active",
       primaryAcademyId: claims.academyId,
     });
   } catch {
