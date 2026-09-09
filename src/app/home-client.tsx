@@ -8,7 +8,12 @@ import { getFirebaseAuth } from "@/lib/firebase/client-app";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { redirectIfKnownSessionDashboard } from "@/lib/firebase/resolve-session-dashboard";
 import { getLastDashboardRoleHintPath } from "@/lib/auth/last-dashboard-role";
-import { BOOT_PROGRESS, useBootOverlay } from "@/components/boot/boot-overlay";
+import {
+  BOOT_PROGRESS,
+  hasShownBootOverlayThisSession,
+  markBootOverlayShown,
+  useBootOverlay,
+} from "@/components/boot/boot-overlay";
 
 type Phase = "checking" | "ready";
 
@@ -23,7 +28,12 @@ export function HomeClient() {
       return;
     }
 
-    showBootOverlay();
+    // 이번 세션(탭)에서 처음 여는 경우에만 부팅 애니메이션을 보여준다 — 앱 안에서
+    // "홈" 등으로 "/"를 다시 거치는 재방문(설정 화면 → 홈 등)에는 재생하지 않는다.
+    if (!hasShownBootOverlayThisSession()) {
+      showBootOverlay();
+      markBootOverlayShown();
+    }
 
     // 인증 복원을 기다리는 동안 마지막 로그인 역할의 대시보드 라우트를 미리 받아둔다.
     // 실제 진입 가능 여부는 각 대시보드 페이지가 항상 스스로 재확인하므로 안전하다.

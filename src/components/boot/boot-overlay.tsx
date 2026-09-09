@@ -21,6 +21,29 @@ type BootOverlayContextValue = {
   setProgress: (percent: number) => void;
 };
 
+const BOOT_SHOWN_SESSION_KEY = "attn_boot_overlay_shown";
+
+/**
+ * 이번 브라우저 세션(탭)에서 부팅 오버레이를 이미 보여줬는지.
+ * PWA를 껐다 다시 열면(새 세션) 초기화되지만, 앱 안에서 "홈"으로 돌아가는 등
+ * 같은 세션 안의 재방문에서는 애니메이션을 또 재생하지 않기 위한 표시.
+ */
+export function hasShownBootOverlayThisSession(): boolean {
+  try {
+    return sessionStorage.getItem(BOOT_SHOWN_SESSION_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function markBootOverlayShown(): void {
+  try {
+    sessionStorage.setItem(BOOT_SHOWN_SESSION_KEY, "1");
+  } catch {
+    /* private mode 등 — 무시 */
+  }
+}
+
 const BootOverlayContext = createContext<BootOverlayContextValue | null>(null);
 
 /**
@@ -93,9 +116,15 @@ function BootSplash({
 export function BootOverlayProvider({ children }: { children: React.ReactNode }) {
   const [phase, setPhase] = useState<OverlayPhase>("hidden");
   const [progress, setProgressState] = useState<number>(BOOT_PROGRESS.START);
+  const phaseRef = useRef<OverlayPhase>("hidden");
   const failsafeRef = useRef<number | undefined>(undefined);
   const hideDelayRef = useRef<number | undefined>(undefined);
   const idleHintFrameRef = useRef<number | undefined>(undefined);
+
+  const updatePhase = useCallback((next: OverlayPhase) => {
+    phaseRef.current = next;
+    setPhase(next);
+  }, []);
 
   const clearTimers = useCallback(() => {
     window.clearTimeout(failsafeRef.current);
@@ -109,15 +138,15 @@ export function BootOverlayProvider({ children }: { children: React.ReactNode })
   const show = useCallback(() => {
     clearTimers();
     setProgressState(BOOT_PROGRESS.START);
-    setPhase("visible");
+    updatePhase("visible");
     // 마운트 직후 한 프레임 뒤에 살짝 채워서, 0%에서도 "지금 시작됐다"는 게 눈에 보이도록 함
     idleHintFrameRef.current = window.requestAnimationFrame(() => {
       setProgressState(BOOT_PROGRESS.IDLE_HINT);
     });
     failsafeRef.current = window.setTimeout(() => {
-      setPhase("hidden");
+      updatePhase("hidden");
     }, FAILSAFE_TIMEOUT_MS);
-  }, [clearTimers]);
+  }, [clearTimers, updatePhase]);
 
   const setProgress = useCallback((percent: number) => {
     setProgressState(Math.max(0, Math.min(100, percent)));
@@ -125,21 +154,24 @@ export function BootOverlayProvider({ children }: { children: React.ReactNode })
 
   const hide = useCallback(
     (opts?: HideOptions) => {
+      // 애초에 안 떠 있으면 아무것도 하지 않음 — show() 없이 hide()만 호출되는
+      // 경로(예: 같은 세션에서 재방문해 오버레이를 스킵한 경우)를 위한 가드.
+      if (phaseRef.current === "hidden") return;
       clearTimers();
       if (opts?.immediate) {
-        setPhase("hidden");
+        updatePhase("hidden");
         return;
       }
       setProgressState(BOOT_PROGRESS.DONE);
-      setPhase("splashing");
+      updatePhase("splashing");
       hideDelayRef.current = window.setTimeout(() => {
-        setPhase("leaving");
+        updatePhase("leaving");
         hideDelayRef.current = window.setTimeout(() => {
-          setPhase("hidden");
+          updatePhase("hidden");
         }, FADE_MS);
       }, FILL_TRANSITION_MS + SPLASH_TAIL_MS);
     },
-    [clearTimers],
+    [clearTimers, updatePhase],
   );
 
   useEffect(() => clearTimers, [clearTimers]);
