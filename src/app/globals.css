@@ -137,7 +137,7 @@ body {
 .attn-boot-wordmark-wrap {
   position: relative;
   display: inline-block;
-  font-size: 2.75rem;
+  font-size: clamp(3.5rem, 16vw, 6.5rem);
   font-weight: 600;
   letter-spacing: -0.02em;
 }
@@ -163,5 +163,69 @@ body {
   }
   50% {
     transform: translateY(-2px);
+  }
+}
+
+/* 물이 다 찬 순간 위로 튀어 오르는 물방울 — 각 점마다 방향(--dx/--dy)과 지연을 다르게 줘서 부채꼴로 흩어짐 */
+.attn-boot-splash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.attn-boot-splash i {
+  position: absolute;
+  top: 6%;
+  left: 50%;
+  width: 0.14em;
+  height: 0.14em;
+  border-radius: 999px;
+  background: #4a90e2;
+  opacity: 0;
+  animation: attn-boot-droplet 0.55s ease-out forwards;
+}
+
+.attn-boot-splash i:nth-child(1) {
+  --dx: -2.4em;
+  --dy: -1.7em;
+  animation-delay: 0.7s;
+}
+.attn-boot-splash i:nth-child(2) {
+  --dx: -1.3em;
+  --dy: -2.35em;
+  animation-delay: 0.72s;
+}
+.attn-boot-splash i:nth-child(3) {
+  --dx: -0.2em;
+  --dy: -2.6em;
+  animation-delay: 0.68s;
+}
+.attn-boot-splash i:nth-child(4) {
+  --dx: 0.4em;
+  --dy: -2.5em;
+  animation-delay: 0.74s;
+}
+.attn-boot-splash i:nth-child(5) {
+  --dx: 1.5em;
+  --dy: -2.1em;
+  animation-delay: 0.69s;
+}
+.attn-boot-splash i:nth-child(6) {
+  --dx: 2.3em;
+  --dy: -1.5em;
+  animation-delay: 0.73s;
+}
+
+@keyframes attn-boot-droplet {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) translate(0, 0) scale(0.7);
+  }
+  18% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) translate(var(--dx), var(--dy)) scale(0.3);
   }
 }

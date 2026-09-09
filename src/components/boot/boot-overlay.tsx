@@ -34,18 +34,24 @@ export const BOOT_PROGRESS = {
   DONE: 100,
 } as const;
 
-type OverlayPhase = "hidden" | "visible" | "leaving";
+type OverlayPhase = "hidden" | "visible" | "splashing" | "leaving";
 
 /** 어떤 경로도 오버레이를 못 끄는 예외 상황을 대비한 안전장치 */
 const FAILSAFE_TIMEOUT_MS = 8000;
-/** 100%로 채워지는 모습을 보여준 뒤 사라지기까지의 여유 */
-const HIDE_DELAY_MS = 350;
+/** globals.css의 .attn-boot-wordmark-fill transition 시간과 맞춤 — 물이 끝까지 차오르는 시간 */
+const FILL_TRANSITION_MS = 800;
+/** 물이 다 찬 뒤 튀어 오르는 연출(드롭릿)이 끝날 때까지 여유 */
+const SPLASH_TAIL_MS = 550;
+/** 페이드아웃 시간 */
+const FADE_MS = 300;
 
 function BootSplash({
   progress,
+  splashing,
   leaving,
 }: {
   progress: number;
+  splashing: boolean;
   leaving: boolean;
 }) {
   return (
@@ -67,6 +73,16 @@ function BootSplash({
       >
         <span className="attn-boot-wordmark-base">attn.</span>
         <span className="attn-boot-wordmark-fill">attn.</span>
+        {splashing ? (
+          <span className="attn-boot-splash" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+            <i />
+            <i />
+            <i />
+          </span>
+        ) : null}
       </div>
     </div>
   );
@@ -104,10 +120,13 @@ export function BootOverlayProvider({ children }: { children: React.ReactNode })
         return;
       }
       setProgressState(BOOT_PROGRESS.DONE);
-      setPhase("leaving");
+      setPhase("splashing");
       hideDelayRef.current = window.setTimeout(() => {
-        setPhase("hidden");
-      }, HIDE_DELAY_MS);
+        setPhase("leaving");
+        hideDelayRef.current = window.setTimeout(() => {
+          setPhase("hidden");
+        }, FADE_MS);
+      }, FILL_TRANSITION_MS + SPLASH_TAIL_MS);
     },
     [clearTimers],
   );
@@ -120,7 +139,11 @@ export function BootOverlayProvider({ children }: { children: React.ReactNode })
     <BootOverlayContext.Provider value={value}>
       {children}
       {phase !== "hidden" ? (
-        <BootSplash progress={progress} leaving={phase === "leaving"} />
+        <BootSplash
+          progress={progress}
+          splashing={phase === "splashing"}
+          leaving={phase === "leaving"}
+        />
       ) : null}
     </BootOverlayContext.Provider>
   );
