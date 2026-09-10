@@ -296,6 +296,22 @@ service cloud.firestore {
             || isAcademyOwner(academyId);
         }
       }
+
+      /**
+       * 카드 결제(포트원 V2) 이력 — 검증·상태 갱신은 Cloud Functions(Admin SDK, onRequest)만 수행.
+       * 클라이언트 쓰기는 isAdmin/isAcademyOwner 외에는 항상 거부(위변조 방지).
+       */
+      match /payments/{paymentId} {
+        allow read: if isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyPortalSession(academyId)
+          || (isSignedIn()
+              && resource.data.keys().hasAny(['parentUserId'])
+              && resource.data.parentUserId is string
+              && resource.data.parentUserId == request.auth.uid);
+
+        allow create, update, delete: if isAdmin() || isAcademyOwner(academyId);
+      }
     }
 
     /** attnId 로그인 조회 — Functions(Admin SDK)만 쓰기 */

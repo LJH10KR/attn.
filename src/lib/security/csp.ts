@@ -21,6 +21,12 @@ const EMULATOR_CONNECT =
 const EMULATOR_FRAME =
   "http://127.0.0.1:9099 http://localhost:9099";
 
+/** 포트원 V2 결제 SDK — 결제창 로드·API 통신에 사용하는 도메인 */
+const PORTONE_CONNECT = "https://*.iamport.co https://*.portone.io";
+const PORTONE_SCRIPT = "https://*.iamport.co https://*.portone.io";
+const PORTONE_FRAME =
+  "https://*.iamport.co https://*.portone.io https://*.nicepay.co.kr";
+
 export function generateCspNonce(): string {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
@@ -41,12 +47,12 @@ export function buildContentSecurityPolicy(opts: { nonce: string; isDev: boolean
     "form-action 'self'",
     "object-src 'none'",
     "frame-ancestors 'none'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${scriptDev} https://www.gstatic.com https://apis.google.com https://www.google.com https://accounts.google.com`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${scriptDev} https://www.gstatic.com https://apis.google.com https://www.google.com https://accounts.google.com ${PORTONE_SCRIPT}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https:",
     "font-src 'self' data:",
-    `connect-src 'self' ${FIREBASE_CONNECT}${isDev ? ` ${EMULATOR_CONNECT}` : ""}`,
-    `frame-src 'self' https://accounts.google.com https://www.google.com https://www.gstatic.com https://*.firebaseapp.com https://*.google.com${isDev ? ` ${EMULATOR_FRAME}` : ""}`,
+    `connect-src 'self' ${FIREBASE_CONNECT} ${PORTONE_CONNECT}${isDev ? ` ${EMULATOR_CONNECT}` : ""}`,
+    `frame-src 'self' https://accounts.google.com https://www.google.com https://www.gstatic.com https://*.firebaseapp.com https://*.google.com ${PORTONE_FRAME}${isDev ? ` ${EMULATOR_FRAME}` : ""}`,
   ];
 
   if (!isDev) {

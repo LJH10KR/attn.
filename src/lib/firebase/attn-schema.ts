@@ -296,6 +296,12 @@ export type AcademyTuitionSettingsDoc = {
   bankName: string;
   accountNumber: string;
   accountHolder: string;
+  /**
+   * 포트원 채널 키 — 학원별 프로덕션(나이스정보통신) 채널로 실연동 전환 시 사용.
+   * 테스트 단계에서는 비어있을 수 있으며, 그 경우 클라이언트는
+   * `NEXT_PUBLIC_PORTONE_CHANNEL_KEY`(공용 테스트 채널)로 폴백합니다.
+   */
+  channelKey?: string;
   updatedAt?: Timestamp;
 };
 
@@ -325,4 +331,29 @@ export type SessionLogDoc = {
 
 export function academyStudentSessionLogsPath(academyId: string, studentId: string): string {
   return `${academyStudentsPath(academyId)}/${studentId}/sessionLogs`;
+}
+
+/** 카드 결제(포트원 V2 · 나이스정보통신) 상태 */
+export type AcademyPaymentStatus = "PENDING" | "PAID" | "FAILED" | "CANCELLED";
+
+/** `academies/{academyId}/payments/{paymentId}` — 카드 결제 이력 (paymentId는 클라이언트가 생성한 UUID) */
+export type AcademyPaymentDoc = {
+  paymentId: string;
+  studentId: string;
+  studentName: string;
+  parentUserId: string;
+  amount: number;
+  status: AcademyPaymentStatus;
+  portoneTransactionId?: string;
+  cancelledAt?: Timestamp;
+  createdAt: Timestamp;
+  updatedAt?: Timestamp;
+};
+
+export function academyPaymentsPath(academyId: string): string {
+  return `${academyPath(academyId)}/payments`;
+}
+
+export function academyPaymentPath(academyId: string, paymentId: string): string {
+  return `${academyPaymentsPath(academyId)}/${paymentId}`;
 }

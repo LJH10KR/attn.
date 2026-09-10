@@ -1,5 +1,6 @@
 "use client";
 
+import PortOne from "@portone/browser-sdk/v2";
 import { useMemo, useState } from "react";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -37,20 +38,30 @@ type TuitionSettings = {
   bankName?: string;
   accountNumber?: string;
   accountHolder?: string;
+  channelKey?: string;
 };
 
 type Props = {
+  studentId: string;
+  studentName: string;
+  academyId: string;
   tuitionDueDayOfMonth: number;
   tuitionAmount?: number | null;
   settings: TuitionSettings | null;
 };
 
 export function ParentTuitionReminderCard({
+  studentId,
+  studentName,
+  academyId,
   tuitionDueDayOfMonth,
   tuitionAmount,
   settings,
 }: Props) {
   const [copied, setCopied] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [paid, setPaid] = useState(false);
 
   const { diffDays, dueDateLabel } = useMemo(() => {
     const todayMs = seoulMidnightMs(new Date());
@@ -91,6 +102,56 @@ export function ParentTuitionReminderCard({
     }
   };
 
+  const onCardPayment = async () => {
+    if (paying || tuitionAmount == null) return;
+
+    const storeId = process.env.NEXT_PUBLIC_PORTONE_STORE_ID;
+    // Firestore tuitionSettings.channelKey가 있으면 우선 사용, 없으면 공용 테스트 채널로 폴백
+    const channelKey = settings?.channelKey || process.env.NEXT_PUBLIC_PORTONE_CHANNEL_KEY;
+    if (!storeId || !channelKey) {
+      setPaymentError("결제 설정이 완료되지 않았습니다. 학원에 문의해 주세요.");
+      return;
+    }
+
+    setPaying(true);
+    setPaymentError(null);
+    try {
+      const paymentId = crypto.randomUUID();
+      const payment = await PortOne.requestPayment({
+        storeId,
+        channelKey,
+        paymentId,
+        orderName: `${studentName} 학생 원비`,
+        totalAmount: tuitionAmount,
+        currency: "KRW",
+        payMethod: "CARD",
+      });
+
+      if (payment?.code) {
+        setPaymentError(payment.message || "결제가 취소되었거나 실패했습니다.");
+        return;
+      }
+
+      const verifyRes = await fetch("/api/payment/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentId, studentId, academyId }),
+      });
+
+      if (!verifyRes.ok) {
+        const data = (await verifyRes.json().catch(() => null)) as { error?: string } | null;
+        setPaymentError(data?.error || "결제 검증에 실패했습니다.");
+        return;
+      }
+
+      setPaid(true);
+    } catch {
+      setPaymentError("결제 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setPaying(false);
+    }
+  };
+
   return (
     <div className="mt-3 rounded-2xl bg-amber-50/80 dark:bg-amber-900/20 ring-1 ring-amber-200/70 dark:ring-amber-700/40 p-3 space-y-2.5">
       <div className="flex items-center gap-2">
@@ -119,16 +180,37 @@ export function ParentTuitionReminderCard({
         ) : null}
       </div>
 
-      {settings?.kakaoPayLink ? (
-        <a
-          href={settings.kakaoPayLink}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center justify-center w-full rounded-[8px] bg-[#FEE500] py-2.5 text-xs font-semibold text-[#3C1E1E] hover:bg-[#F6D800] active:bg-[#EDD000]"
-        >
-          카카오페이로 납부하기
-        </a>
-      ) : null}
+      {paid ? (
+        <p className="rounded-[8px] bg-emerald-100/80 dark:bg-emerald-900/30 py-2.5 text-center text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+          납부가 완료되었습니다
+        </p>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={() => void onCardPayment()}
+            disabled={paying || tuitionAmount == null}
+            className="flex items-center justify-center w-full rounded-[8px] bg-indigo-600 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {paying ? "결제 진행 중…" : "카드로 납부하기"}
+          </button>
+
+          {paymentError ? (
+            <p className="text-[11px] text-red-600 dark:text-red-400">{paymentError}</p>
+          ) : null}
+
+          {settings?.kakaoPayLink ? (
+            <a
+              href={settings.kakaoPayLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center w-full rounded-[8px] bg-[#FEE500] py-2.5 text-xs font-semibold text-[#3C1E1E] hover:bg-[#F6D800] active:bg-[#EDD000]"
+            >
+              카카오페이로 납부하기
+            </a>
+          ) : null}
+        </>
+      )}
 
       {hasBankInfo ? (
         <div className="flex items-center justify-between gap-2 rounded-xl bg-white/60 dark:bg-white/10 px-3 py-2.5">

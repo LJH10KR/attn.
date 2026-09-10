@@ -91,6 +91,7 @@ type TuitionSettingsState = {
   bankName?: string;
   accountNumber?: string;
   accountHolder?: string;
+  channelKey?: string;
 } | null;
 
 type ParentListPayload = {
@@ -500,6 +501,7 @@ export default function ParentDashboardPage() {
             bankName: typeof d?.bankName === "string" && d.bankName ? d.bankName : undefined,
             accountNumber: typeof d?.accountNumber === "string" && d.accountNumber ? d.accountNumber : undefined,
             accountHolder: typeof d?.accountHolder === "string" && d.accountHolder ? d.accountHolder : undefined,
+            channelKey: typeof d?.channelKey === "string" && d.channelKey ? d.channelKey : undefined,
           });
         } else {
           setTuitionSettings(null);
@@ -641,6 +643,9 @@ export default function ParentDashboardPage() {
                 ) : null}
                 {s.tuitionDueDayOfMonth ? (
                   <ParentTuitionReminderCard
+                    studentId={s.id}
+                    studentName={s.name}
+                    academyId={academyId!}
                     tuitionDueDayOfMonth={s.tuitionDueDayOfMonth}
                     tuitionAmount={s.tuitionAmount}
                     settings={tuitionSettings}
