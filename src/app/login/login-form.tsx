@@ -12,6 +12,8 @@ import {
   signOut,
 } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
+import { EmailVerificationCodeModal } from "@/components/auth/email-verification-code-modal";
+import { LoginPasswordField } from "@/components/auth/login-password-field";
 import { GoogleMark } from "@/components/auth/google-mark";
 import {
   LOGIN_ROLE_OPTIONS,
@@ -19,7 +21,7 @@ import {
 } from "@/lib/auth/login-routes";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import {
   getFirebaseAuth,
@@ -84,14 +86,30 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [academyId, setAcademyId] = useState("");
+  const [attnId, setAttnId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resetSent, setResetSent] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
   const [sessionUser, setSessionUser] = useState<User | null>(null);
   const [logoutBusy, setLogoutBusy] = useState(false);
+  const [otpModalOpen, setOtpModalOpen] = useState(false);
+  const [otpPurpose, setOtpPurpose] = useState<"owner" | "parent">("owner");
+  const [otpEmailHint, setOtpEmailHint] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [sessionBannerReady, setSessionBannerReady] = useState(false);
+  const otpFlowRef = useRef(false);
+  const autoSessionTriggeredRef = useRef(false);
+
+  // LoginSessionAutoRedirect가 자동 리다이렉트를 처리할 시간을 확보한 뒤에만 배너를 표시
+  useEffect(() => {
+    const t = setTimeout(() => setSessionBannerReady(true), 900);
+    return () => clearTimeout(t);
+  }, []);
 
   const configured = isFirebaseConfigured();
+  const loginPasswordInputClass =
+    "w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]";
 
   useEffect(() => {
     if (!configured) {
@@ -122,7 +140,33 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
     } else {
       setBanner(null);
     }
+    const presetLoginId = searchParams.get("loginId");
+    if (presetLoginId) {
+      setAttnId(presetLoginId);
+    }
   }, [searchParams, fixedRole]);
+
+  useEffect(() => {
+    if (!configured || (role !== "parent" && role !== "owner")) return;
+    const auth = getFirebaseAuth();
+    return onAuthStateChanged(auth, async (user) => {
+      if (!user || otpFlowRef.current) return;
+      try {
+        const token = await user.getIdTokenResult();
+        if (
+          role === "parent" &&
+          token.claims.membershipStatus === "pending_email_verification"
+        ) {
+          otpFlowRef.current = true;
+          setOtpPurpose("parent");
+          setOtpEmailHint(null);
+          setOtpModalOpen(true);
+        }
+      } catch {
+        /* ignore */
+      }
+    });
+  }, [configured, role]);
 
   const checkTeacherActivationOrRedirect =
     useCallback(async (): Promise<boolean> => {
@@ -144,6 +188,11 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
        * 초청 발송 직후 — 로그인한 채로 등록 완료(Callable)까지 가야 함.
        * 여기서 session으로 보내면 등록 완료 처리가 불가능해 교착 상태가 됩니다.
        */
+      if (state === "pending_setup") {
+        router.replace("/teacher/setup");
+        return false;
+      }
+
       if (state === "invitation_sent") {
         const p = new URLSearchParams();
         if (academyId) p.set("academyId", academyId);
@@ -175,11 +224,23 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
       const state = data?.primaryStatus ?? "unknown";
       const aid = data?.primaryAcademyId ?? "";
 
+      if (state === "pending_setup") {
+        router.replace("/parent/setup");
+        return false;
+      }
+
       if (state === "invitation_sent") {
         const p = new URLSearchParams();
         if (aid) p.set("academyId", aid);
         const qs = p.toString();
         router.replace(`/parent/complete${qs ? `?${qs}` : ""}`);
+        return false;
+      }
+
+      if (state === "pending_email_verification") {
+        setOtpPurpose("parent");
+        setOtpEmailHint(getFirebaseAuth().currentUser?.email ?? null);
+        setOtpModalOpen(true);
         return false;
       }
 
@@ -189,9 +250,9 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
       router.replace(`/parent/session?${q.toString()}`);
       return false;
     }, [router]);
-  const showEmailAuth =
-    role === "owner" || role === "teacher" || role === "parent";
-  const showGoogle = role === "owner";
+  const showOwnerEmailAuth = role === "owner";
+  const showMemberAttnAuth = role === "teacher" || role === "parent";
+  const showGoogle = role === "owner" || role === "parent" || role === "teacher";
   const showAcademyFields = role === "academy";
   const hasSession = Boolean(sessionUser);
   const sessionBlocked = hasSession;
@@ -233,8 +294,10 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
     if (!u) return;
     setBusy(true);
     try {
-      if (showEmailAuth && !u.emailVerified) {
-        router.replace("/verify-email");
+      if (showOwnerEmailAuth && !u.emailVerified) {
+        setOtpPurpose("owner");
+        setOtpEmailHint(u.email);
+        setOtpModalOpen(true);
         return;
       }
       if (role === "owner") {
@@ -268,8 +331,98 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
     configured,
     role,
     router,
-    showEmailAuth,
+    showOwnerEmailAuth,
   ]);
+
+  // 역할 고정 페이지(/login/parent 등)에서 기존 세션이 있으면 배너 없이 자동 이동
+  useEffect(() => {
+    if (!fixedRole) return;
+    if (!hasSession || busy || !sessionBannerReady) return;
+    if (autoSessionTriggeredRef.current || otpFlowRef.current) return;
+    autoSessionTriggeredRef.current = true;
+    void onContinueAsSession();
+  }, [fixedRole, hasSession, busy, sessionBannerReady, onContinueAsSession]);
+
+  const onMemberAttnLogin = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      setError(null);
+      setResetSent(false);
+      if (!configured) {
+        setError("Firebase 환경 변수를 먼저 설정해 주세요.");
+        return;
+      }
+      const id = attnId.trim();
+      if (!id || !password) {
+        setError("로그인 ID와 비밀번호를 입력해 주세요.");
+        return;
+      }
+      if (getFirebaseAuth().currentUser) {
+        setError("다른 계정으로 로그인하려면 먼저 로그아웃해 주세요.");
+        return;
+      }
+      setBusy(true);
+      try {
+        const auth = getFirebaseAuth();
+        const functions = getFirebaseFunctions();
+        const fnName = role === "teacher" ? "signInTeacher" : "signInParent";
+        const signIn = httpsCallable(functions, fnName);
+        const result = await signIn({ loginId: id, password });
+        const data = result.data as {
+          customToken?: string;
+          membershipStatus?: string;
+          contactEmail?: string;
+        };
+        if (!data?.customToken) {
+          setError("로그인 응답이 올바르지 않습니다.");
+          return;
+        }
+        await signInWithCustomToken(auth, data.customToken);
+        await auth.currentUser?.getIdToken(true);
+        if (role === "parent" && data.membershipStatus === "pending_email_verification") {
+          otpFlowRef.current = true;
+          setOtpPurpose("parent");
+          setOtpEmailHint(data.contactEmail ?? null);
+          setOtpModalOpen(true);
+          return;
+        }
+        if (data.membershipStatus === "pending_setup") {
+          router.replace(role === "teacher" ? "/teacher/setup" : "/parent/setup");
+          return;
+        }
+        if (role === "teacher") {
+          const ok = await checkTeacherActivationOrRedirect();
+          if (!ok) return;
+        } else {
+          const ok = await checkParentActivationOrRedirect();
+          if (!ok) return;
+        }
+        router.replace(role === "teacher" ? "/teacher" : "/parent");
+      } catch (err) {
+        if (err instanceof FirebaseError) {
+          setError(
+            err.code === "functions/permission-denied" ||
+              err.code === "functions/not-found"
+              ? "로그인 ID 또는 비밀번호가 올바르지 않습니다."
+              : functionsErrorMessage(err),
+          );
+        } else {
+          setError("로그인에 실패했습니다.");
+        }
+      } finally {
+        setBusy(false);
+      }
+    },
+    [
+      attnId,
+      checkParentActivationOrRedirect,
+      checkTeacherActivationOrRedirect,
+      configured,
+      password,
+      role,
+      router,
+    ],
+  );
 
   const onEmailLogin = useCallback(
     async (e: React.FormEvent) => {
@@ -298,8 +451,10 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
           email.trim(),
           password,
         );
-        if (showEmailAuth && !cred.user.emailVerified) {
-          router.replace("/verify-email");
+        if (showOwnerEmailAuth && !cred.user.emailVerified) {
+          setOtpPurpose("owner");
+          setOtpEmailHint(cred.user.email);
+          setOtpModalOpen(true);
           return;
         }
         if (role === "teacher") {
@@ -337,9 +492,37 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
       password,
       router,
       role,
-      showEmailAuth,
+      showOwnerEmailAuth,
     ],
   );
+
+  const onEmailOtpVerified = useCallback(async () => {
+    otpFlowRef.current = false;
+    setOtpModalOpen(false);
+    setBusy(true);
+    try {
+      const auth = getFirebaseAuth();
+      const user = auth.currentUser;
+      if (!user) {
+        setError("로그인 세션이 없습니다. 다시 로그인해 주세요.");
+        return;
+      }
+      await user.reload();
+      await user.getIdToken(true);
+      if (otpPurpose === "owner") {
+        await upsertOwnerProfile(auth.currentUser!);
+        router.replace("/owner");
+        return;
+      }
+      const ok = await checkParentActivationOrRedirect();
+      if (ok) router.replace("/parent");
+    } catch (err) {
+      const code = err instanceof FirebaseError ? err.code : "";
+      setError(code ? authErrorMessage(code, role) : "인증 후 이동에 실패했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  }, [checkParentActivationOrRedirect, otpPurpose, role, router]);
 
   const onGoogleLogin = useCallback(async () => {
     setError(null);
@@ -359,11 +542,38 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
       const auth = getFirebaseAuth();
       const provider = new GoogleAuthProvider();
       const cred = await signInWithPopup(auth, provider);
-      if (!cred.user.emailVerified) {
+      if (role === "owner" && !cred.user.emailVerified) {
         router.replace("/verify-email");
         return;
       }
       if (role === "teacher") {
+        try {
+          const signInGoogle = httpsCallable(
+            getFirebaseFunctions(),
+            "signInTeacherGoogle",
+          );
+          await signInGoogle({});
+          await cred.user.getIdToken(true);
+        } catch (linkErr) {
+          await signOut(auth);
+          if (linkErr instanceof FirebaseError) {
+            if (linkErr.code === "functions/failed-precondition") {
+              setError(linkErr.message || "구글 로그인 연동 후 진행해 주세요.");
+              return;
+            }
+            if (linkErr.code === "functions/not-found") {
+              setError(
+                linkErr.message || "연결된 선생님 계정을 찾을 수 없습니다.",
+              );
+              return;
+            }
+            if (linkErr.code === "functions/unauthenticated") {
+              setError(linkErr.message || "Google 로그인 후 다시 시도해 주세요.");
+              return;
+            }
+          }
+          throw linkErr;
+        }
         const ok = await checkTeacherActivationOrRedirect();
         if (!ok) return;
       }
@@ -384,6 +594,9 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
               : "/",
       );
     } catch (err) {
+      if (role === "teacher" && getFirebaseAuth().currentUser) {
+        await signOut(getFirebaseAuth()).catch(() => undefined);
+      }
       const code = err instanceof FirebaseError ? err.code : "";
       setError(authErrorMessage(code, role));
     } finally {
@@ -418,8 +631,8 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
         const auth = getFirebaseAuth();
         const functions = getFirebaseFunctions();
         const signIn = httpsCallable(functions, "signInAcademy");
-        const result = await signIn({
-          academyId: academyId.trim().toLowerCase(),
+        const result =         await signIn({
+          academyId: academyId.trim(),
           password,
         });
         const data = result.data as { customToken?: string };
@@ -527,7 +740,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
           </div>
         ) : null}
 
-        {hasSession ? (
+        {hasSession && !busy && sessionBannerReady && !fixedRole ? (
           <div className="mt-5 rounded-2xl border border-amber-200/70 bg-amber-50/80 px-3.5 py-3 text-sm text-amber-950 ring-1 ring-amber-500/15 backdrop-blur-sm">
             <p className="font-medium">이미 로그인된 상태입니다</p>
             <p className="mt-1 text-xs text-amber-900/90">
@@ -545,7 +758,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
                 type="button"
                 disabled={busy || logoutBusy || !configured}
                 onClick={onContinueAsSession}
-                className="flex-1 rounded-xl bg-[#222] dark:bg-neutral-100 px-3 py-2.5 text-xs font-medium text-white dark:text-neutral-950 shadow-sm transition hover:bg-[#333] dark:hover:bg-white active:scale-[0.99] disabled:opacity-50"
+                className="flex-1 rounded-[8px] bg-[#222] dark:bg-neutral-100 px-3 py-2.5 text-xs font-medium text-white dark:text-neutral-950 shadow-sm transition hover:bg-[#333] dark:hover:bg-white active:scale-[0.99] disabled:opacity-50"
               >
                 {busy ? "처리 중…" : "선택한 역할 화면으로 이동"}
               </button>
@@ -553,7 +766,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
                 type="button"
                 disabled={busy || logoutBusy || !configured}
                 onClick={onLogoutForSwitch}
-                className="flex-1 rounded-xl border border-amber-800/20 bg-white/60 px-3 py-2.5 text-xs font-medium text-amber-950 transition hover:bg-white/90 active:scale-[0.99] disabled:opacity-50"
+                className="flex-1 rounded-[8px] border border-amber-800/20 bg-white/60 px-3 py-2.5 text-xs font-medium text-amber-950 transition hover:bg-white/90 active:scale-[0.99] disabled:opacity-50"
               >
                 {logoutBusy ? "로그아웃 중…" : "로그아웃 후 전환"}
               </button>
@@ -587,7 +800,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
                 className="mb-1.5 block text-xs font-medium text-neutral-600"
                 htmlFor="academy-id"
               >
-                학원 ID
+                로그인 번호
               </label>
               <input
                 id="academy-id"
@@ -595,28 +808,61 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
                 autoComplete="username"
                 value={academyId}
                 onChange={(e) => setAcademyId(e.target.value)}
-                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 text-foreground shadow-inner shadow-white/40 outline-none ring-0 transition placeholder:text-neutral-400 focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]"
-                placeholder="오너가 설정한 학원 로그인 ID"
+                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 font-mono text-foreground shadow-inner shadow-white/40 outline-none ring-0 transition placeholder:text-neutral-400 focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]"
+                placeholder="학원 로그인 번호 (예: o1_a1)"
               />
             </div>
+            <LoginPasswordField
+              id="academy-password"
+              label="비밀번호"
+              value={password}
+              onChangeAction={setPassword}
+              visible={showPassword}
+              onToggleVisibleAction={() => setShowPassword((v) => !v)}
+              disabled={busy || !configured || sessionBlocked}
+              inputClassName={loginPasswordInputClass}
+            />
+            <button
+              type="submit"
+              disabled={busy || !configured || sessionBlocked}
+              className="mt-2 w-full rounded-2xl bg-[#222] dark:bg-neutral-100 py-3.5 text-[15px] font-medium text-white dark:text-neutral-950 shadow-[0_8px_24px_rgba(0,0,0,0.18)] transition hover:bg-[#333] dark:hover:bg-white active:scale-[0.99] disabled:opacity-50"
+            >
+              {busy ? "처리 중…" : "로그인"}
+            </button>
+          </form>
+        ) : showMemberAttnAuth ? (
+          <form className="mt-6 space-y-4" onSubmit={onMemberAttnLogin}>
             <div>
               <label
                 className="mb-1.5 block text-xs font-medium text-neutral-600"
-                htmlFor="academy-password"
+                htmlFor="attn-id"
               >
-                비밀번호
+                로그인 ID
               </label>
               <input
-                id="academy-password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 text-foreground shadow-inner shadow-white/40 outline-none focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]"
-                placeholder="포털 비밀번호"
+                id="attn-id"
+                name="attnId"
+                autoComplete="username"
+                value={attnId}
+                onChange={(e) => setAttnId(e.target.value)}
+                className={`w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)] ${role === "teacher" ? "font-mono" : ""}`}
+                placeholder={
+                  role === "parent"
+                    ? "가입 시 설정한 로그인 ID"
+                    : "학원에서 발급한 로그인 ID (예: 용감한코끼리)"
+                }
               />
             </div>
+            <LoginPasswordField
+              id="member-password"
+              label="비밀번호"
+              value={password}
+              onChangeAction={setPassword}
+              visible={showPassword}
+              onToggleVisibleAction={() => setShowPassword((v) => !v)}
+              disabled={busy || !configured || sessionBlocked}
+              inputClassName={loginPasswordInputClass}
+            />
             <button
               type="submit"
               disabled={busy || !configured || sessionBlocked}
@@ -645,23 +891,16 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
                 placeholder="name@example.com"
               />
             </div>
-            <div>
-              <label
-                className="mb-1.5 block text-xs font-medium text-neutral-600"
-                htmlFor="password"
-              >
-                비밀번호
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 text-foreground shadow-inner shadow-white/40 outline-none focus:border-[#4a90e2]/50 focus:bg-white/70 focus:shadow-[0_0_0_3px_rgba(74,144,226,0.18)]"
-              />
-            </div>
+            <LoginPasswordField
+              id="password"
+              label="비밀번호"
+              value={password}
+              onChangeAction={setPassword}
+              visible={showPassword}
+              onToggleVisibleAction={() => setShowPassword((v) => !v)}
+              disabled={busy || !configured || sessionBlocked}
+              inputClassName={loginPasswordInputClass}
+            />
             <button
               type="submit"
               disabled={busy || !configured || sessionBlocked}
@@ -688,13 +927,15 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
               className="flex w-full items-center justify-center gap-3 rounded-2xl border border-neutral-300/70 bg-white/60 dark:border-white/12 dark:bg-white/10 py-3.5 text-[15px] font-medium text-foreground shadow-sm backdrop-blur-md transition hover:bg-white/85 active:scale-[0.99] disabled:opacity-50"
             >
               <GoogleMark />
-              Google 계정으로 시작
+              {role === "teacher"
+                ? "Google 계정으로 로그인"
+                : "Google 계정으로 시작"}
             </button>
           </>
         ) : null}
 
         <div className="mt-8 space-y-2 text-center text-sm text-neutral-600">
-          {showEmailAuth ? (
+          {showOwnerEmailAuth ? (
             <p>
               비밀번호를 잊으셨나요?{" "}
               <button
@@ -707,7 +948,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
               </button>
             </p>
           ) : null}
-          {showEmailAuth && role === "owner" ? (
+          {showOwnerEmailAuth && role === "owner" ? (
             <p>
               오너 계정이 없으신가요?{" "}
               <Link
@@ -717,9 +958,13 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
                 회원가입
               </Link>
             </p>
-          ) : showEmailAuth ? (
+          ) : showMemberAttnAuth ? (
             <p className="text-xs text-neutral-500">
-              선생님·학부모 계정은 학원에서 안내에 따라 가입해 주세요.
+              {role === "parent"
+                ? "가입 시 설정한 로그인 ID와 비밀번호로 로그인합니다. 링크 가입 전에 학원이 발급한 로그인 번호가 있다면 그 번호로도 로그인할 수 있습니다."
+                : role === "teacher"
+                  ? "로그인 ID·비밀번호는 학원에서 발급받습니다. 기존 관리 번호로도 로그인할 수 있습니다. Google 로그인은 설정에서 연동을 완료한 뒤에만 사용할 수 있습니다."
+                  : "로그인 번호와 임시 비밀번호는 학원에서 발급받으세요. 최초 로그인 후 비밀번호를 변경해야 이용할 수 있습니다."}
             </p>
           ) : (
             <p className="text-xs text-neutral-500">
@@ -734,6 +979,18 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
           홈으로
         </Link>
       </p> */}
+
+      <EmailVerificationCodeModal
+        open={otpModalOpen}
+        purpose={otpPurpose}
+        emailHint={otpEmailHint}
+        onVerifiedAction={onEmailOtpVerified}
+        onCloseAction={() => {
+          otpFlowRef.current = false;
+          setOtpModalOpen(false);
+          void signOut(getFirebaseAuth()).catch(() => undefined);
+        }}
+      />
     </div>
   );
 }

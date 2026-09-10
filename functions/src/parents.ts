@@ -5,6 +5,14 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import * as nodemailer from "nodemailer";
 import { createShortAuthLink, getAppOrigin } from "./auth-short-links";
+import { reconcileUserActivationMirror } from "./user-activation-mirror";
+import { getRequireStudentCheckInPin } from "./kiosk";
+import {
+  deleteAttnLoginIndexForMember,
+  deleteMemberLoginSecrets,
+  deleteStudentDocs,
+  purgeUserFirestoreData,
+} from "./lib/firestore-cleanup";
 
 type ParentStatus =
   | "invitation_needed"
@@ -384,7 +392,14 @@ function parentDocAcademyId(ref: admin.firestore.DocumentReference): string | nu
   return m ? m[1] : null;
 }
 
-function serializeStudentDocForCallable(d: QueryDocumentSnapshot): {
+function studentCheckInSecretPath(academyId: string, studentId: string): string {
+  return `academies/${academyId}/students/${studentId}/serverSecrets/checkIn`;
+}
+
+function serializeStudentDocForCallable(
+  d: QueryDocumentSnapshot,
+  opts?: { hasCheckInPin?: boolean },
+): {
   id: string;
   parentUserId: string;
   name: string;
@@ -394,6 +409,14 @@ function serializeStudentDocForCallable(d: QueryDocumentSnapshot): {
   assignedTeacherUids: string[];
   assignedTeacherUid: string | null;
   createdAtMillis: number | null;
+  hasCheckInPin?: boolean;
+  tuitionDueDayOfMonth: number | null;
+  tuitionAmount: number | null;
+  weeklySessionCount: number | null;
+  pricePerSession: number | null;
+  sessionBalance: number | null;
+  extraSessionDates: string[];
+  hasPendingPaymentReminder: boolean;
 } {
   const data = d.data();
   const createdAt = data.createdAt as Timestamp | undefined;
@@ -405,6 +428,27 @@ function serializeStudentDocForCallable(d: QueryDocumentSnapshot): {
       ? (rawUids as string[]).filter((x) => x.length > 0)
       : [];
   const legacyUid = data.assignedTeacherUid;
+  const rawDay = data.tuitionDueDayOfMonth;
+  const tuitionDueDayOfMonth =
+    typeof rawDay === "number" && Number.isInteger(rawDay) && rawDay >= 1 && rawDay <= 31
+      ? rawDay
+      : null;
+  const rawWeeklyCount = data.weeklySessionCount;
+  const weeklySessionCount =
+    typeof rawWeeklyCount === "number" && Number.isInteger(rawWeeklyCount) && rawWeeklyCount >= 1 && rawWeeklyCount <= 7
+      ? rawWeeklyCount
+      : null;
+  const rawPrice = data.pricePerSession;
+  const pricePerSession =
+    typeof rawPrice === "number" && rawPrice >= 0 ? rawPrice : null;
+  const rawBalance = data.sessionBalance;
+  const sessionBalance =
+    typeof rawBalance === "number" && Number.isInteger(rawBalance) ? rawBalance : null;
+  const rawExtraDates = data.extraSessionDates;
+  const extraSessionDates =
+    Array.isArray(rawExtraDates)
+      ? (rawExtraDates as unknown[]).filter((x): x is string => typeof x === "string")
+      : [];
   return {
     id: d.id,
     parentUserId: typeof data.parentUserId === "string" ? data.parentUserId : "",
@@ -416,6 +460,15 @@ function serializeStudentDocForCallable(d: QueryDocumentSnapshot): {
     assignedTeacherUid:
       typeof legacyUid === "string" && legacyUid.length > 0 ? legacyUid : null,
     createdAtMillis,
+    ...(opts?.hasCheckInPin !== undefined ? { hasCheckInPin: opts.hasCheckInPin } : {}),
+    tuitionDueDayOfMonth,
+    tuitionAmount: typeof data.tuitionAmount === "number" ? data.tuitionAmount : null,
+    weeklySessionCount,
+    pricePerSession,
+    sessionBalance,
+    extraSessionDates,
+    hasPendingPaymentReminder:
+      data.sentSessionPaymentReminder === true && !data.tuitionReminderConfirmedAt,
   };
 }
 
@@ -496,51 +549,13 @@ export const getParentActivationState = onCall(
     const { uid } = request.auth;
 
     const db = admin.firestore();
-
-    const activeSnap = await db
-      .collectionGroup("parents")
-      .where("authUid", "==", uid)
-      .where("status", "==", "active")
-      .limit(1)
-      .get();
-
-    if (!activeSnap.empty) {
-      const d = activeSnap.docs[0]!;
-      return {
-        ok: true,
-        anyActive: true,
-        primaryStatus: "active" as ParentStatus,
-        primaryAcademyId: parentDocAcademyId(d.ref),
-      };
-    }
-
-    const snaps = await db.collectionGroup("parents").where("authUid", "==", uid).limit(25).get();
-
-    if (snaps.empty) {
-      return {
-        ok: true,
-        anyActive: false,
-        primaryStatus: null as ParentStatus | null,
-        primaryAcademyId: null as string | null,
-      };
-    }
-
-    const memberships = snaps.docs.map((d) => {
-      const status = d.data().status as ParentStatus;
-      const academyId = parentDocAcademyId(d.ref);
-      return { status, academyId };
-    });
-
-    const order: ParentStatus[] = ["pending_registration", "invitation_sent", "inactive", "invitation_needed"];
-    const primary = memberships.find((m) => order.includes(m.status));
-    const primaryStatus = primary?.status ?? null;
-    const primaryAcademyId = primary?.academyId ?? null;
+    const { parent } = await reconcileUserActivationMirror(db, uid, "reconcile");
 
     return {
       ok: true,
-      anyActive: false,
-      primaryStatus,
-      primaryAcademyId,
+      anyActive: parent.anyActive,
+      primaryStatus: parent.primaryStatus as ParentStatus | null,
+      primaryAcademyId: parent.primaryAcademyId,
     };
   },
 );
@@ -564,7 +579,13 @@ export const listParentChildrenStudents = onCall(
 
     const db = admin.firestore();
     const parentRef = db.doc(`academies/${academyId}/parents/${uid}`);
-    const parentSnap = await parentRef.get();
+    const col = db.collection(`academies/${academyId}/students`);
+
+    const [parentSnap, snap, requireStudentCheckInPin] = await Promise.all([
+      parentRef.get(),
+      col.where("parentUserId", "==", uid).get(),
+      getRequireStudentCheckInPin(db, academyId),
+    ]);
     if (!parentSnap.exists || parentSnap.get("status") !== "active") {
       throw new HttpsError(
         "permission-denied",
@@ -572,11 +593,20 @@ export const listParentChildrenStudents = onCall(
       );
     }
 
-    const col = db.collection(`academies/${academyId}/students`);
-    const snap = await col.where("parentUserId", "==", uid).get();
-    const students = snap.docs.map((d) => serializeStudentDocForCallable(d));
+    const pinRefs = snap.docs.map((d) => db.doc(studentCheckInSecretPath(academyId, d.id)));
+    const pinSnaps = pinRefs.length ? await db.getAll(...pinRefs) : [];
+    const students = snap.docs.map((d, i) => {
+      const pinSnap = pinSnaps[i];
+      const hasCheckInPin =
+        typeof pinSnap?.get("pinHash") === "string" && (pinSnap.get("pinHash") as string).length > 0;
+      return serializeStudentDocForCallable(d, { hasCheckInPin });
+    });
 
-    return { ok: true as const, students };
+    return {
+      ok: true as const,
+      students,
+      kiosk: { requireStudentCheckInPin },
+    };
   },
 );
 
@@ -615,6 +645,7 @@ export const activateParent = onCall(async (request) => {
   await admin.auth().setCustomUserClaims(parentAuthUid, {
     role: "parent",
     academyId,
+    membershipStatus: "active",
   });
 
   await admin.auth().updateUser(parentAuthUid, { disabled: false });
@@ -693,7 +724,21 @@ export const deleteParentInvite = onCall(async (request) => {
   }
 
   const authUid = (snap.get("authUid") as string | undefined) || parentId;
+  const data = snap.data() ?? {};
 
+  const studentsSnap = await db.collection(`academies/${academyId}/students`).get();
+  const studentIds = studentsSnap.docs
+    .filter((s) => {
+      const pid = s.get("parentUserId");
+      return pid === parentId || pid === authUid;
+    })
+    .map((s) => s.id);
+  if (studentIds.length > 0) {
+    await deleteStudentDocs(db, academyId, studentIds);
+  }
+
+  await deleteMemberLoginSecrets(db, academyId, "parent", parentId);
+  await deleteAttnLoginIndexForMember(db, data, authUid);
   await ref.delete();
 
   if (st === "active" || st === "invitation_sent" || st === "inactive") {
@@ -702,7 +747,35 @@ export const deleteParentInvite = onCall(async (request) => {
     } catch (e) {
       logger.warn("deleteParentInvite: auth delete skipped", { authUid, e });
     }
+    await purgeUserFirestoreData(db, authUid);
   }
 
+  return { ok: true };
+});
+
+/** 학원·오너 — 학생 삭제(문서 + serverSecrets) */
+export const deleteAcademyStudent = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+  }
+  const { uid: callerUid, token } = request.auth;
+  const academyId =
+    typeof request.data?.academyId === "string" ? request.data.academyId.trim() : "";
+  const studentId =
+    typeof request.data?.studentId === "string" ? request.data.studentId.trim() : "";
+  if (!academyId || !studentId) {
+    throw new HttpsError("invalid-argument", "요청이 올바르지 않습니다.");
+  }
+
+  const db = admin.firestore();
+  await assertCanManageAcademy(db, academyId, callerUid, token);
+
+  const ref = db.doc(`academies/${academyId}/students/${studentId}`);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    throw new HttpsError("not-found", "학생 정보를 찾을 수 없습니다.");
+  }
+
+  await deleteStudentDocs(db, academyId, [studentId]);
   return { ok: true };
 });

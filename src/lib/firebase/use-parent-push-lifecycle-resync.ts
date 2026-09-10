@@ -1,17 +1,30 @@
 "use client";
 
 import { doc, onSnapshot } from "firebase/firestore";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { getFirebaseAuth, getFirebaseDb } from "@/lib/firebase/client-app";
 import { isFirebaseEmulatorEnabled, isWebPushConfigured } from "@/lib/firebase/config";
 import { resyncParentPushTokenAfterResume } from "@/lib/firebase/web-push";
 
 /**
- * 프로덕션 PWA에서 흔히 쓰는 패턴: 앱이 다시 보이거나 SW가 바뀐 뒤 FCM 토큰을 다시 받아
- * 서버(Firestore 구독 문서)와 맞춥니다. 토큰 로테이션·iOS·절전 이후 불일치를 줄입니다.
+ * PWA 포그라운드·SW 갱신 시 FCM 토큰을 서버와 조용히 맞춥니다 (iOS/Android 공통).
+ * `pushNotificationsEnabled`가 켜져 있으면 사용자 추가 조작 없이 구독을 유지·복구합니다.
  */
 export function useParentPushLifecycleResync() {
+  const parentUidRef = useRef<string | null>(null);
   const pushEnabledRef = useRef(false);
+  /** onSnapshot이 `updatedAt` 등으로 다시 불릴 때 resync 루프 방지 */
+  const prevPushNotificationsEnabledRef = useRef<boolean | undefined>(undefined);
+
+  const triggerResync = useCallback((opts?: { force?: boolean }) => {
+    const uid = parentUidRef.current;
+    if (!uid) return;
+    void resyncParentPushTokenAfterResume({
+      parentUid: uid,
+      enabled: pushEnabledRef.current,
+      force: opts?.force,
+    });
+  }, []);
 
   useEffect(() => {
     if (isFirebaseEmulatorEnabled() || !isWebPushConfigured()) return;
@@ -21,20 +34,26 @@ export function useParentPushLifecycleResync() {
 
     const unsubAuth = auth.onAuthStateChanged((user) => {
       unsubDoc?.();
+      parentUidRef.current = user?.uid ?? null;
       pushEnabledRef.current = false;
+      prevPushNotificationsEnabledRef.current = undefined;
       if (!user) return;
+
       const db = getFirebaseDb();
       unsubDoc = onSnapshot(
         doc(db, "users", user.uid),
         (snap) => {
           const en = snap.data()?.pushNotificationsEnabled === true;
+          const prev = prevPushNotificationsEnabledRef.current;
+          prevPushNotificationsEnabledRef.current = en;
           pushEnabledRef.current = en;
-          if (en) {
-            void resyncParentPushTokenAfterResume(() => pushEnabledRef.current);
+          if (en && prev !== true) {
+            triggerResync({ force: true });
           }
         },
         () => {
           pushEnabledRef.current = false;
+          prevPushNotificationsEnabledRef.current = undefined;
         },
       );
     });
@@ -43,24 +62,26 @@ export function useParentPushLifecycleResync() {
       unsubAuth();
       unsubDoc?.();
     };
-  }, []);
+  }, [triggerResync]);
 
   useEffect(() => {
     if (isFirebaseEmulatorEnabled() || !isWebPushConfigured()) return;
 
-    // bfcache 복원 시에도 동일 effect 인스턴스의 리스너만 유지됨.
-    // unmount 시 아래 return에서 전부 remove — 중복 등록 누적 없음.
+    const auth = getFirebaseAuth();
+    const uid = auth.currentUser?.uid;
+    if (uid) {
+      parentUidRef.current = uid;
+      triggerResync({ force: true });
+    }
 
-    const run = () => {
-      void resyncParentPushTokenAfterResume(() => pushEnabledRef.current);
-    };
+    const run = () => triggerResync();
 
     const onVisibility = () => {
       if (document.visibilityState === "visible") run();
     };
 
     const onPageShow = (e: PageTransitionEvent) => {
-      if (e.persisted) run();
+      if (e.persisted) triggerResync({ force: true });
     };
 
     document.addEventListener("visibilitychange", onVisibility);
@@ -69,13 +90,11 @@ export function useParentPushLifecycleResync() {
 
     let removeControllerListener: (() => void) | undefined;
     if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
-      const handler = () => run();
+      const handler = () => triggerResync({ force: true });
       navigator.serviceWorker.addEventListener("controllerchange", handler);
       removeControllerListener = () =>
         navigator.serviceWorker.removeEventListener("controllerchange", handler);
     }
-
-    if (document.visibilityState === "visible") run();
 
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
@@ -83,5 +102,5 @@ export function useParentPushLifecycleResync() {
       window.removeEventListener("pageshow", onPageShow);
       removeControllerListener?.();
     };
-  }, []);
+  }, [triggerResync]);
 }

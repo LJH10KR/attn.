@@ -14,7 +14,11 @@ import type { Timestamp } from "firebase/firestore";
 export const COLLECTIONS = {
   users: "users",
   academies: "academies",
+  attnLoginIndex: "attnLoginIndex",
 } as const;
+
+/** 발급형 멤버 상태 — v2 */
+export type MemberProvisionStatus = "pending_setup" | "active" | "inactive";
 
 export function academyPath(academyId: string) {
   return `${COLLECTIONS.academies}/${academyId}`;
@@ -32,14 +36,108 @@ export function academyStudentsPath(academyId: string) {
   return `${academyPath(academyId)}/students`;
 }
 
+/** `academies/{academyId}/meta/dashboardStats` — Functions 집계, 클라이언트 읽기 전용 */
+export const ACADEMY_DASHBOARD_STATS_DOC_ID = "dashboardStats" as const;
+
+export const ACADEMY_DASHBOARD_STATS_SCHEMA_VERSION = 1 as const;
+
+export type AcademyDashboardStatsDoc = {
+  schemaVersion: typeof ACADEMY_DASHBOARD_STATS_SCHEMA_VERSION;
+  teachers: number;
+  parents: number;
+  students: number;
+  teachersPending: number;
+  teachersInviteNeeded: number;
+  teachersInviteSent: number;
+  parentsPending: number;
+  parentsInviteNeeded: number;
+  parentsInviteSent: number;
+  updatedAt: Timestamp;
+};
+
+export function academyDashboardStatsPath(academyId: string): string {
+  return `${academyPath(academyId)}/meta/${ACADEMY_DASHBOARD_STATS_DOC_ID}`;
+}
+
+/** `academies/{academyId}/meta/kioskSettings` — 출석 키오스크(Functions 전용 쓰기) */
+export const ACADEMY_KIOSK_SETTINGS_DOC_ID = "kioskSettings" as const;
+
+export type AcademyKioskSettingsPublic = {
+  requireStudentCheckInPin: boolean;
+  exitPinConfigured: boolean;
+  exitPinLocked: boolean;
+};
+
+export function academyKioskSettingsPath(academyId: string): string {
+  return `${academyPath(academyId)}/meta/${ACADEMY_KIOSK_SETTINGS_DOC_ID}`;
+}
+
+/** `academies/{academyId}/adminInbox/{inboxId}` — 운영 알림(벨) */
+export const ACADEMY_ADMIN_INBOX_SCHEMA_VERSION = 1 as const;
+
+export type AcademyAdminInboxKind = "pending_registration" | "invitation_sent";
+
+export type AcademyAdminInboxDoc = {
+  schemaVersion: typeof ACADEMY_ADMIN_INBOX_SCHEMA_VERSION;
+  kind: AcademyAdminInboxKind;
+  entityType: "teacher" | "parent";
+  entityId: string;
+  displayName: string;
+  email: string;
+  invitedAt?: Timestamp | null;
+  invitationExpiresAt?: Timestamp | null;
+  createdAt: Timestamp;
+  updatedAt?: Timestamp;
+};
+
+export function academyAdminInboxCollectionPath(academyId: string): string {
+  return `${academyPath(academyId)}/adminInbox`;
+}
+
 /** 학원 포털 비밀번호 — `secrets/login` 문서, 클라이언트 규칙으로 읽기 불가 */
 export function academySecretsLoginPath(academyId: string) {
   return `${academyPath(academyId)}/secrets/login`;
 }
 
+/** `users/{uid}/serverMirror/{USER_ACTIVATION_MIRROR_DOC_ID}` — Functions만 쓰기 */
+export const USER_SERVER_MIRROR_COLLECTION = "serverMirror" as const;
+export const USER_ACTIVATION_MIRROR_DOC_ID = "activation" as const;
+
+/** `UserActivationMirrorDoc` 필드 `schemaVersion` — 규칙·클라 검증과 동기화 */
+export const USER_ACTIVATION_MIRROR_SCHEMA_VERSION = 1 as const;
+
+/**
+ * Callable `getTeacherActivationState` / `getParentActivationState`와 동일한 의미의 스냅샷.
+ * `primaryStatus` / `primaryAcademyId`는 서버가 멤버십에서 계산한 값(클라이언트가 수정 불가).
+ */
+export type UserRoleActivationMirrorSlice = {
+  anyActive: boolean;
+  primaryStatus: string | null;
+  primaryAcademyId: string | null;
+};
+
+/**
+ * 로그인 사용자별 선생님·학부모 활성 판별 요약(읽기 전용 미러).
+ * - 경로: `users/{uid}/serverMirror/activation`
+ * - 쓰기: Admin SDK(Functions)만 — `firestore.rules` 참고.
+ */
+export type UserActivationMirrorDoc = {
+  schemaVersion: typeof USER_ACTIVATION_MIRROR_SCHEMA_VERSION;
+  teacher: UserRoleActivationMirrorSlice;
+  parent: UserRoleActivationMirrorSlice;
+  updatedAt: Timestamp;
+  /** 갱신 출처(운영·디버깅용) */
+  source?: "trigger" | "reconcile" | "bootstrap";
+};
+
+export function userActivationMirrorPath(userId: string): string {
+  return `${COLLECTIONS.users}/${userId}/${USER_SERVER_MIRROR_COLLECTION}/${USER_ACTIVATION_MIRROR_DOC_ID}`;
+}
+
 /** 모든 로그인 사용자 공통 프로필 (선택) */
 export type UserProfile = {
   displayName?: string | null;
+  phone?: string | null;
   email?: string | null;
   photoURL?: string | null;
   /** 서비스 단위 역할 (오너 가입 등) */
@@ -51,12 +149,16 @@ export type UserProfile = {
 };
 
 /**
- * 학원 문서 — Firestore 문서 ID가 곧 포털 로그인용 학원 ID(오너가 `createAcademyWithPortal`으로 지정).
+ * 학원 문서 — `createAcademyEasy` 시 Firestore 문서 ID가 attn 학원 번호(예: `o00001_a03`).
+ * `createAcademyWithPortal`은 오너가 슬러그 ID를 직접 지정할 수 있음.
  * owner 한 명이 여러 학원을 가질 수 있음.
  */
 export type Academy = {
   ownerUid: string;
   name: string;
+  /** 공개 로그인 번호 — Firestore 문서 ID와 동일 */
+  attnId?: string;
+  ownerAttnSeq?: string;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
   /** 필요 시: 운영 상태 등 */
@@ -68,9 +170,11 @@ export type Academy = {
  * 생성·수정·삭제는 Cloud Functions(Admin SDK)만 수행.
  */
 export type TeacherRegistrationStatus =
+  | "pending_setup"
   | "invitation_needed"
   | "invitation_sent"
   | "pending_registration"
+  | "pending_email_verification"
   | "active"
   | "inactive";
 
@@ -84,12 +188,18 @@ export const PARENT_INVITE_TTL_MS = TEACHER_INVITE_TTL_MS;
 export type ParentRegistrationStatus = TeacherRegistrationStatus;
 
 export type AcademyTeacher = {
+  attnId?: string;
+  /** 로그인용 별칭 — attnLoginIndex 키 (관리 번호와 분리) */
+  loginId?: string;
   email: string;
   displayName: string;
   subject?: string | null;
   phone?: string | null;
   academyId: string;
   status: TeacherRegistrationStatus;
+  authProvider?: "password" | "google";
+  googleLinked?: boolean;
+  googleEmail?: string;
   authUid?: string | null;
   invitedAt?: Timestamp | null;
   /** 초청 발송(또는 재발송) 시각 + 24시간 — 대시보드 카운트다운·서버 검증에 사용 */
@@ -105,8 +215,13 @@ export type AcademyTeacher = {
  * 생성·수정·삭제는 Cloud Functions만 수행.
  */
 export type AcademyParent = {
+  attnId?: string;
+  /** 인증 코드 수신용 연락 이메일 (자가 가입) */
+  contactEmail?: string;
+  contactEmailVerified?: boolean;
   email: string;
   displayName: string;
+  nextStudentSeq?: number;
   phone?: string | null;
   emergencyContact?: string | null;
   childrenCount: number;
@@ -124,8 +239,12 @@ export type AcademyParent = {
 /** 학생당 전담 선생 상한 — Firestore 규칙과 클라이언트가 동일 값 사용 */
 export const MAX_ASSIGNED_TEACHERS_PER_STUDENT = 20;
 
+/** 원비 납부 방식 */
+export type TuitionType = "monthly_fixed" | "session_based";
+
 /** 학생 — 부모와 연결, Auth 없을 수 있음 */
 export type AcademyStudent = {
+  attnId?: string;
   parentUserId: string;
   name: string;
   /** 만 나이 등 정수(0~120) */
@@ -142,9 +261,68 @@ export type AcademyStudent = {
    * 전담 저장 시 제거(`deleteField`)합니다.
    */
   assignedTeacherUid?: string | null;
+  /** 매월 지정일 납부 — tuitionType이 "monthly_fixed"이거나 미설정(학원 기본값) 시 사용 */
+  tuitionDueDayOfMonth?: number;
+  tuitionAmount?: number;
+  sentTuitionReminders?: string[];
+  /** 학생별 납부 방식 재정의 — 미설정 시 학원 defaultTuitionType 상속 */
+  tuitionType?: TuitionType;
+  /** 회차 방식 — 주당 기본 수업 횟수 (1~7) */
+  weeklySessionCount?: number;
+  /** 회차당 수업료 (원) */
+  pricePerSession?: number;
+  /** 잔여 선결제 횟수 — 음수는 초과 수업 부채 */
+  sessionBalance?: number;
+  /** 초과 수업이 발생한 날짜 목록 (YYYY-MM-DD) — 충전 시 초기화 */
+  extraSessionDates?: string[];
+  /** 회차 납부 안내 FCM 발송 여부 — 충전 시 초기화 */
+  sentSessionPaymentReminder?: boolean;
+  /** 학부모가 납부 안내 알림을 확인한 시각 — 충전 시 초기화 */
+  tuitionReminderConfirmedAt?: Timestamp;
+  /** 납부 알림을 확인한 학부모 uid */
+  tuitionReminderConfirmedByUid?: string;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 };
 
 /** 학원이 학부모당 등록 가능한 학생(자녀) 상한 */
 export const MAX_STUDENTS_PER_PARENT = 20;
+
+/** `academies/{academyId}/meta/tuitionSettings` — 원장이 설정하는 납부 안내 정보 */
+export const ACADEMY_TUITION_SETTINGS_DOC_ID = "tuitionSettings" as const;
+
+export type AcademyTuitionSettingsDoc = {
+  kakaoPayLink: string;
+  bankName: string;
+  accountNumber: string;
+  accountHolder: string;
+  updatedAt?: Timestamp;
+};
+
+export function academyTuitionSettingsPath(academyId: string): string {
+  return `${academyPath(academyId)}/meta/${ACADEMY_TUITION_SETTINGS_DOC_ID}`;
+}
+
+/** `academies/{academyId}/meta/sessionTuitionSettings` — 회차 방식 기본 설정 */
+export const ACADEMY_SESSION_TUITION_SETTINGS_DOC_ID = "sessionTuitionSettings" as const;
+
+export type AcademySessionTuitionSettingsDoc = {
+  defaultTuitionType: TuitionType;
+  updatedAt?: Timestamp;
+};
+
+export function academySessionTuitionSettingsPath(academyId: string): string {
+  return `${academyPath(academyId)}/meta/${ACADEMY_SESSION_TUITION_SETTINGS_DOC_ID}`;
+}
+
+/** `academies/{academyId}/students/{studentId}/sessionLogs/{logId}` */
+export type SessionLogDoc = {
+  recordedAt: Timestamp;
+  recordedByUid: string;
+  /** 기록 시점에 sessionBalance가 0 이하였던 경우 true (초과 수업) */
+  wasExtra: boolean;
+};
+
+export function academyStudentSessionLogsPath(academyId: string, studentId: string): string {
+  return `${academyStudentsPath(academyId)}/${studentId}/sessionLogs`;
+}

@@ -9,6 +9,7 @@ import {
 } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AcademyAttendanceLogPanel } from "@/components/academy/academy-attendance-log-panel";
 import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { GoogleMark } from "@/components/auth/google-mark";
@@ -114,6 +115,10 @@ export default function AdminSeedPage() {
   const [directorySearch, setDirectorySearch] = useState("");
   const [memberDeleteKey, setMemberDeleteKey] = useState<string | null>(null);
   const [cascadeBusyAcademyId, setCascadeBusyAcademyId] = useState<string | null>(null);
+  const [metaReconcileBusyAcademyId, setMetaReconcileBusyAcademyId] = useState<string | null>(
+    null,
+  );
+  const [adminLogAcademyId, setAdminLogAcademyId] = useState("");
 
   useEffect(() => {
     const unsub = auth.onAuthStateChanged(async (u) => {
@@ -333,6 +338,26 @@ export default function AdminSeedPage() {
       setDeleteBusy(false);
     }
   }, [deleteSeedBatchId, functions, refreshBatches, refreshDirectory]);
+
+  const onReconcileDashboardMeta = useCallback(
+    async (academyId: string, academyName: string) => {
+      const ok = window.confirm(
+        `학원「${academyName || academyId}」의 대시보드 집계(stats)·알림 inbox를 다시 계산합니다. 진행할까요?`,
+      );
+      if (!ok) return;
+      setMetaReconcileBusyAcademyId(academyId);
+      try {
+        const fn = httpsCallable(functions, "adminReconcileAcademyDashboardMeta");
+        await fn({ academyId });
+        window.alert("대시보드 메타를 갱신했습니다.");
+      } catch (err) {
+        window.alert(getErrorMessage(err));
+      } finally {
+        setMetaReconcileBusyAcademyId(null);
+      }
+    },
+    [functions],
+  );
 
   const onCascadeDeleteAcademy = useCallback(
     async (academyId: string, academyName: string) => {
@@ -559,18 +584,40 @@ export default function AdminSeedPage() {
                             선생님 {a.teachers.length}명 · 학부모 {a.parents.length}명
                           </p>
                         </div>
-                        <button
-                          type="button"
-                          className="rounded-xl bg-red-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-red-700 disabled:opacity-50"
-                          disabled={cascadeBusyAcademyId === a.academyId}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            void onCascadeDeleteAcademy(a.academyId, a.name);
-                          }}
-                        >
-                          {cascadeBusyAcademyId === a.academyId ? "삭제 중…" : "학원 전체 삭제"}
-                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            className="rounded-[8px] border border-neutral-300/80 bg-white/70 px-3 py-1.5 text-[11px] font-medium text-neutral-800 hover:bg-white disabled:opacity-50 dark:border-white/12 dark:bg-white/[0.08] dark:text-neutral-200"
+                            disabled={
+                              metaReconcileBusyAcademyId === a.academyId ||
+                              cascadeBusyAcademyId === a.academyId
+                            }
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              void onReconcileDashboardMeta(a.academyId, a.name);
+                            }}
+                          >
+                            {metaReconcileBusyAcademyId === a.academyId
+                              ? "갱신 중…"
+                              : "대시보드 메타 갱신"}
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-[8px] bg-red-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                            disabled={
+                              cascadeBusyAcademyId === a.academyId ||
+                              metaReconcileBusyAcademyId === a.academyId
+                            }
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              void onCascadeDeleteAcademy(a.academyId, a.name);
+                            }}
+                          >
+                            {cascadeBusyAcademyId === a.academyId ? "삭제 중…" : "학원 전체 삭제"}
+                          </button>
+                        </div>
                       </div>
                     </summary>
                     <div className="space-y-4 border-t border-neutral-200/80 px-3 py-3 dark:border-white/10">
@@ -622,7 +669,7 @@ export default function AdminSeedPage() {
                                         t.displayName || t.email || t.docId,
                                       )
                                     }
-                                    className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-800 hover:bg-red-100 disabled:opacity-50 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200"
+                                    className="shrink-0 rounded-[8px] border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-800 hover:bg-red-100 disabled:opacity-50 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200"
                                   >
                                     {memberDeleteKey === busyKey ? "삭제 중…" : "삭제"}
                                   </button>
@@ -666,7 +713,7 @@ export default function AdminSeedPage() {
                                         p.displayName || p.email || p.docId,
                                       )
                                     }
-                                    className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-800 hover:bg-red-100 disabled:opacity-50 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200"
+                                    className="shrink-0 rounded-[8px] border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-800 hover:bg-red-100 disabled:opacity-50 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200"
                                   >
                                     {memberDeleteKey === busyKey ? "삭제 중…" : "삭제"}
                                   </button>
@@ -680,6 +727,29 @@ export default function AdminSeedPage() {
                   </details>
                 ))
               )}
+            </div>
+          </section>
+
+          <section className="glass-card-soft p-5">
+            <h2 className="text-sm font-semibold text-foreground">출석/결석 알림 전송 기록</h2>
+            <p className="mt-1 text-xs text-neutral-500">
+              관리자 권한으로 전송 이력을 조회합니다. 학원 ID를 입력하면 해당 학원만, 비워두면 전체 최근 기록을 봅니다.
+            </p>
+            <label className="mt-3 block">
+              <span className="mb-1.5 block text-xs font-medium text-neutral-600">학원 ID 필터(선택)</span>
+              <input
+                value={adminLogAcademyId}
+                onChange={(e) => setAdminLogAcademyId(e.target.value)}
+                className="w-full rounded-2xl border border-neutral-300/60 bg-white/50 px-4 py-3 text-foreground outline-none focus:border-[#4a90e2]/50 dark:border-white/12 dark:bg-white/[0.08]"
+                placeholder="비우면 전체 최근 기록"
+              />
+            </label>
+            <div className="mt-4">
+              <AcademyAttendanceLogPanel
+                academyId={adminLogAcademyId.trim() || null}
+                includeAdminAll
+                storageScopeKey={`admin_attendance_${adminLogAcademyId.trim() || "all"}`}
+              />
             </div>
           </section>
 

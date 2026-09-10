@@ -15,6 +15,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { DashboardNotificationRow } from "@/components/dashboard/dashboard-notifications-modal";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
+import { setAppIconBadgeCount } from "@/lib/ios/app-badge";
 
 /** Cloud Functions `sendStudentAttendanceNotification`가 기록 — 클라이언트는 읽기만 */
 export const PARENT_USER_DASHBOARD_BELL_COLLECTION = "dashboardBellItems";
@@ -80,6 +81,10 @@ export function useParentDashboardBell(parentUid: string | null) {
       detail: formatWhen(r.createdAt),
     }));
   }, [rows]);
+
+  useEffect(() => {
+    setAppIconBadgeCount(items.length, { badgeUserId: parentUid ?? undefined });
+  }, [items.length, parentUid]);
 
   const deleteItem = useCallback(
     async (id: string) => {

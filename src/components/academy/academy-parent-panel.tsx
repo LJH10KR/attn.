@@ -2,13 +2,10 @@
 
 import { FirebaseError } from "firebase/app";
 import {
-  addDoc,
   collection,
   getCountFromServer,
-  onSnapshot,
-  orderBy,
+  getDocs,
   query,
-  serverTimestamp,
   Timestamp,
   where,
 } from "firebase/firestore";
@@ -21,8 +18,17 @@ import {
   type ParentRegistrationStatus,
 } from "@/lib/firebase/attn-schema";
 import { AcademyParentStudentList } from "@/components/academy/academy-student-panel";
+import { compareAttnIdAsc } from "@/lib/attn-id-sort";
 import { getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
+import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
+import { KrPhoneInput } from "@/components/ui/kr-phone-input";
+import {
+  AcademyMemberCredentialActions,
+  AcademyMemberProvisionModal,
+} from "@/components/academy/academy-member-provision";
+import { formatKrPhoneDisplay, phoneMatchesSearch } from "@/lib/phone/kr-phone";
 
 const glassCard = "glass-card";
 
@@ -31,6 +37,8 @@ const inputClass =
 
 export type ParentRowVM = {
   id: string;
+  attnId: string;
+  loginId: string;
   name: string;
   email: string;
   status: ParentRegistrationStatus;
@@ -68,7 +76,7 @@ function StatusDot({ status }: { status: ParentRegistrationStatus }) {
       />
     );
   }
-  if (status === "pending_registration") {
+  if (status === "pending_registration" || status === "pending_setup") {
     return <span className="h-3 w-3 shrink-0 rounded-full bg-amber-400 ring-2 ring-amber-500/40" />;
   }
   return <span className="h-3 w-3 shrink-0 rounded-full bg-red-500 ring-2 ring-red-600/25" />;
@@ -129,21 +137,13 @@ function SearchIcon() {
 }
 
 const actionBtnClass =
-  "rounded-xl border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45";
+  "rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-45";
 
 function RegisterChildModal({
   parentRow,
   open,
   busy,
   error,
-  formName,
-  setFormName,
-  formAge,
-  setFormAge,
-  formPhone,
-  setFormPhone,
-  formEmergency,
-  setFormEmergency,
   studentCount,
   countLoading,
   onClose,
@@ -153,14 +153,6 @@ function RegisterChildModal({
   open: boolean;
   busy: boolean;
   error: string | null;
-  formName: string;
-  setFormName: (v: string) => void;
-  formAge: string;
-  setFormAge: (v: string) => void;
-  formPhone: string;
-  setFormPhone: (v: string) => void;
-  formEmergency: string;
-  setFormEmergency: (v: string) => void;
   studentCount: number | null;
   countLoading: boolean;
   onClose: () => void;
@@ -212,7 +204,8 @@ function RegisterChildModal({
         </h2>
         <p className="mt-2 text-xs leading-relaxed text-neutral-600">
           <span className="font-medium text-foreground">{parentRow.name || "(이름 없음)"}</span>
-          학부모에게 연결됩니다. 한 학부모당 최대{" "}
+          학부모에게 연결됩니다. 학생은 관리 번호(attnId)로 생성되며, 등록 후 학생 목록에서
+          이름·연락처 등을 수정할 수 있습니다. 한 학부모당 최대{" "}
           <strong>{MAX_STUDENTS_PER_PARENT}명</strong>까지 등록할 수 있습니다.
         </p>
         {countLoading ? (
@@ -229,64 +222,6 @@ function RegisterChildModal({
             이미 {MAX_STUDENTS_PER_PARENT}명에 도달했습니다. 더 등록하려면 기존 학생 정리가 필요합니다.
           </p>
         ) : null}
-        <div className="mt-4 space-y-3">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="c-name">
-              이름 (필수)
-            </label>
-            <input
-              id="c-name"
-              className={inputClass}
-              value={formName}
-              onChange={(e) => setFormName(e.target.value)}
-              maxLength={80}
-              disabled={busy || atCap}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="c-age">
-              나이 (필수)
-            </label>
-            <input
-              id="c-age"
-              className={inputClass}
-              type="number"
-              min={0}
-              max={120}
-              value={formAge}
-              onChange={(e) => setFormAge(e.target.value)}
-              disabled={busy || atCap}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="c-phone">
-              연락처 (필수)
-            </label>
-            <input
-              id="c-phone"
-              className={inputClass}
-              value={formPhone}
-              onChange={(e) => setFormPhone(e.target.value)}
-              maxLength={30}
-              inputMode="tel"
-              disabled={busy || atCap}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="c-em">
-              비상 연락처 (필수)
-            </label>
-            <input
-              id="c-em"
-              className={inputClass}
-              value={formEmergency}
-              onChange={(e) => setFormEmergency(e.target.value)}
-              maxLength={30}
-              inputMode="tel"
-              disabled={busy || atCap}
-            />
-          </div>
-        </div>
         {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
         <div className="mt-6 flex flex-wrap justify-end gap-2">
           <button
@@ -398,6 +333,7 @@ type RowActionsProps = {
   busyKey: string | null;
   setBusyKey: (k: string | null) => void;
   setNotice: (m: string | null) => void;
+  onListRefresh: () => void;
 };
 
 function ParentRowActions({
@@ -406,6 +342,7 @@ function ParentRowActions({
   busyKey,
   setBusyKey,
   setNotice,
+  onListRefresh,
 }: RowActionsProps) {
   const fn = getFirebaseFunctions();
   const k = (action: string) => `${row.id}:${action}`;
@@ -415,10 +352,6 @@ function ParentRowActions({
   const [childCountLoading, setChildCountLoading] = useState(false);
   const [childFormBusy, setChildFormBusy] = useState(false);
   const [childFormError, setChildFormError] = useState<string | null>(null);
-  const [childFormName, setChildFormName] = useState("");
-  const [childFormAge, setChildFormAge] = useState("");
-  const [childFormPhone, setChildFormPhone] = useState("");
-  const [childFormEmergency, setChildFormEmergency] = useState("");
 
   const refreshChildCount = useCallback(async () => {
     setChildCountLoading(true);
@@ -440,10 +373,6 @@ function ParentRowActions({
   }, [academyId, row.id]);
 
   const openChildModal = useCallback(() => {
-    setChildFormName("");
-    setChildFormAge("");
-    setChildFormPhone("");
-    setChildFormEmergency("");
     setChildFormError(null);
     setChildModalOpen(true);
     void refreshChildCount();
@@ -458,58 +387,33 @@ function ParentRowActions({
 
   const submitChild = useCallback(async () => {
     setChildFormError(null);
-    const name = childFormName.trim();
-    if (!name || name.length > 80) {
-      setChildFormError("이름을 1~80자로 입력해 주세요.");
-      return;
-    }
-    const ageNum = Number.parseInt(childFormAge.trim(), 10);
-    if (!Number.isFinite(ageNum) || ageNum < 0 || ageNum > 120) {
-      setChildFormError("나이는 0~120 사이 정수로 입력해 주세요.");
-      return;
-    }
     if (childStudentCount !== null && childStudentCount >= MAX_STUDENTS_PER_PARENT) {
       setChildFormError(`자녀는 학부모당 최대 ${MAX_STUDENTS_PER_PARENT}명까지 등록할 수 있습니다.`);
       return;
     }
-    const phone = childFormPhone.trim().slice(0, 30);
-    const emergency = childFormEmergency.trim().slice(0, 30);
-    if (!phone) {
-      setChildFormError("연락처를 입력해 주세요.");
-      return;
-    }
-    if (!emergency) {
-      setChildFormError("비상 연락처를 입력해 주세요.");
-      return;
-    }
     setChildFormBusy(true);
     try {
-      const db = getFirebaseDb();
-      await addDoc(collection(db, "academies", academyId, "students"), {
-        parentUserId: row.id,
-        name,
-        age: ageNum,
-        phone,
-        emergencyContact: emergency,
-        createdAt: serverTimestamp(),
+      const call = httpsCallable(fn, "provisionStudentsBatch");
+      const res = await call({
+        academyId,
+        parentAuthUid: row.id,
+        count: 1,
       });
-      setNotice("자녀(학생)를 등록했습니다.");
+      const data = res.data as { students?: Array<{ attnId: string; name: string }> };
+      const created = data.students?.[0];
+      setNotice(
+        created
+          ? `자녀(학생)를 등록했습니다. (${created.attnId})`
+          : "자녀(학생)를 등록했습니다.",
+      );
       setChildModalOpen(false);
+      onListRefresh();
     } catch (e) {
       setChildFormError(callableErr(e));
     } finally {
       setChildFormBusy(false);
     }
-  }, [
-    academyId,
-    childFormAge,
-    childFormEmergency,
-    childFormName,
-    childFormPhone,
-    childStudentCount,
-    row.id,
-    setNotice,
-  ]);
+  }, [academyId, childStudentCount, fn, onListRefresh, row.id, setNotice]);
 
   const run = async (action: string, name: string, exec: () => Promise<unknown>) => {
     setNotice(null);
@@ -517,6 +421,7 @@ function ParentRowActions({
     try {
       await exec();
       setNotice(`${name} 처리되었습니다.`);
+      onListRefresh();
     } catch (e) {
       setNotice(callableErr(e));
     } finally {
@@ -533,6 +438,7 @@ function ParentRowActions({
         await del({ academyId, parentId: row.id });
         setNotice("삭제 처리되었습니다.");
         setDeleteConfirmOpen(false);
+        onListRefresh();
       } catch (e) {
         setNotice(callableErr(e));
       } finally {
@@ -717,14 +623,6 @@ function ParentRowActions({
           open={childModalOpen}
           busy={childFormBusy}
           error={childFormError}
-          formName={childFormName}
-          setFormName={setChildFormName}
-          formAge={childFormAge}
-          setFormAge={setChildFormAge}
-          formPhone={childFormPhone}
-          setFormPhone={setChildFormPhone}
-          formEmergency={childFormEmergency}
-          setFormEmergency={setChildFormEmergency}
           studentCount={childStudentCount}
           countLoading={childCountLoading}
           onClose={closeChildModal}
@@ -757,6 +655,8 @@ function docToRow(id: string, data: Record<string, unknown>): ParentRowVM {
     typeof cc === "number" && Number.isFinite(cc) ? Math.max(0, Math.floor(cc)) : 0;
   return {
     id,
+    attnId: typeof data.attnId === "string" ? data.attnId : "",
+    loginId: typeof data.loginId === "string" ? data.loginId : "",
     name: typeof data.displayName === "string" ? data.displayName : "",
     email: typeof data.email === "string" ? data.email : "",
     status,
@@ -775,6 +675,7 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
   const [rows, setRows] = useState<ParentRowVM[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [registerOpen, setRegisterOpen] = useState(false);
+  const [studentProvisionParentId, setStudentProvisionParentId] = useState<string | null>(null);
   useBodyScrollLock(registerOpen);
   const [formEmail, setFormEmail] = useState("");
   const [formName, setFormName] = useState("");
@@ -787,24 +688,20 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
 
-  useEffect(() => {
+  const loadParentsList = useCallback(async () => {
     const db = getFirebaseDb();
-    const qy = query(
-      collection(db, "academies", academyId, "parents"),
-      orderBy("createdAt", "desc"),
-    );
-    const unsub = onSnapshot(
-      qy,
-      (snap) => {
-        setListError(null);
-        setRows(
-          snap.docs.map((d) => docToRow(d.id, d.data() as Record<string, unknown>)),
-        );
-      },
-      (err) => setListError(err.message || "목록을 불러오지 못했습니다."),
-    );
-    return () => unsub();
+    const qy = query(collection(db, "academies", academyId, "parents"));
+    const snap = await getDocs(qy);
+    setListError(null);
+    const list = snap.docs.map((d) => docToRow(d.id, d.data() as Record<string, unknown>));
+    list.sort((a, b) => compareAttnIdAsc(a.attnId, b.attnId));
+    setRows(list);
   }, [academyId]);
+
+  const { refresh: refreshParentsList, busy: listBusy } = useAcademyListPoll(
+    loadParentsList,
+    [academyId],
+  );
 
   useEffect(() => {
     setSelected((prev) => new Set([...prev].filter((id) => rows.some((r) => r.id === id))));
@@ -819,8 +716,8 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
       (t) =>
         t.name.toLowerCase().includes(q) ||
         t.email.toLowerCase().includes(q) ||
-        (t.phone ?? "").toLowerCase().includes(q) ||
-        (t.emergencyContact ?? "").toLowerCase().includes(q),
+        phoneMatchesSearch(t.phone, q) ||
+        phoneMatchesSearch(t.emergencyContact, q),
     );
   }, [rows, queryText]);
 
@@ -884,12 +781,21 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
       setFormChildrenCount("0");
       setFormPhone("");
       setNotice("학부모가 초청 필요 상태로 등록되었습니다.");
+      refreshParentsList();
     } catch (e) {
       setFormError(callableErr(e));
     } finally {
       setFormBusy(false);
     }
-  }, [academyId, formEmail, formName, formPhone, formEmergencyContact, formChildrenCount]);
+  }, [
+    academyId,
+    formEmail,
+    formName,
+    formPhone,
+    formEmergencyContact,
+    formChildrenCount,
+    refreshParentsList,
+  ]);
 
   const onBulkInvite = useCallback(async () => {
     if (inviteSelectedCount === 0) {
@@ -910,12 +816,13 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
       }
       setSelected(new Set());
       setNotice(`${ids.length}명에게 초청 메일을 발송했습니다.`);
+      refreshParentsList();
     } catch (e) {
       setNotice(callableErr(e));
     } finally {
       setBulkBusy(false);
     }
-  }, [academyId, inviteSelectedCount, rows, selected]);
+  }, [academyId, inviteSelectedCount, rows, selected, refreshParentsList]);
 
   return (
     <div className="space-y-4">
@@ -932,16 +839,9 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
 
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold text-foreground">학부모 관리</h2>
-        <button
-          type="button"
-          onClick={() => {
-            setFormError(null);
-            setRegisterOpen(true);
-          }}
-          className="shrink-0 rounded-full bg-[#222] dark:bg-neutral-100 px-3.5 py-2 text-xs font-medium text-white dark:text-neutral-950 shadow-sm hover:bg-[#333] dark:hover:bg-white"
-        >
-          + 학부모 등록
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <AcademyPanelRefreshButton busy={listBusy} onRefreshAction={refreshParentsList} />
+        </div>
       </div>
 
       <div className="flex gap-2">
@@ -1026,7 +926,7 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
                       </span>
                       <span className="mt-0.5 block text-[11px] text-neutral-500">
                         자녀 {t.childrenCount}명
-                        {t.phone ? ` · ${t.phone}` : ""}
+                        {t.phone ? ` · ${formatKrPhoneDisplay(t.phone)}` : ""}
                       </span>
                       {t.status === "invitation_sent" && t.invitationExpiresAt ? (
                         <span className="mt-1 block">
@@ -1047,24 +947,40 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
                     <AcademyParentStudentList
                       academyId={academyId}
                       parentUserId={t.id}
-                      setNotice={setNotice}
+                      setNoticeAction={setNotice}
                     />
                     <div className="mb-3 space-y-1 text-[11px] text-neutral-600">
                       {t.emergencyContact ? (
                         <p>
                           <span className="font-medium text-neutral-500">비상연락</span>{" "}
-                          {t.emergencyContact}
+                          {formatKrPhoneDisplay(t.emergencyContact)}
                         </p>
                       ) : (
                         <p className="text-neutral-400">비상연락처 없음</p>
                       )}
                     </div>
+                    <AcademyMemberCredentialActions
+                      academyId={academyId}
+                      authUid={t.id}
+                      role="parent"
+                      attnId={t.attnId}
+                      loginId={t.loginId}
+                      status={t.status}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setStudentProvisionParentId(t.id)}
+                      className="mb-3 w-full rounded-[8px] border border-neutral-300/70 bg-white/50 py-2 text-xs font-medium text-foreground"
+                    >
+                      자녀 등록
+                    </button>
                     <ParentRowActions
                       academyId={academyId}
                       row={t}
                       busyKey={busyKey}
                       setBusyKey={setBusyKey}
                       setNotice={setNotice}
+                      onListRefresh={refreshParentsList}
                     />
                   </div>
                 ) : null}
@@ -1086,6 +1002,15 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
           </div>
         ) : null}
       </div>
+
+      <AcademyMemberProvisionModal
+        academyId={academyId}
+        kind="students"
+        parentAuthUid={studentProvisionParentId ?? undefined}
+        open={studentProvisionParentId !== null}
+        onCloseAction={() => setStudentProvisionParentId(null)}
+        onDoneAction={refreshParentsList}
+      />
 
       {registerOpen ? (
         <div
@@ -1134,13 +1059,11 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
                 <label className="mb-1 block text-xs font-medium text-neutral-600" htmlFor="p-phone">
                   연락처 (선택)
                 </label>
-                <input
+                <KrPhoneInput
                   id="p-phone"
                   className={inputClass}
                   value={formPhone}
-                  onChange={(e) => setFormPhone(e.target.value)}
-                  maxLength={30}
-                  inputMode="tel"
+                  onChange={setFormPhone}
                 />
               </div>
               <div>
@@ -1150,13 +1073,11 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
                 >
                   비상연락처 (선택)
                 </label>
-                <input
+                <KrPhoneInput
                   id="p-emergency"
                   className={inputClass}
                   value={formEmergencyContact}
-                  onChange={(e) => setFormEmergencyContact(e.target.value)}
-                  maxLength={30}
-                  inputMode="tel"
+                  onChange={setFormEmergencyContact}
                 />
               </div>
               <div>

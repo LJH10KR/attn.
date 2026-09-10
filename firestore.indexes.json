@@ -9,6 +9,15 @@
       ]
     },
     {
+      "collectionGroup": "attendanceNotifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "senderUid", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ],
+      "density": "SPARSE_ALL"
+    },
+    {
       "collectionGroup": "parents",
       "queryScope": "COLLECTION_GROUP",
       "fields": [

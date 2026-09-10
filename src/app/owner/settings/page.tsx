@@ -1,15 +1,20 @@
 "use client";
 
-import { onAuthStateChanged, signOut } from "firebase/auth";
+import { onAuthStateChanged } from "firebase/auth";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
-import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
+import { doc, getDoc } from "firebase/firestore";
+import { useEffect, useMemo, useState } from "react";
+import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
+import { OwnerPasswordSettingsCard } from "@/components/account/password-settings-cards";
 import { OwnerGoogleLinkCard } from "@/components/owner/owner-google-link-card";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
-import { getFirebaseAuth } from "@/lib/firebase/client-app";
+import { COLLECTIONS } from "@/lib/firebase/attn-schema";
+import { getFirebaseAuth, getFirebaseDb } from "@/lib/firebase/client-app";
+import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
+import { useRoleLogout } from "@/lib/auth/use-role-logout";
 import { fetchIsOwner } from "@/lib/firebase/owner-profile";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 
@@ -17,12 +22,17 @@ const glassCard = "glass-card";
 
 export default function OwnerSettingsPage() {
   const router = useRouter();
-  const authProfile = useAuthProfile();
+  const { profile: authProfile } = useAuthProfile();
   const [gate, setGate] = useState<"loading" | "auth" | "forbidden" | "ok">(
     "loading",
   );
-  const [logoutBusy, setLogoutBusy] = useState(false);
+  const { logout: onLogout, logoutBusy, logoutModal } = useRoleLogout({
+    redirectTo: "/login/owner",
+    role: "owner",
+  });
   const configured = isFirebaseConfigured();
+  const [ownerDisplayName, setOwnerDisplayName] = useState<string | null>(null);
+  const [ownerPhone, setOwnerPhone] = useState<string | null>(null);
 
   useEffect(() => {
     if (!configured) {
@@ -46,15 +56,33 @@ export default function OwnerSettingsPage() {
     router.replace("/login/owner");
   }, [configured, gate, router]);
 
-  const onLogout = useCallback(async () => {
-    setLogoutBusy(true);
-    try {
-      await signOut(getFirebaseAuth());
-    } finally {
-      setLogoutBusy(false);
-      router.replace("/login/owner");
-    }
-  }, [router]);
+  useEffect(() => {
+    if (!configured || gate !== "ok") return;
+    const uid = getFirebaseAuth().currentUser?.uid;
+    if (!uid) return;
+    let cancelled = false;
+    void (async () => {
+      const db = getFirebaseDb();
+      const snap = await getDoc(doc(db, COLLECTIONS.users, uid));
+      if (cancelled) return;
+      const d = snap.data();
+      setOwnerDisplayName(typeof d?.displayName === "string" ? d.displayName : null);
+      const rawPhone = typeof d?.phone === "string" ? d.phone.trim() : "";
+      setOwnerPhone(rawPhone || null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [configured, gate]);
+
+  const headerProfile = useMemo(
+    () =>
+      buildDashboardHeaderProfile(authProfile, {
+        displayName: ownerDisplayName,
+        phone: ownerPhone,
+      }),
+    [authProfile, ownerDisplayName, ownerPhone],
+  );
 
   if (!configured) {
     return (
@@ -117,36 +145,35 @@ export default function OwnerSettingsPage() {
           affiliationLabel="오너 계정"
           menuIntro={
             <span className="text-neutral-600 dark:text-neutral-400">
-              Google 로그인 연동 등 계정을 관리합니다.
+              Google 연동, 비밀번호 등 계정을 관리합니다.
             </span>
           }
           showBack
-          onBackAction={() => router.push("/owner")}
+          onBackAction={() => router.back()}
           backAriaLabel="오너 대시보드로 돌아가기"
           onHomeAction={() => router.push("/")}
-          showBellOnTitle={false}
-          showBellInBottomBar={false}
           bottomTabs={[
             {
               id: "home",
               label: "홈",
-              showLabel: false,
-              icon: (active: boolean) => <AttnTabLogo active={active} />,
+              iconAction: (active: boolean) => <HomeTabIcon active={active} />,
               active: true,
-              onSelect: () => router.push("/"),
+              onSelectAction: () => router.push("/"),
             },
           ]}
           onLogoutAction={() => void onLogout()}
           logoutBusy={logoutBusy}
-          profile={authProfile}
+          profile={headerProfile}
         />
 
-        <div className="mt-5 space-y-4">
-          <OwnerGoogleLinkCard />
+        <div className="mt-[26px] space-y-4">
+          <OwnerPasswordSettingsCard disabled={logoutBusy} defaultCollapsed />
+          <OwnerGoogleLinkCard defaultCollapsed />
         </div>
       </div>
 
       <DashboardBottomScrim />
+      {logoutModal}
     </div>
   );
 }

@@ -15,16 +15,22 @@ import {
   prepareWebPushMessaging,
   removeFcmTokenLocal,
 } from "@/lib/firebase/web-push";
+import { ProcessStatusModal } from "@/components/ui/process-status-modal";
 
 const shellClass = "glass-card overflow-hidden";
 
-export function ParentPushNotificationsCard() {
+export function ParentPushNotificationsCard({
+  defaultCollapsed,
+}: {
+  defaultCollapsed?: boolean;
+} = {}) {
   const headingId = useId();
   const panelId = useId();
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(!defaultCollapsed);
   const [uid, setUid] = useState<string | null>(null);
   const [remoteEnabled, setRemoteEnabled] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<"on" | "off" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -62,6 +68,7 @@ export function ParentPushNotificationsCard() {
         return;
       }
       setBusy(true);
+      setBusyAction(wantOn ? "on" : "off");
       try {
         if (!wantOn) {
           await removeFcmTokenLocal();
@@ -93,7 +100,10 @@ export function ParentPushNotificationsCard() {
           setError(tokenErr ?? "푸시 등록에 실패했습니다.");
           return;
         }
-        await callSyncParentPushSubscription(true, token);
+        await callSyncParentPushSubscription(true, token, {
+          clientAtMillis: Date.now(),
+          syncMode: "normal",
+        });
         try {
           sessionStorage.setItem(FCM_LAST_SYNCED_TOKEN_STORAGE_KEY, token);
         } catch {
@@ -104,6 +114,7 @@ export function ParentPushNotificationsCard() {
         setError("설정 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
       } finally {
         setBusy(false);
+        setBusyAction(null);
       }
     },
     [uid],
@@ -123,6 +134,7 @@ export function ParentPushNotificationsCard() {
       : "브라우저 알림 받기 꺼짐";
 
   return (
+    <>
     <section className={shellClass} aria-label="출석·결석 웹 푸시 알림">
       <button
         type="button"
@@ -188,7 +200,7 @@ export function ParentPushNotificationsCard() {
             >
               <span
                 className={`absolute top-1 left-1 h-7 w-7 rounded-full bg-white shadow transition-transform ${
-                  remoteEnabled ? "translate-x-[1.35rem]" : "translate-x-0"
+                  remoteEnabled ? "translate-x-4" : "translate-x-0"
                 }`}
               />
             </button>
@@ -205,5 +217,13 @@ export function ParentPushNotificationsCard() {
         </div>
       ) : null}
     </section>
+
+    <ProcessStatusModal
+      open={busy}
+      title={busyAction === "on" ? "알림 켜는 중…" : "알림 끄는 중…"}
+      description="잠시만 기다려 주세요."
+      animated
+    />
+    </>
   );
 }

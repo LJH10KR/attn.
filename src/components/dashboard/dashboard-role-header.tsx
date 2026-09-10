@@ -30,10 +30,12 @@ type DashboardRoleHeaderProps = {
   menuIntro?: ReactNode;
   onHomeAction?: () => void;
   onBellClickAction?: () => void;
-  showBellOnTitle?: boolean;
-  showBellInBottomBar?: boolean;
   bellBadgeCount?: number;
+  beforeBell?: ReactNode;
+  showBell?: boolean;
+  showProfile?: boolean;
   bottomTabs?: DashboardBottomNavTab[];
+  hideBottomNav?: boolean;
   includeSettingsAction?: boolean;
   onSettingsAction?: () => void;
   settingsLabel?: string;
@@ -54,10 +56,12 @@ export function DashboardRoleHeader({
   menuIntro,
   onHomeAction,
   onBellClickAction,
-  showBellOnTitle = false,
-  showBellInBottomBar = true,
   bellBadgeCount = 0,
+  beforeBell,
+  showBell,
+  showProfile,
   bottomTabs,
+  hideBottomNav = false,
   includeSettingsAction = false,
   onSettingsAction,
   settingsLabel = "사용자 설정",
@@ -88,7 +92,7 @@ export function DashboardRoleHeader({
   }, [configured]);
 
   if (includeSettingsAction && onSettingsAction) {
-    menuActions.push({ label: settingsLabel, onSelect: onSettingsAction });
+    menuActions.push({ label: settingsLabel, onSelectAction: onSettingsAction });
   }
   if (extraMenuActions.length > 0) {
     menuActions.push(...extraMenuActions);
@@ -96,12 +100,12 @@ export function DashboardRoleHeader({
   if (isAdmin) {
     menuActions.push({
       label: "관리자 페이지로",
-      onSelect: () => router.push("/admin"),
+      onSelectAction: () => router.push("/admin"),
     });
   }
   menuActions.push({
     label: logoutBusy ? "처리 중…" : logoutLabel,
-    onSelect: onLogoutAction,
+    onSelectAction: onLogoutAction,
     disabled: logoutBusy,
   });
 
@@ -109,33 +113,31 @@ export function DashboardRoleHeader({
     <>
       <DashboardTopScrim />
       <DashboardTopHeader
-        title={title}
-        showBack={showBack}
-        onBack={onBackAction}
-        backAriaLabel={backAriaLabel}
-        backHint={backHint}
-        onBellClick={onBellClickAction}
-        showBell={showBellOnTitle}
+        onHomeAction={onHomeAction}
+        onBellClickAction={onBellClickAction}
         bellBadgeCount={bellBadgeCount}
-      />
-      <DashboardTopHeaderSpacer
-        showSubline={Boolean(showBack && backHint)}
-      />
-
-      <DashboardBottomNav
-        title={title}
+        beforeBell={beforeBell}
+        showBell={showBell}
+        showProfile={showProfile}
         affiliationLabel={affiliationLabel}
-        showBack={false}
-        onHomeClick={onHomeAction}
-        onBellClick={onBellClickAction}
-        showBellInBottomBar={showBellInBottomBar}
-        bellBadgeCount={bellBadgeCount}
-        bottomTabs={bottomTabs}
         menuIntro={menuIntro}
         menuActions={menuActions}
-        includeSrOnlyScreenTitle={false}
         profile={profile}
       />
+      <DashboardTopHeaderSpacer />
+
+      {hideBottomNav ? null : (
+        <DashboardBottomNav
+          title={title}
+          showBack={showBack}
+          onBackAction={onBackAction}
+          backAriaLabel={backAriaLabel}
+          backHint={backHint}
+          onHomeClickAction={onHomeAction}
+          bottomTabs={bottomTabs}
+          includeSrOnlyScreenTitle={false}
+        />
+      )}
     </>
   );
 }

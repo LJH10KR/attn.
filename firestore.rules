@@ -143,6 +143,17 @@ service cloud.firestore {
         allow create, update: if false;
         allow delete: if isSignedIn() && request.auth.uid == userId;
       }
+
+      /**
+       * 서버(Cloud Functions Admin SDK)만 쓰는 역할 활성 요약 — 클라이언트는 읽기만.
+       * 2-2: 멤버십 변경 시 Functions가 갱신. 위조 방지를 위해 클라이언트 write는 항상 거부.
+       * 문서 ID는 `activation` 단일 고정(`attn-schema.ts`와 동일).
+       */
+      match /serverMirror/{docId} {
+        allow read: if isAdmin()
+          || (isSignedIn() && request.auth.uid == userId && docId == "activation");
+        allow create, update, delete: if false;
+      }
     }
 
     match /academies/{academyId} {
@@ -187,6 +198,48 @@ service cloud.firestore {
         allow create, update, delete: if false;
       }
 
+      /** 학원 대시보드 집계·알림 inbox — Functions(Admin SDK)만 쓰기 */
+      match /meta/dashboardStats {
+        allow read: if isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyPortalSession(academyId);
+        allow write: if false;
+      }
+
+      match /adminInbox/{inboxId} {
+        allow read: if isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyPortalSession(academyId);
+        allow write: if false;
+      }
+
+      /** 출석 키오스크 설정(해시·잠금) — Functions만 쓰기, 공개 필드만 읽기 */
+      match /meta/kioskSettings {
+        allow read: if isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyPortalSession(academyId);
+        allow write: if false;
+      }
+
+      /** 원비 납부 안내(카카오페이 링크·계좌) — 오너만 쓰기, 소속 활성 학부모도 읽기 허용 */
+      match /meta/tuitionSettings {
+        allow read: if isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyPortalSession(academyId)
+          || isAcademyParentActive(academyId);
+        allow write: if isAdmin()
+          || isAcademyOwner(academyId);
+      }
+
+      /** 회차 방식 원비 기본 설정 — 오너만 쓰기 */
+      match /meta/sessionTuitionSettings {
+        allow read: if isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyPortalSession(academyId);
+        allow write: if isAdmin()
+          || isAcademyOwner(academyId);
+      }
+
       match /students/{studentId} {
         /**
          * list 쿼리 검증 시 OR 전체가 분석되므로, parentUserId 등 필드가 없을 때 직접 접근하면
@@ -224,7 +277,34 @@ service cloud.firestore {
           || isAcademyOwner(academyId)
           || isAcademyPortalSession(academyId)
           || (isAcademyParentActive(academyId) && resource.data.parentUserId == request.auth.uid);
+
+        match /serverSecrets/{secretId} {
+          allow read, write: if false;
+        }
+
+        /** 수업 완료 기록 로그 — 오너·포털·활성 선생님이 생성, 삭제는 오너만 */
+        match /sessionLogs/{logId} {
+          allow read: if isAdmin()
+            || isAcademyOwner(academyId)
+            || isAcademyPortalSession(academyId)
+            || isAcademyTeacherActive(academyId);
+          allow create: if isAdmin()
+            || isAcademyOwner(academyId)
+            || isAcademyPortalSession(academyId)
+            || isAcademyTeacherActive(academyId);
+          allow update, delete: if isAdmin()
+            || isAcademyOwner(academyId);
+        }
       }
+    }
+
+    /** attnId 로그인 조회 — Functions(Admin SDK)만 쓰기 */
+    match /attnLoginIndex/{attnIdKey} {
+      allow read, write: if false;
+    }
+
+    match /meta/attnGlobal {
+      allow read, write: if false;
     }
 
     match /{document=**} {

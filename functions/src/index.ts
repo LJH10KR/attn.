@@ -3,9 +3,35 @@ import {onCall, HttpsError} from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
+import { assertCanManageAcademy } from "./lib/academy-access";
+import { ACADEMY_ATTN_ID_RE } from "./lib/attn-id";
+
+/**
+ * `createCustomToken`용 IAM 서명 주체.
+ * Gen2에서는 메타데이터 기본 SA가 compute 기본 계정이라, 미지정 시 signBlob 대상이
+ * firebase-adminsdk가 아닌 compute로 잡혀 권한 오류가 나기 쉽습니다.
+ * `FIREBASE_SIGNING_SERVICE_ACCOUNT_EMAIL`로 덮어쓸 수 있습니다.
+ */
+function adminCustomTokenSignerServiceAccountId(): string | undefined {
+  const explicit = process.env.FIREBASE_SIGNING_SERVICE_ACCOUNT_EMAIL?.trim();
+  if (explicit) return explicit;
+  const projectId =
+    process.env.GCLOUD_PROJECT?.trim() ||
+    process.env.GOOGLE_CLOUD_PROJECT?.trim();
+  if (!projectId) return undefined;
+  return `${projectId}@appspot.gserviceaccount.com`;
+}
 
 if (!admin.apps.length) {
-  admin.initializeApp();
+  const serviceAccountId = adminCustomTokenSignerServiceAccountId();
+  if (serviceAccountId) {
+    admin.initializeApp({
+      credential: admin.credential.applicationDefault(),
+      serviceAccountId,
+    });
+  } else {
+    admin.initializeApp();
+  }
 }
 
 setGlobalOptions({maxInstances: 10, region: "asia-northeast3"});
@@ -31,6 +57,15 @@ function requireAcademyDocumentId(raw: unknown): string {
     throw new HttpsError("invalid-argument", "유효하지 않은 학원 ID입니다.");
   }
   return id;
+}
+
+/** attnId 학원(o1_a3) 또는 구 슬러그 ID */
+function resolveAcademyLoginId(raw: unknown): string {
+  const id = requireAcademyDocumentId(raw);
+  if (ACADEMY_ATTN_ID_RE.test(id)) {
+    return id;
+  }
+  return id.toLowerCase();
 }
 
 function assertValidNewAcademySlug(academyId: string): void {
@@ -130,6 +165,58 @@ export const updateAcademyPortalPassword = onCall(async (request) => {
 });
 
 /**
+ * 학원 포털(또는 오너) — 현재 비밀번호 확인 후 포털 로그인 비밀번호 변경
+ */
+export const changeAcademyPortalPassword = onCall(async (request) => {
+  const auth = request.auth;
+  if (!auth?.uid) {
+    throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+  }
+  const uid = auth.uid;
+
+  const academyId = requireAcademyDocumentId(request.data?.academyId);
+  const currentPassword =
+    typeof request.data?.currentPassword === "string" ? request.data.currentPassword : "";
+  const newPassword =
+    typeof request.data?.newPassword === "string" ? request.data.newPassword : "";
+
+  if (!currentPassword) {
+    throw new HttpsError("invalid-argument", "현재 비밀번호를 입력해 주세요.");
+  }
+  if (newPassword.length < 6) {
+    throw new HttpsError("invalid-argument", "새 비밀번호는 6자 이상이어야 합니다.");
+  }
+  if (currentPassword === newPassword) {
+    throw new HttpsError(
+      "invalid-argument",
+      "새 비밀번호는 현재 비밀번호와 달라야 합니다.",
+    );
+  }
+
+  const db = admin.firestore();
+  await assertCanManageAcademy(db, academyId, uid, auth.token);
+
+  const secretRef = db.doc(`academies/${academyId}/secrets/login`);
+  const secretSnap = await secretRef.get();
+  if (!secretSnap.exists) {
+    throw new HttpsError("failed-precondition", "학원 로그인이 아직 설정되지 않았습니다.");
+  }
+  const portalPassword = secretSnap.get("portalPassword");
+  if (typeof portalPassword !== "string" || portalPassword.length === 0) {
+    throw new HttpsError("failed-precondition", "학원 로그인이 아직 설정되지 않았습니다.");
+  }
+  if (currentPassword !== portalPassword) {
+    throw new HttpsError("permission-denied", "현재 비밀번호가 올바르지 않습니다.");
+  }
+
+  await secretRef.set(
+    {portalPassword: newPassword, updatedAt: FieldValue.serverTimestamp()},
+    {merge: true},
+  );
+  return {ok: true};
+});
+
+/**
  * 오너 전용 — 학원 문서 + 포털 시크릿 문서 삭제
  */
 export const deleteOwnerAcademy = onCall(async (request) => {
@@ -157,11 +244,11 @@ export const deleteOwnerAcademy = onCall(async (request) => {
  * 학원 포털 로그인
  */
 export const signInAcademy = onCall(async (request) => {
-  const academyId = requireAcademyDocumentId(request.data?.academyId);
+  const academyId = resolveAcademyLoginId(request.data?.academyId);
   const password = typeof request.data?.password === "string" ? request.data.password : "";
 
   if (!password) {
-    throw new HttpsError("invalid-argument", "학원 ID와 비밀번호를 입력해 주세요.");
+    throw new HttpsError("invalid-argument", "로그인 번호와 비밀번호를 입력해 주세요.");
   }
 
   const academySnap = await admin.firestore().doc(`academies/${academyId}`).get();
@@ -197,10 +284,16 @@ export const signInAcademy = onCall(async (request) => {
   return {customToken};
 });
 
-export {sendStudentAttendanceNotification, syncParentPushSubscription} from "./push";
+export {
+  sendStudentAttendanceNotification,
+  syncParentPushSubscription,
+  listAttendanceNotifications,
+} from "./push";
+export { retryAttendancePushDelivery } from "./attendance-push-delivery";
 export {
   activateParent,
   deactivateParent,
+  deleteAcademyStudent,
   deleteParentInvite,
   finalizeParentOnboarding,
   getParentActivationState,
@@ -230,7 +323,66 @@ export {
 export {
   adminDeleteAcademyCascade,
   adminDeleteMemberUser,
+  adminReconcileActivationMirrors,
   listAdminUserDirectory,
 } from "./admin-directory";
+export {
+  adminReconcileAcademyDashboardMeta,
+  onAcademyParentDashboardMetaWritten,
+  onAcademyStudentDashboardMetaWritten,
+  onAcademyTeacherDashboardMetaWritten,
+} from "./academy-dashboard-meta";
+export {
+  getAcademyKioskSettings,
+  updateAcademyKioskSettings,
+  verifyKioskExitPin,
+  submitKioskCheckIn,
+  setStudentCheckInPin,
+} from "./kiosk";
 export { openShortAuthLink } from "./auth-short-links";
 export { sendOwnerSignupVerificationEmail } from "./owner-auth-mail";
+export { issueEmailVerificationOtp, verifyEmailVerificationOtp } from "./email-verification-otp";
+export {
+  createAcademyEasy,
+  provisionTemplateTeachers,
+  provisionTemplateParents,
+  provisionTeachersBatch,
+  provisionParentsBatch,
+  provisionStudentsBatch,
+} from "./academy-provision";
+export {
+  signInTeacher,
+  signInTeacherGoogle,
+  signInParent,
+  completeMemberFirstLogin,
+  regenerateMemberTempPassword,
+  listAcademyIssuedAccounts,
+} from "./member-auth";
+export {
+  getParentSignupAcademyInfo,
+  checkParentLoginIdAvailable,
+  getParentSignupGoogleStatus,
+  registerParentGoogleSignup,
+  registerParentSelfSignup,
+} from "./parent-self-signup";
+export {
+  updateTeacherProfile,
+  updateParentProfile,
+  syncParentGoogleLink,
+  syncTeacherGoogleLink,
+  checkTeacherLoginIdAvailable,
+  updateTeacherLoginId,
+  checkParentLoginIdForUpdate,
+  updateParentLoginId,
+  updateTeacherPassword,
+  updateParentPassword,
+} from "./member-profiles";
+export {
+  onTeacherMembershipWritten,
+  onParentMembershipWritten,
+} from "./user-activation-mirror";
+export { sendTuitionReminders } from "./tuition-reminder";
+export {
+  sendSessionPaymentReminders,
+  onStudentSessionBalanceChanged,
+} from "./session-payment-reminder";

@@ -8,6 +8,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { tearDownParentWebPushForLogout } from "@/lib/firebase/web-push";
 
 function finalizeErrorMessage(err: FirebaseError): string {
   switch (err.code) {
@@ -72,6 +73,7 @@ export function ParentCompleteForm() {
       }
       router.replace(`/parent/complete?${next.toString()}`);
 
+      await tearDownParentWebPushForLogout();
       await signOut(getFirebaseAuth());
     } catch (e) {
       if (e instanceof FirebaseError) {
@@ -87,6 +89,7 @@ export function ParentCompleteForm() {
   const onSignOutOtherParent = useCallback(async () => {
     setError(null);
     try {
+      await tearDownParentWebPushForLogout();
       await signOut(getFirebaseAuth());
       setDone(false);
       setAlready(false);
@@ -132,7 +135,7 @@ export function ParentCompleteForm() {
             <button
               type="button"
               onClick={() => void onSignOutOtherParent()}
-              className="w-full rounded-xl border border-amber-700/30 bg-white/60 py-2 text-xs font-medium text-amber-950"
+              className="w-full rounded-[8px] border border-amber-700/30 bg-white/60 py-2 text-xs font-medium text-amber-950"
             >
               다른 학부모로 진행 (로그인 화면)
             </button>

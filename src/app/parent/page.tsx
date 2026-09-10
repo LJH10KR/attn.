@@ -1,19 +1,29 @@
 ﻿"use client";
 
-import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, onSnapshot, setDoc, Timestamp } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
+import { doc, getDoc, setDoc, Timestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   docToStudentRow,
   type StudentRowVM,
 } from "@/components/academy/academy-student-panel";
-import { AttnTabLogo } from "@/components/dashboard/attn-tab-logo";
+import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardNotificationsModal } from "@/components/dashboard/dashboard-notifications-modal";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
+import { RoleDashboardBootShell } from "@/components/dashboard/role-dashboard-boot-shell";
+import { StudentListSectionSkeleton } from "@/components/dashboard/student-list-section-skeleton";
+import { ParentCheckInPinCard } from "@/components/parent/parent-check-in-pin-card";
+import { ParentSessionBalanceCard } from "@/components/parent/parent-session-balance-card";
+import { ParentTuitionReminderCard } from "@/components/parent/parent-tuition-reminder-card";
+import {
+  PaymentReminderModal,
+  type PaymentReminderPayload,
+} from "@/components/parent/payment-reminder-modal";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
+import { academyTuitionSettingsPath } from "@/lib/firebase/attn-schema";
 import {
   getFirebaseAuth,
   getFirebaseDb,
@@ -21,13 +31,28 @@ import {
 } from "@/lib/firebase/client-app";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { useParentDashboardBell } from "@/lib/firebase/use-parent-dashboard-bell";
+import { setLastDashboardRoleHint } from "@/lib/auth/last-dashboard-role";
+import { useBootOverlay } from "@/components/boot/boot-overlay";
+import { resolveParentActivationState } from "@/lib/firebase/resolve-session-dashboard";
+import { useRoleLogout } from "@/lib/auth/use-role-logout";
+import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
+import { FirebaseError } from "firebase/app";
+import { formatKrPhoneDisplay } from "@/lib/phone/kr-phone";
 
 const glassCard = "glass-card";
 
 function sortByName(a: StudentRowVM, b: StudentRowVM): number {
   return a.name.localeCompare(b.name, "ko");
+}
+
+function isRetryableCallableAuthError(err: unknown): boolean {
+  if (!(err instanceof FirebaseError)) return false;
+  return (
+    err.code === "functions/unauthenticated" ||
+    err.code === "functions/permission-denied"
+  );
 }
 
 type CallableStudentPayload = {
@@ -40,6 +65,37 @@ type CallableStudentPayload = {
   assignedTeacherUids?: string[];
   assignedTeacherUid?: string | null;
   createdAtMillis?: number | null;
+  hasCheckInPin?: boolean;
+  tuitionDueDayOfMonth?: number | null;
+  tuitionAmount?: number | null;
+  weeklySessionCount?: number | null;
+  pricePerSession?: number | null;
+  sessionBalance?: number | null;
+  extraSessionDates?: string[];
+  hasPendingPaymentReminder?: boolean;
+};
+
+type ParentStudentRow = StudentRowVM & {
+  hasCheckInPin?: boolean;
+  tuitionDueDayOfMonth?: number | null;
+  tuitionAmount?: number | null;
+  weeklySessionCount?: number | null;
+  pricePerSession?: number | null;
+  sessionBalance?: number | null;
+  extraSessionDates?: string[];
+  hasPendingPaymentReminder?: boolean;
+};
+
+type TuitionSettingsState = {
+  kakaoPayLink?: string;
+  bankName?: string;
+  accountNumber?: string;
+  accountHolder?: string;
+} | null;
+
+type ParentListPayload = {
+  students?: CallableStudentPayload[];
+  kiosk?: { requireStudentCheckInPin?: boolean };
 };
 
 function studentRowFromCallablePayload(
@@ -65,19 +121,36 @@ function studentRowFromCallablePayload(
 
 export default function ParentDashboardPage() {
   const router = useRouter();
-  const authProfile = useAuthProfile();
+  const { hide: hideBootOverlay } = useBootOverlay();
+  const { profile: authProfile } = useAuthProfile();
   const [ready, setReady] = useState(false);
   const [academyId, setAcademyId] = useState<string | null>(null);
   const [academyName, setAcademyName] = useState<string | null>(null);
+  const [memberDisplayName, setMemberDisplayName] = useState<string | null>(null);
+  const [memberPhone, setMemberPhone] = useState<string | null>(null);
+  const [googleLinked, setGoogleLinked] = useState(false);
+  const [googleEmail, setGoogleEmail] = useState<string | null>(null);
   const [students, setStudents] = useState<StudentRowVM[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
-  const [logoutBusy, setLogoutBusy] = useState(false);
+  const { logout: onLogout, logoutBusy, logoutModal } = useRoleLogout({
+    redirectTo: "/login/parent",
+    role: "parent",
+  });
   const [listRefreshBusy, setListRefreshBusy] = useState(false);
   const [authUid, setAuthUid] = useState<string | null>(null);
   const [hideIosPwaHint, setHideIosPwaHint] = useState<boolean | null>(null);
   const [iosAutoModalOpen, setIosAutoModalOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [listInitialLoading, setListInitialLoading] = useState(false);
+  const [kioskRequirePin, setKioskRequirePin] = useState(false);
+  const [studentsWithPinMeta, setStudentsWithPinMeta] = useState<
+    ParentStudentRow[]
+  >([]);
+  const [tuitionSettings, setTuitionSettings] =
+    useState<TuitionSettingsState>(null);
+  const [reminderPayload, setReminderPayload] = useState<PaymentReminderPayload | null>(null);
+  const shownReminderForRef = useRef<Set<string>>(new Set());
 
   const {
     items: parentBellItems,
@@ -89,6 +162,11 @@ export default function ParentDashboardPage() {
 
   const parentListLoadedUidRef = useRef<string | null>(null);
   const parentInitGenerationRef = useRef(0);
+
+  // 콜드부팅 스플래시 — 이 페이지가 준비되면(정상 진입 또는 에러 모두 ready=true) 넘겨받는다.
+  useEffect(() => {
+    if (ready) hideBootOverlay();
+  }, [ready, hideBootOverlay]);
 
   useEffect(() => {
     const auth = getFirebaseAuth();
@@ -108,6 +186,7 @@ export default function ParentDashboardPage() {
         setReady(false);
         setAuthUid(null);
         setHideIosPwaHint(null);
+        setListInitialLoading(false);
         router.replace("/login/parent");
         return;
       }
@@ -123,8 +202,8 @@ export default function ParentDashboardPage() {
       resetParentListSession();
       setStudents([]);
       setListError(null);
+      setListInitialLoading(false);
 
-      let revealUi = false;
       try {
         await auth.authStateReady();
         if (
@@ -144,11 +223,11 @@ export default function ParentDashboardPage() {
           return;
         }
 
-        const fn = httpsCallable(
-          getFirebaseFunctions(),
-          "getParentActivationState",
-        );
-        const res = await fn({});
+        // 대시보드 진입 체크는 캐시를 건너뛰고 항상 최신 상태를 본다 — 45초짜리 캐시가
+        // 옛 상태를 돌려주는 걸 막는다. "클레임 우선 판별"은 "active"만 즉시 신뢰하고
+        // 그 외에는 항상 미러/콜러블로 재확인하므로(Custom Claims 전파 지연 대응),
+        // 여기서 별도로 토큰을 강제 갱신할 필요는 없다.
+        const data = await resolveParentActivationState(user, { bypassCache: true });
         if (
           cancelled ||
           gen !== parentInitGenerationRef.current ||
@@ -156,12 +235,6 @@ export default function ParentDashboardPage() {
         ) {
           return;
         }
-
-        const data = res.data as {
-          anyActive?: boolean;
-          primaryStatus?: string | null;
-          primaryAcademyId?: string | null;
-        };
         if (!data?.anyActive || !data.primaryAcademyId) {
           const q = new URLSearchParams();
           q.set("state", data?.primaryStatus ?? "unknown");
@@ -173,23 +246,23 @@ export default function ParentDashboardPage() {
         const aid = data.primaryAcademyId;
         setAcademyId(aid);
         setInitError(null);
-        revealUi = true;
-
-        await user.getIdToken(true);
-        if (
-          cancelled ||
-          gen !== parentInitGenerationRef.current ||
-          auth.currentUser?.uid !== uid
-        ) {
-          return;
-        }
+        setReady(true);
+        setLastDashboardRoleHint("parent");
+        setListInitialLoading(true);
 
         try {
           const listFn = httpsCallable(
             getFirebaseFunctions(),
             "listParentChildrenStudents",
           );
-          const listRes = await listFn({ academyId: aid });
+          let listRes;
+          try {
+            listRes = await listFn({ academyId: aid });
+          } catch (err) {
+            if (!isRetryableCallableAuthError(err)) throw err;
+            await user.getIdToken(true);
+            listRes = await listFn({ academyId: aid });
+          }
           if (
             cancelled ||
             gen !== parentInitGenerationRef.current ||
@@ -198,15 +271,25 @@ export default function ParentDashboardPage() {
             return;
           }
 
-          const payload = listRes.data as {
-            students?: CallableStudentPayload[];
-          };
+          const payload = listRes.data as ParentListPayload;
           const rawList = Array.isArray(payload?.students)
             ? payload.students
             : [];
-          const list = rawList.map((s) => studentRowFromCallablePayload(s));
+          const list = rawList.map((s) => ({
+            ...studentRowFromCallablePayload(s),
+            hasCheckInPin: s.hasCheckInPin === true,
+            tuitionDueDayOfMonth: s.tuitionDueDayOfMonth ?? null,
+            tuitionAmount: typeof s.tuitionAmount === "number" ? s.tuitionAmount : null,
+            weeklySessionCount: typeof s.weeklySessionCount === "number" ? s.weeklySessionCount : null,
+            pricePerSession: typeof s.pricePerSession === "number" ? s.pricePerSession : null,
+            sessionBalance: typeof s.sessionBalance === "number" ? s.sessionBalance : null,
+            extraSessionDates: Array.isArray(s.extraSessionDates) ? s.extraSessionDates : [],
+            hasPendingPaymentReminder: s.hasPendingPaymentReminder === true,
+          }));
           list.sort(sortByName);
           setStudents(list);
+          setStudentsWithPinMeta(list);
+          setKioskRequirePin(payload?.kiosk?.requireStudentCheckInPin === true);
           setListError(null);
           parentListLoadedUidRef.current = uid;
         } catch {
@@ -216,15 +299,16 @@ export default function ParentDashboardPage() {
               "자녀 학생 목록을 불러오지 못했습니다. 잠시 후 새로고침해 주세요.",
             );
           }
+        } finally {
+          if (!cancelled && gen === parentInitGenerationRef.current) {
+            setListInitialLoading(false);
+          }
         }
       } catch {
         if (!cancelled && gen === parentInitGenerationRef.current) {
           setInitError("학부모 정보를 불러오지 못했습니다.");
-          revealUi = true;
+          setReady(true);
         }
-      }
-      if (revealUi && !cancelled && gen === parentInitGenerationRef.current) {
-        setReady(true);
       }
     });
 
@@ -239,16 +323,20 @@ export default function ParentDashboardPage() {
     if (!authUid || !ready) {
       return;
     }
-    const db = getFirebaseDb();
-    const ref = doc(db, "users", authUid);
-    const unsub = onSnapshot(
-      ref,
-      (snap) => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const db = getFirebaseDb();
+        const snap = await getDoc(doc(db, "users", authUid));
+        if (cancelled) return;
         setHideIosPwaHint(snap.data()?.attn_hide_ios_pwa_hint === true);
-      },
-      () => setHideIosPwaHint(false),
-    );
-    return () => unsub();
+      } catch {
+        if (!cancelled) setHideIosPwaHint(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [authUid, ready]);
 
   useEffect(() => {
@@ -280,6 +368,49 @@ export default function ParentDashboardPage() {
     setIosAutoModalOpen(false);
   }, []);
 
+  // 페이지 진입 시 미확인 납부 안내가 있는 학생을 찾아 모달 자동 오픈
+  useEffect(() => {
+    if (listInitialLoading || !academyId) return;
+    const candidate = studentsWithPinMeta.find(
+      (s) => s.hasPendingPaymentReminder && !shownReminderForRef.current.has(s.id),
+    );
+    if (!candidate || candidate.weeklySessionCount == null) return;
+
+    shownReminderForRef.current.add(candidate.id);
+
+    const wc = candidate.weeklySessionCount;
+    const balance = candidate.sessionBalance ?? 0;
+    const extraCount = candidate.extraSessionDates?.length ?? 0;
+    const monthlySessionCount = wc * 4;
+    let body: string;
+    if (balance <= 0) {
+      body = `${candidate.name} 학생의 수업 잔여 횟수가 없습니다`;
+      if (extraCount > 0) body += ` (초과 ${extraCount}회 발생)`;
+      body += `. 다음 4주 수업(${monthlySessionCount}회)을 위해 납부를 부탁드립니다.`;
+    } else {
+      body = `${candidate.name} 학생의 잔여 수업이 ${balance}회 남았습니다`;
+      body += `. 다음 4주 수업(${monthlySessionCount}회)을 위해 납부를 부탁드립니다.`;
+    }
+    const debtSessions = Math.max(0, -balance);
+    const totalSessions = monthlySessionCount + debtSessions;
+    const suggestedAmount =
+      candidate.pricePerSession != null
+        ? String(totalSessions * candidate.pricePerSession)
+        : undefined;
+
+    setReminderPayload({
+      body,
+      studentName: candidate.name,
+      studentId: candidate.id,
+      academyId,
+      suggestedAmount,
+      kakaoPayLink: tuitionSettings?.kakaoPayLink,
+      bankName: tuitionSettings?.bankName,
+      accountNumber: tuitionSettings?.accountNumber,
+      accountHolder: tuitionSettings?.accountHolder,
+    });
+  }, [studentsWithPinMeta, listInitialLoading, academyId, tuitionSettings]);
+
   const refreshChildrenList = useCallback(async () => {
     const auth = getFirebaseAuth();
     const user = auth.currentUser;
@@ -290,17 +421,34 @@ export default function ParentDashboardPage() {
     setListRefreshBusy(true);
     setListError(null);
     try {
-      await user.getIdToken(true);
       const listFn = httpsCallable(
         getFirebaseFunctions(),
         "listParentChildrenStudents",
       );
-      const listRes = await listFn({ academyId: aid });
-      const payload = listRes.data as { students?: CallableStudentPayload[] };
+      let listRes;
+      try {
+        listRes = await listFn({ academyId: aid });
+      } catch (err) {
+        if (!isRetryableCallableAuthError(err)) throw err;
+        await user.getIdToken(true);
+        listRes = await listFn({ academyId: aid });
+      }
+      const payload = listRes.data as ParentListPayload;
       const rawList = Array.isArray(payload?.students) ? payload.students : [];
-      const list = rawList.map((s) => studentRowFromCallablePayload(s));
+      const list = rawList.map((s) => ({
+        ...studentRowFromCallablePayload(s),
+        hasCheckInPin: s.hasCheckInPin === true,
+        tuitionDueDayOfMonth: s.tuitionDueDayOfMonth ?? null,
+        tuitionAmount: typeof s.tuitionAmount === "number" ? s.tuitionAmount : null,
+        weeklySessionCount: typeof s.weeklySessionCount === "number" ? s.weeklySessionCount : null,
+        pricePerSession: typeof s.pricePerSession === "number" ? s.pricePerSession : null,
+        sessionBalance: typeof s.sessionBalance === "number" ? s.sessionBalance : null,
+        extraSessionDates: Array.isArray(s.extraSessionDates) ? s.extraSessionDates : [],
+      }));
       list.sort(sortByName);
       setStudents(list);
+      setStudentsWithPinMeta(list);
+      setKioskRequirePin(payload?.kiosk?.requireStudentCheckInPin === true);
       setListError(null);
     } catch {
       setListError(
@@ -313,34 +461,75 @@ export default function ParentDashboardPage() {
 
   useEffect(() => {
     if (!academyId) return;
-    const db = getFirebaseDb();
-    const unsub = onSnapshot(
-      doc(db, "academies", academyId),
-      (snap) => {
+    let cancelled = false;
+    void (async () => {
+      const db = getFirebaseDb();
+      const uid = getFirebaseAuth().currentUser?.uid;
+
+      try {
+        const snap = await getDoc(doc(db, "academies", academyId));
+        if (cancelled) return;
         const n = snap.data()?.name;
         setAcademyName(typeof n === "string" ? n : null);
-      },
-      () => setAcademyName(null),
-    );
-    return () => unsub();
+      } catch {
+        if (!cancelled) setAcademyName(null);
+      }
+
+      if (uid) {
+        const snap = await getDoc(doc(db, "academies", academyId, "parents", uid));
+        if (cancelled) return;
+        const d = snap.data();
+        setMemberDisplayName(
+          typeof d?.displayName === "string" ? d.displayName : null,
+        );
+        const rawPhone = typeof d?.phone === "string" ? d.phone.trim() : "";
+        setMemberPhone(rawPhone || null);
+        setGoogleLinked(d?.googleLinked === true);
+        setGoogleEmail(
+          typeof d?.googleEmail === "string" ? d.googleEmail.trim() || null : null,
+        );
+      }
+
+      try {
+        const snap = await getDoc(doc(db, academyTuitionSettingsPath(academyId)));
+        if (cancelled) return;
+        if (snap.exists()) {
+          const d = snap.data();
+          setTuitionSettings({
+            kakaoPayLink: typeof d?.kakaoPayLink === "string" && d.kakaoPayLink ? d.kakaoPayLink : undefined,
+            bankName: typeof d?.bankName === "string" && d.bankName ? d.bankName : undefined,
+            accountNumber: typeof d?.accountNumber === "string" && d.accountNumber ? d.accountNumber : undefined,
+            accountHolder: typeof d?.accountHolder === "string" && d.accountHolder ? d.accountHolder : undefined,
+          });
+        } else {
+          setTuitionSettings(null);
+        }
+      } catch {
+        if (!cancelled) setTuitionSettings(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [academyId]);
 
-  const onLogout = useCallback(async () => {
-    setLogoutBusy(true);
-    try {
-      parentListLoadedUidRef.current = null;
-      await signOut(getFirebaseAuth());
-    } finally {
-      setLogoutBusy(false);
-      router.replace("/login/parent");
-    }
-  }, [router]);
+  const headerProfile = useMemo(
+    () =>
+      buildDashboardHeaderProfile(authProfile, {
+        displayName: memberDisplayName,
+        phone: memberPhone,
+        googleLinked,
+        googleEmail,
+      }),
+    [authProfile, googleEmail, googleLinked, memberDisplayName, memberPhone],
+  );
 
   if (!ready) {
     return (
-      <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
-        <p className="text-sm text-neutral-600">불러오는 중…</p>
-      </div>
+      <RoleDashboardBootShell
+        loadingLabel="학부모 대시보드 확인 중"
+        footerHint="학부모 계정과 연결 정보를 확인하는 중입니다."
+      />
     );
   }
 
@@ -371,35 +560,32 @@ export default function ParentDashboardPage() {
           includeSettingsAction
           onSettingsAction={() => router.push("/parent/settings")}
           onHomeAction={() => router.push("/")}
-          showBellOnTitle
-          showBellInBottomBar={false}
           onBellClickAction={() => setNotificationsOpen(true)}
           bellBadgeCount={parentBellCount}
           bottomTabs={[
             {
               id: "home",
               label: "홈",
-              showLabel: false,
-              icon: (active: boolean) => <AttnTabLogo active={active} />,
+              iconAction: (active: boolean) => <HomeTabIcon active={active} />,
               active: true,
-              onSelect: () => router.push("/"),
+              onSelectAction: () => router.push("/"),
             },
           ]}
           onLogoutAction={() => void onLogout()}
           logoutBusy={logoutBusy}
-          profile={authProfile}
+          profile={headerProfile}
         />
         {/* <p className="mb-4 mt-1 text-[11px] leading-relaxed text-neutral-500 dark:text-neutral-400">
           연결된 자녀 학생 정보를 확인할 수 있습니다.
         </p> */}
 
-        <div className="mt-5 mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="mt-[26px] mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-foreground">자녀 학생</h2>
           <button
             type="button"
             onClick={() => void refreshChildrenList()}
             disabled={listRefreshBusy || !academyId}
-            className="rounded-xl border border-neutral-300/80 bg-white/70 px-3 py-2 text-[11px] font-medium text-neutral-800 hover:bg-white disabled:opacity-50"
+            className="rounded-[8px] border border-neutral-300/80 bg-white/70 px-3 py-2 text-[11px] font-medium text-neutral-800 hover:bg-white disabled:opacity-50"
           >
             {listRefreshBusy ? "불러오는 중…" : "목록 새로고침"}
           </button>
@@ -412,7 +598,12 @@ export default function ParentDashboardPage() {
         ) : null}
 
         <div className="space-y-2">
-          {students.length === 0 ? (
+          {listInitialLoading ? (
+            <StudentListSectionSkeleton
+              rows={3}
+              label="자녀 학생 목록 불러오는 중"
+            />
+          ) : students.length === 0 ? (
             <p
               className={`py-12 text-center text-sm text-neutral-500 ${glassCard}`}
             >
@@ -420,7 +611,7 @@ export default function ParentDashboardPage() {
               표시됩니다.
             </p>
           ) : (
-            students.map((s) => (
+            studentsWithPinMeta.map((s) => (
               <div key={s.id} className={`p-4 ${glassCard}`}>
                 <p className="font-medium text-foreground">
                   {s.name}
@@ -430,14 +621,39 @@ export default function ParentDashboardPage() {
                   </span>
                 </p>
                 <p className="mt-2 text-[11px] text-neutral-600">
-                  연락 <span className="text-foreground">{s.phone || "—"}</span>
+                  연락{" "}
+                  <span className="text-foreground">
+                    {formatKrPhoneDisplay(s.phone) || "—"}
+                  </span>
                 </p>
                 <p className="mt-0.5 text-[11px] text-neutral-600">
                   비상 연락{" "}
                   <span className="text-foreground">
-                    {s.emergencyContact || "—"}
+                    {formatKrPhoneDisplay(s.emergencyContact) || "—"}
                   </span>
                 </p>
+                {kioskRequirePin ? (
+                  <ParentCheckInPinCard
+                    academyId={academyId!}
+                    student={s}
+                    onUpdatedAction={() => void refreshChildrenList()}
+                  />
+                ) : null}
+                {s.tuitionDueDayOfMonth ? (
+                  <ParentTuitionReminderCard
+                    tuitionDueDayOfMonth={s.tuitionDueDayOfMonth}
+                    tuitionAmount={s.tuitionAmount}
+                    settings={tuitionSettings}
+                  />
+                ) : s.weeklySessionCount != null ? (
+                  <ParentSessionBalanceCard
+                    weeklySessionCount={s.weeklySessionCount}
+                    pricePerSession={s.pricePerSession ?? null}
+                    sessionBalance={s.sessionBalance ?? null}
+                    extraSessionDates={s.extraSessionDates ?? []}
+                    settings={tuitionSettings}
+                  />
+                ) : null}
               </div>
             ))
           )}
@@ -475,6 +691,13 @@ export default function ParentDashboardPage() {
       </div>
 
       <DashboardBottomScrim />
+      {logoutModal}
+      {reminderPayload ? (
+        <PaymentReminderModal
+          payload={reminderPayload}
+          onConfirmAction={() => setReminderPayload(null)}
+        />
+      ) : null}
     </div>
   );
 }
