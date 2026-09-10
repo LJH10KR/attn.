@@ -72,6 +72,20 @@ const STATUS_BADGE_CLASS: Record<AcademyPaymentStatus, string> = {
 
 type PaymentRow = AcademyPaymentDoc & { id: string };
 
+/** 미설정 시(구 데이터) monthly_fixed로 취급 */
+function paymentTypeLabel(r: PaymentRow): string {
+  if (r.paymentType === "session_based") {
+    return `회차 ${r.sessionCount ?? "?"}회`;
+  }
+  return "월정액";
+}
+
+function paymentTypeBadgeClass(r: PaymentRow): string {
+  return r.paymentType === "session_based"
+    ? "bg-violet-500/15 text-violet-900"
+    : "bg-sky-500/15 text-sky-900";
+}
+
 function AcademyPaymentsInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -298,6 +312,11 @@ function AcademyPaymentsInner() {
                     className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${STATUS_BADGE_CLASS[r.status]}`}
                   >
                     {STATUS_LABEL[r.status]}
+                  </span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${paymentTypeBadgeClass(r)}`}
+                  >
+                    {paymentTypeLabel(r)}
                   </span>
                   <span className="text-xs font-medium text-foreground">
                     {r.studentName || "학생"}

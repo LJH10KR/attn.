@@ -653,6 +653,9 @@ export default function ParentDashboardPage() {
                   />
                 ) : s.weeklySessionCount != null ? (
                   <ParentSessionBalanceCard
+                    studentId={s.id}
+                    studentName={s.name}
+                    academyId={academyId!}
                     weeklySessionCount={s.weeklySessionCount}
                     pricePerSession={s.pricePerSession ?? null}
                     sessionBalance={s.sessionBalance ?? null}

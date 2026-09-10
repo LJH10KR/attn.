@@ -69,6 +69,29 @@ function mapInboxDoc(id: string, data: Record<string, unknown>, now: number): Da
     }
   }
 
+  if (kind === "session_payment_received") {
+    const studentName =
+      typeof data.studentName === "string" && data.studentName.trim()
+        ? data.studentName.trim()
+        : name;
+    const sessionCount =
+      typeof data.sessionCount === "number" &&
+      Number.isInteger(data.sessionCount) &&
+      data.sessionCount > 0
+        ? data.sessionCount
+        : null;
+    return [
+      {
+        id,
+        title:
+          sessionCount != null
+            ? `${studentName} 학생 회차 충전 결제 완료 (${sessionCount}회)`
+            : `${studentName} 학생 회차 충전 결제 완료`,
+        detail: "원장님이 직접 회차를 충전해 주시기 바랍니다.",
+      },
+    ];
+  }
+
   return [];
 }
 

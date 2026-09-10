@@ -75,7 +75,10 @@ export function academyKioskSettingsPath(academyId: string): string {
 /** `academies/{academyId}/adminInbox/{inboxId}` — 운영 알림(벨) */
 export const ACADEMY_ADMIN_INBOX_SCHEMA_VERSION = 1 as const;
 
-export type AcademyAdminInboxKind = "pending_registration" | "invitation_sent";
+export type AcademyAdminInboxKind =
+  | "pending_registration"
+  | "invitation_sent"
+  | "session_payment_received";
 
 export type AcademyAdminInboxDoc = {
   schemaVersion: typeof ACADEMY_ADMIN_INBOX_SCHEMA_VERSION;
@@ -86,6 +89,10 @@ export type AcademyAdminInboxDoc = {
   email: string;
   invitedAt?: Timestamp | null;
   invitationExpiresAt?: Timestamp | null;
+  /** kind가 "session_payment_received"일 때 사용 — 결제된 회차 수 */
+  sessionCount?: number;
+  /** kind가 "session_payment_received"일 때 사용 — 결제한 학생 이름 */
+  studentName?: string;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 };
@@ -281,6 +288,8 @@ export type AcademyStudent = {
   tuitionReminderConfirmedAt?: Timestamp;
   /** 납부 알림을 확인한 학부모 uid */
   tuitionReminderConfirmedByUid?: string;
+  /** 회차 카드 결제 완료 후 서버가 설정 — 원장이 충전 완료 시 삭제 */
+  pendingSessionCharge?: number;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 };
@@ -344,6 +353,10 @@ export type AcademyPaymentDoc = {
   parentUserId: string;
   amount: number;
   status: AcademyPaymentStatus;
+  /** 결제 종류 — 미설정 시 기존 데이터와의 호환을 위해 "monthly_fixed"로 취급 */
+  paymentType?: "monthly_fixed" | "session_based";
+  /** paymentType이 "session_based"일 때 결제된 회차 수 */
+  sessionCount?: number;
   portoneTransactionId?: string;
   cancelledAt?: Timestamp;
   createdAt: Timestamp;
