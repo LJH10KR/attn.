@@ -650,6 +650,7 @@ export default function ParentDashboardPage() {
                     tuitionDueDayOfMonth={s.tuitionDueDayOfMonth}
                     tuitionAmount={s.tuitionAmount}
                     settings={tuitionSettings}
+                    onRefreshAction={refreshChildrenList}
                   />
                 ) : s.weeklySessionCount != null ? (
                   <ParentSessionBalanceCard
@@ -661,6 +662,7 @@ export default function ParentDashboardPage() {
                     sessionBalance={s.sessionBalance ?? null}
                     extraSessionDates={s.extraSessionDates ?? []}
                     settings={tuitionSettings}
+                    onRefreshAction={refreshChildrenList}
                   />
                 ) : null}
               </div>

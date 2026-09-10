@@ -2,7 +2,7 @@
 
 import {
   collection,
-  getDocs,
+  onSnapshot,
   orderBy,
   query,
   Timestamp,
@@ -65,7 +65,6 @@ export function ParentPaymentHistory({ academyId, parentUid }: Props) {
       setLoading(false);
       return;
     }
-    let cancelled = false;
     setLoading(true);
     setError(null);
     const db = getFirebaseDb();
@@ -75,22 +74,19 @@ export function ParentPaymentHistory({ academyId, parentUid }: Props) {
       where("createdAt", ">=", threeMonthsAgoTimestamp()),
       orderBy("createdAt", "desc"),
     );
-    void (async () => {
-      try {
-        const snap = await getDocs(qy);
-        if (cancelled) return;
+    const unsub = onSnapshot(
+      qy,
+      (snap) => {
         setError(null);
         setRows(snap.docs.map((d) => ({ id: d.id, ...(d.data() as AcademyPaymentDoc) })));
-      } catch (err) {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : "납부 내역을 불러오지 못했습니다.");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+        setLoading(false);
+      },
+      (err) => {
+        setError(err.message || "납부 내역을 불러오지 못했습니다.");
+        setLoading(false);
+      },
+    );
+    return () => unsub();
   }, [academyId, parentUid]);
 
   if (!academyId || !parentUid) return null;

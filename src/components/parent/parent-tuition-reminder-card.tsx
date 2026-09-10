@@ -48,6 +48,7 @@ type Props = {
   tuitionDueDayOfMonth: number;
   tuitionAmount?: number | null;
   settings: TuitionSettings | null;
+  onRefreshAction: () => void;
 };
 
 export function ParentTuitionReminderCard({
@@ -57,6 +58,7 @@ export function ParentTuitionReminderCard({
   tuitionDueDayOfMonth,
   tuitionAmount,
   settings,
+  onRefreshAction,
 }: Props) {
   const [copied, setCopied] = useState(false);
   const [paying, setPaying] = useState(false);
@@ -145,6 +147,7 @@ export function ParentTuitionReminderCard({
       }
 
       setPaid(true);
+      onRefreshAction();
     } catch {
       setPaymentError("결제 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {

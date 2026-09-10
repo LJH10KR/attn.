@@ -65,8 +65,6 @@ export type StudentRowVM = {
   sessionBalance?: number | null;
   /** 학부모가 납부 안내 알림을 확인한 시각 */
   tuitionReminderConfirmedAt?: Timestamp | null;
-  /** 회차 카드 결제 완료 후 서버가 설정 — 원장이 충전 완료 시 삭제됨 */
-  pendingSessionCharge?: number | null;
 };
 
 type StudentRowWithParent = StudentRowVM & { parentName: string; teacherLabel: string };
@@ -143,12 +141,6 @@ export function docToStudentRow(id: string, data: Record<string, unknown>): Stud
   const sessionBalance =
     typeof rawBalance === "number" && Number.isInteger(rawBalance) ? rawBalance : null;
 
-  const rawPendingCharge = data.pendingSessionCharge;
-  const pendingSessionCharge =
-    typeof rawPendingCharge === "number" && Number.isInteger(rawPendingCharge) && rawPendingCharge > 0
-      ? rawPendingCharge
-      : null;
-
   const rawConfirmedAt = data.tuitionReminderConfirmedAt;
   const tuitionReminderConfirmedAt =
     rawConfirmedAt &&
@@ -180,7 +172,6 @@ export function docToStudentRow(id: string, data: Record<string, unknown>): Stud
     pricePerSession,
     sessionBalance,
     tuitionReminderConfirmedAt,
-    pendingSessionCharge,
   };
 }
 
@@ -1378,9 +1369,6 @@ function ChargeSessionModal({
   busy: boolean;
 }) {
   const [input, setInput] = useState(() => {
-    if (student.pendingSessionCharge != null && student.pendingSessionCharge > 0) {
-      return String(student.pendingSessionCharge);
-    }
     const wc = student.weeklySessionCount;
     return wc != null && wc >= 1 ? String(wc * 4) : "1";
   });
@@ -1398,7 +1386,6 @@ function ChargeSessionModal({
   const currentBalance = student.sessionBalance ?? 0;
   const afterBalance = valid ? currentBalance + n : null;
   const hasDebt = currentBalance < 0;
-  const hasPendingCharge = student.pendingSessionCharge != null && student.pendingSessionCharge > 0;
 
   return createPortal(
     <div
@@ -1433,11 +1420,6 @@ function ChargeSessionModal({
               </div>
             ) : null}
           </div>
-          {hasPendingCharge ? (
-            <p className="text-[11px] text-indigo-700 rounded-xl bg-indigo-50 px-3 py-2">
-              학부모 결제 완료 건 반영 — 충전 횟수가 결제된 회차 수({student.pendingSessionCharge}회)로 자동 입력되었습니다.
-            </p>
-          ) : null}
           {hasDebt ? (
             <p className="text-[11px] text-amber-700 rounded-xl bg-amber-50 px-3 py-2">
               초과 수업 부채가 있습니다.{" "}
@@ -1602,7 +1584,6 @@ export function AcademyParentStudentList({
       const newBalance = (student.sessionBalance ?? 0) + n;
       await updateDoc(doc(db, "academies", academyId, "students", student.id), {
         sessionBalance: increment(n),
-        pendingSessionCharge: deleteField(),
         // 충전 후에도 잔여가 0 미만이면(부채가 다 안 갚아졌으면) 초과 수업 기록을 유지
         ...(newBalance >= 0 ? { extraSessionDates: deleteField() } : {}),
         sentSessionPaymentReminder: deleteField(),
@@ -1779,11 +1760,6 @@ export function AcademyParentStudentList({
                     <div className="mt-0.5 text-[11px] text-emerald-700 font-medium">
                       ✓ 학부모 납부 알림 확인 완료
                     </div>
-                  ) : null}
-                  {s.pendingSessionCharge ? (
-                    <span className="mt-1 inline-flex items-center rounded-full bg-amber-200/60 dark:bg-amber-800/50 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:text-amber-300">
-                      충전 대기 {s.pendingSessionCharge}회
-                    </span>
                   ) : null}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
@@ -2007,7 +1983,6 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
       const newBalance = (student.sessionBalance ?? 0) + n;
       await updateDoc(doc(db, "academies", academyId, "students", student.id), {
         sessionBalance: increment(n),
-        pendingSessionCharge: deleteField(),
         // 충전 후에도 잔여가 0 미만이면(부채가 다 안 갚아졌으면) 초과 수업 기록을 유지
         ...(newBalance >= 0 ? { extraSessionDates: deleteField() } : {}),
         sentSessionPaymentReminder: deleteField(),
@@ -2332,11 +2307,6 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                       {s.tuitionReminderConfirmedAt ? (
                         <span className="mt-0.5 block text-[11px] font-medium text-emerald-700">
                           ✓ 학부모 납부 알림 확인 완료
-                        </span>
-                      ) : null}
-                      {s.pendingSessionCharge ? (
-                        <span className="mt-1 inline-flex items-center rounded-full bg-amber-200/60 dark:bg-amber-800/50 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:text-amber-300">
-                          충전 대기 {s.pendingSessionCharge}회
                         </span>
                       ) : null}
                     </span>

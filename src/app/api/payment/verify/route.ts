@@ -149,40 +149,73 @@ export async function POST(request: NextRequest) {
   }
 
   if (paymentType === "session_based") {
-    const paymentDoc: AcademyPaymentDoc = {
-      paymentId,
-      studentId,
-      studentName,
-      parentUserId,
-      amount: expectedAmount,
-      status: "PAID",
-      paymentType: "session_based",
-      sessionCount: sessionCount!,
-      portoneTransactionId: payment.transactionId,
-      createdAt: FieldValue.serverTimestamp() as unknown as AcademyPaymentDoc["createdAt"],
-    };
+    const finalSessionCount = sessionCount!;
+    const paymentRef = adminDb.doc(academyPaymentPath(academyId, paymentId));
 
-    const inboxDoc: AcademyAdminInboxDoc = {
-      schemaVersion: ACADEMY_ADMIN_INBOX_SCHEMA_VERSION,
-      kind: "session_payment_received",
-      entityType: "parent",
-      entityId: parentUserId,
-      displayName: studentName,
-      email: "",
-      studentName,
-      sessionCount: sessionCount!,
-      createdAt: FieldValue.serverTimestamp() as unknown as AcademyAdminInboxDoc["createdAt"],
-    };
+    // 이중 충전 방지 — 결제 문서 존재 여부 확인, 잔여 조회, sessionBalance 증가를
+    // 하나의 트랜잭션으로 원자 처리(동시 요청·재시도로 인한 중복 충전 차단).
+    const alreadyProcessed = await adminDb.runTransaction(async (tx) => {
+      const paymentSnap = await tx.get(paymentRef);
+      if (paymentSnap.exists) {
+        return true;
+      }
 
-    // 결제 성공 후 sessionBalance는 자동으로 늘리지 않는다 — 원장이 기존 "충전" 버튼으로
-    // 직접 확인 후 처리하도록, 결제 이력 + 원장 알림 + 충전 대기 표시만 남긴다.
-    await Promise.all([
-      adminDb.doc(academyPaymentPath(academyId, paymentId)).set(paymentDoc, { merge: true }),
-      adminDb
-        .doc(`${academyAdminInboxCollectionPath(academyId)}/session-payment-${paymentId}`)
-        .set(inboxDoc, { merge: true }),
-      studentRef.update({ pendingSessionCharge: sessionCount }),
-    ]);
+      const studentSnapTx = await tx.get(studentRef);
+      const studentDataTx = studentSnapTx.data() ?? {};
+      const currentBalance =
+        typeof studentDataTx.sessionBalance === "number" &&
+        Number.isInteger(studentDataTx.sessionBalance)
+          ? studentDataTx.sessionBalance
+          : 0;
+      const newBalance = currentBalance + finalSessionCount;
+
+      const paymentDoc: AcademyPaymentDoc = {
+        paymentId,
+        studentId,
+        studentName,
+        parentUserId,
+        amount: expectedAmount,
+        status: "PAID",
+        paymentType: "session_based",
+        sessionCount: finalSessionCount,
+        portoneTransactionId: payment.transactionId,
+        createdAt: FieldValue.serverTimestamp() as unknown as AcademyPaymentDoc["createdAt"],
+      };
+      tx.set(paymentRef, paymentDoc);
+
+      tx.update(studentRef, {
+        sessionBalance: FieldValue.increment(finalSessionCount),
+        // 충전 후에도 잔여가 0 미만이면(부채가 다 안 갚아졌으면) 초과 수업 기록을 유지
+        ...(newBalance >= 0 ? { extraSessionDates: FieldValue.delete() } : {}),
+        sentSessionPaymentReminder: FieldValue.delete(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      return false;
+    });
+
+    // adminInbox 알림은 트랜잭션 밖에서 처리 — 알림 실패가 충전 자체에 영향을 주지 않도록 분리.
+    // 이미 처리된 결제(재시도 등)면 알림도 다시 보내지 않는다.
+    if (!alreadyProcessed) {
+      const inboxDoc: AcademyAdminInboxDoc = {
+        schemaVersion: ACADEMY_ADMIN_INBOX_SCHEMA_VERSION,
+        kind: "session_payment_received",
+        entityType: "parent",
+        entityId: parentUserId,
+        displayName: studentName,
+        email: "",
+        studentName,
+        sessionCount: finalSessionCount,
+        createdAt: FieldValue.serverTimestamp() as unknown as AcademyAdminInboxDoc["createdAt"],
+      };
+      try {
+        await adminDb
+          .doc(`${academyAdminInboxCollectionPath(academyId)}/session-payment-${paymentId}`)
+          .set(inboxDoc, { merge: true });
+      } catch (inboxErr) {
+        console.error("[payment/verify] adminInbox 알림 생성 실패", inboxErr);
+      }
+    }
 
     return NextResponse.json({ ok: true, status: "PAID" });
   }

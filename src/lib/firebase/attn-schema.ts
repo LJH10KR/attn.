@@ -288,8 +288,6 @@ export type AcademyStudent = {
   tuitionReminderConfirmedAt?: Timestamp;
   /** 납부 알림을 확인한 학부모 uid */
   tuitionReminderConfirmedByUid?: string;
-  /** 회차 카드 결제 완료 후 서버가 설정 — 원장이 충전 완료 시 삭제 */
-  pendingSessionCharge?: number;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 };

@@ -20,6 +20,7 @@ type Props = {
   sessionBalance: number | null;
   extraSessionDates: string[];
   settings: TuitionSettings | null;
+  onRefreshAction: () => void;
 };
 
 export function ParentSessionBalanceCard({
@@ -31,11 +32,11 @@ export function ParentSessionBalanceCard({
   sessionBalance,
   extraSessionDates,
   settings,
+  onRefreshAction,
 }: Props) {
   const [copied, setCopied] = useState(false);
   const [paying, setPaying] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
-  const [paid, setPaid] = useState(false);
 
   const balance = sessionBalance ?? 0;
   const isLow = balance <= weeklySessionCount;
@@ -138,7 +139,7 @@ export function ParentSessionBalanceCard({
         return;
       }
 
-      setPaid(true);
+      onRefreshAction();
     } catch {
       setPaymentError("결제 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
@@ -203,20 +204,14 @@ export function ParentSessionBalanceCard({
           ) : null}
 
           {pricePerSession != null && pricePerSession > 0 ? (
-            paid ? (
-              <p className="rounded-[8px] bg-emerald-100/80 dark:bg-emerald-900/30 py-2.5 text-center text-xs font-semibold text-emerald-800 dark:text-emerald-300">
-                충전 결제가 완료되었습니다. 원장님이 확인 후 회차를 충전해 드립니다.
-              </p>
-            ) : (
-              <button
-                type="button"
-                onClick={() => void onCardCharge()}
-                disabled={paying}
-                className="flex items-center justify-center w-full rounded-[8px] bg-indigo-600 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {paying ? "결제 진행 중…" : "카드로 충전하기"}
-              </button>
-            )
+            <button
+              type="button"
+              onClick={() => void onCardCharge()}
+              disabled={paying}
+              className="flex items-center justify-center w-full rounded-[8px] bg-indigo-600 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {paying ? "결제 진행 중…" : "카드로 충전하기"}
+            </button>
           ) : null}
 
           {paymentError ? (

@@ -85,9 +85,9 @@ function mapInboxDoc(id: string, data: Record<string, unknown>, now: number): Da
         id,
         title:
           sessionCount != null
-            ? `${studentName} 학생 회차 충전 결제 완료 (${sessionCount}회)`
-            : `${studentName} 학생 회차 충전 결제 완료`,
-        detail: "원장님이 직접 회차를 충전해 주시기 바랍니다.",
+            ? `${studentName} 학생 ${sessionCount}회 자동 충전 완료`
+            : `${studentName} 학생 회차 자동 충전 완료`,
+        detail: "결제 및 회차 충전이 완료됐습니다. 결제 내역에서 확인하실 수 있습니다.",
       },
     ];
   }
