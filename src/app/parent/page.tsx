@@ -18,6 +18,7 @@ import { StudentListSectionSkeleton } from "@/components/dashboard/student-list-
 import { ParentCheckInPinCard } from "@/components/parent/parent-check-in-pin-card";
 import { ParentSessionBalanceCard } from "@/components/parent/parent-session-balance-card";
 import { ParentTuitionReminderCard } from "@/components/parent/parent-tuition-reminder-card";
+import { ParentPaymentHistory } from "@/components/parent/parent-payment-history";
 import {
   PaymentReminderModal,
   type PaymentReminderPayload,
@@ -663,6 +664,8 @@ export default function ParentDashboardPage() {
             ))
           )}
         </div>
+
+        <ParentPaymentHistory academyId={academyId} parentUid={authUid} />
 
         <IosPwaHintModal
           open={iosAutoModalOpen}
