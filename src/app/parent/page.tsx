@@ -44,6 +44,10 @@ import { formatKrPhoneDisplay } from "@/lib/phone/kr-phone";
 
 const glassCard = "glass-card";
 
+/** src/app/payment/complete/page.tsx가 남기는 결제 결과 크로스탭 신호 — 키를 그대로 공유 */
+const PAYMENT_RESULT_STORAGE_KEY = "attn_payment_result";
+const PAYMENT_RESULT_TTL_MS = 5 * 60 * 1000;
+
 function sortByName(a: StudentRowVM, b: StudentRowVM): number {
   return a.name.localeCompare(b.name, "ko");
 }
@@ -460,6 +464,46 @@ export default function ParentDashboardPage() {
       setListRefreshBusy(false);
     }
   }, [academyId]);
+
+  // PWA에서 모바일 REDIRECTION 결제 시 나이스 결제 페이지가 시스템 브라우저로 열려
+  // 결제 완료 후 PWA로 자동 복귀되지 않는다 — /payment/complete가 localStorage에 남긴
+  // 결과를 PWA가 다시 포그라운드로 돌아왔을 때(visibilitychange) 읽어 학생 목록을 갱신한다.
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      let raw: string | null;
+      try {
+        raw = localStorage.getItem(PAYMENT_RESULT_STORAGE_KEY);
+      } catch {
+        return;
+      }
+      if (!raw) return;
+
+      let parsed: { status?: string; timestamp?: number } | null = null;
+      try {
+        parsed = JSON.parse(raw) as { status?: string; timestamp?: number };
+      } catch {
+        parsed = null;
+      }
+
+      try {
+        localStorage.removeItem(PAYMENT_RESULT_STORAGE_KEY);
+      } catch {
+        /* ignore */
+      }
+
+      const timestamp = typeof parsed?.timestamp === "number" ? parsed.timestamp : 0;
+      const isFresh = timestamp > 0 && Date.now() - timestamp <= PAYMENT_RESULT_TTL_MS;
+      if (!isFresh) return;
+
+      void refreshChildrenList();
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [refreshChildrenList]);
 
   useEffect(() => {
     if (!academyId) return;

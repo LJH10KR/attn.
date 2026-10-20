@@ -111,6 +111,36 @@ messaging.onBackgroundMessage((payload) => {
   const notifPromise = self.registration.showNotification(title, options);
   return Promise.all([badgePromise, notifPromise]);
 });
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const data = event.notification.data || {};
+  const targetPath = typeof data.url === "string" && data.url ? data.url : "/parent";
+
+  event.waitUntil(
+    (async () => {
+      const targetUrl = new URL(targetPath, self.location.origin).href;
+      const allClients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      for (const client of allClients) {
+        try {
+          if (new URL(client.url).origin !== self.location.origin) continue;
+          await client.focus();
+          if ("navigate" in client) {
+            try {
+              await client.navigate(targetUrl);
+            } catch (e) {
+              // navigate 미지원 브라우저 — focus만으로도 충분
+            }
+          }
+          return;
+        } catch (e) {
+          // 다음 client로 계속 시도
+        }
+      }
+      await self.clients.openWindow(targetUrl);
+    })(),
+  );
+});
 `;
   return new NextResponse(body, {
     status: 200,

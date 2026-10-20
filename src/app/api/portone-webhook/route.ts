@@ -1,10 +1,91 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Webhook } from "@portone/server-sdk";
+import { PaymentClient, Webhook } from "@portone/server-sdk";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
+import { completePayment, type PaymentType } from "@/lib/payment/complete-payment";
 import type { AcademyPaymentStatus } from "@/lib/firebase/attn-schema";
 
 export const runtime = "nodejs";
+
+type PaymentCustomData = {
+  studentId?: unknown;
+  academyId?: unknown;
+  paymentType?: unknown;
+  sessionCount?: unknown;
+};
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+/**
+ * 클라이언트가 /payment/complete로 돌아오지 못해(브라우저를 닫음 등) /api/payment/verify가
+ * 한 번도 호출되지 않은 경우의 안전망. 결제 요청 시 심어둔 customData(studentId, academyId,
+ * paymentType, sessionCount)를 결제 단건 조회로 복원해 completePayment()를 대신 실행한다.
+ */
+async function completeFromWebhookFallback(
+  portone: ReturnType<typeof PaymentClient>,
+  paymentId: string,
+): Promise<void> {
+  let payment;
+  try {
+    payment = await portone.getPayment({ paymentId });
+  } catch (err) {
+    console.error("[portone-webhook] 안전망 처리용 결제 조회 실패", err);
+    return;
+  }
+
+  // 알 수 없는(향후 SDK 버전의) 결제 상태는 customData 필드 자체가 타입에 없음
+  const customDataRaw = "customData" in payment ? payment.customData : undefined;
+  if (!customDataRaw) {
+    console.warn(`[portone-webhook] customData 없음 — 안전망 처리 불가: paymentId=${paymentId}`);
+    return;
+  }
+
+  let customData: PaymentCustomData;
+  try {
+    customData = JSON.parse(customDataRaw) as PaymentCustomData;
+  } catch (err) {
+    console.error("[portone-webhook] customData 파싱 실패", err);
+    return;
+  }
+
+  const { studentId, academyId } = customData;
+  if (!isNonEmptyString(studentId) || !isNonEmptyString(academyId)) {
+    console.warn(`[portone-webhook] customData에 studentId/academyId 없음: paymentId=${paymentId}`);
+    return;
+  }
+
+  const paymentType: PaymentType =
+    customData.paymentType === "session_based" ? "session_based" : "monthly_fixed";
+  const sessionCount =
+    typeof customData.sessionCount === "number" ? customData.sessionCount : null;
+
+  const result = await completePayment(portone, {
+    paymentId,
+    studentId,
+    academyId,
+    paymentType,
+    sessionCount,
+  });
+
+  if (!result.ok) {
+    console.error(
+      `[portone-webhook] 안전망 처리 실패: paymentId=${paymentId}, error=${result.error}`,
+    );
+    return;
+  }
+
+  if (result.alreadyProcessed) {
+    console.info(
+      `[portone-webhook] 이미 처리된 결제(verify가 먼저 완료함) — 안전망 개입 불필요: paymentId=${paymentId}`,
+    );
+  } else {
+    console.info(
+      `[portone-webhook] verify 없이 안전망이 처음부터 독립적으로 결제를 완결함: paymentId=${paymentId}`,
+    );
+  }
+}
 
 export async function POST(request: NextRequest) {
   const webhookSecret = process.env.PORTONE_WEBHOOK_SECRET;
@@ -65,9 +146,21 @@ export async function POST(request: NextRequest) {
     .get();
 
   if (matches.empty) {
-    // /api/payment/verify가 아직 문서를 만들지 않았거나(레이스), 검증되지 않은 결제 —
-    // 갱신할 대상이 없으므로 에러 없이 무시(포트원 재시도 폭주 방지)
-    console.warn(`[portone-webhook] 매칭되는 결제 문서를 찾지 못했습니다: paymentId=${paymentId}`);
+    if (status === "PAID") {
+      // /api/payment/verify가 아직 문서를 만들지 못한 경우(레이스 또는 사용자가 결제 후
+      // /payment/complete로 돌아오지 못함) — customData로 서버가 독립적으로 완결 시도.
+      const apiSecret = process.env.PORTONE_API_SECRET;
+      if (!apiSecret) {
+        console.error("[portone-webhook] PORTONE_API_SECRET 환경변수가 설정되지 않았습니다.");
+        return NextResponse.json({ ok: true });
+      }
+      await completeFromWebhookFallback(PaymentClient({ secret: apiSecret }), paymentId);
+    } else {
+      // 결제 이력이 없는 취소/실패는 되돌릴 것도 없으므로 무시(포트원 재시도 폭주 방지)
+      console.warn(
+        `[portone-webhook] 매칭되는 결제 문서를 찾지 못했습니다: paymentId=${paymentId}`,
+      );
+    }
     return NextResponse.json({ ok: true });
   }
 

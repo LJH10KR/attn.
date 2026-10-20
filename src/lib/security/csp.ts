@@ -21,9 +21,13 @@ const EMULATOR_CONNECT =
 const EMULATOR_FRAME =
   "http://127.0.0.1:9099 http://localhost:9099";
 
-/** 포트원 V2 결제 SDK — 결제창 로드·API 통신에 사용하는 도메인 */
-const PORTONE_CONNECT = "https://*.iamport.co https://*.portone.io";
-const PORTONE_SCRIPT = "https://*.iamport.co https://*.portone.io";
+/**
+ * 포트원 V2 결제 SDK — 결제창 로드·API 통신에 사용하는 도메인.
+ * 나이스정보통신(*.nicepay.co.kr)은 모바일 REDIRECTION 결제 시 브라우저가
+ * 직접 이동하는 결제 페이지 도메인이라 connect-src·script-src에도 필요.
+ */
+const PORTONE_CONNECT = "https://*.iamport.co https://*.portone.io https://*.nicepay.co.kr";
+const PORTONE_SCRIPT = "https://*.iamport.co https://*.portone.io https://*.nicepay.co.kr";
 const PORTONE_FRAME =
   "https://*.iamport.co https://*.portone.io https://*.nicepay.co.kr";
 
@@ -44,7 +48,7 @@ export function buildContentSecurityPolicy(opts: { nonce: string; isDev: boolean
   const directives: string[] = [
     "default-src 'self'",
     "base-uri 'self'",
-    "form-action 'self'",
+    "form-action 'self' https://*.nicepay.co.kr",
     "object-src 'none'",
     "frame-ancestors 'none'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${scriptDev} https://www.gstatic.com https://apis.google.com https://www.google.com https://accounts.google.com ${PORTONE_SCRIPT}`,

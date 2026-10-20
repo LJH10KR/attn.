@@ -119,6 +119,11 @@ export function ParentTuitionReminderCard({
     setPaymentError(null);
     try {
       const paymentId = crypto.randomUUID();
+      const redirectUrl = new URL("/payment/complete", window.location.origin);
+      redirectUrl.searchParams.set("studentId", studentId);
+      redirectUrl.searchParams.set("academyId", academyId);
+      redirectUrl.searchParams.set("paymentType", "monthly_fixed");
+
       const payment = await PortOne.requestPayment({
         storeId,
         channelKey,
@@ -127,10 +132,21 @@ export function ParentTuitionReminderCard({
         totalAmount: tuitionAmount,
         currency: "KRW",
         payMethod: "CARD",
+        windowType: { pc: "IFRAME", mobile: "REDIRECTION" },
+        redirectUrl: redirectUrl.toString(),
+        // 사용자가 /payment/complete로 돌아오지 못해도 웹훅이 이 값으로 독립적으로
+        // 결제를 완결할 수 있도록 결제 건 자체에 실어 보낸다.
+        customData: { studentId, academyId, paymentType: "monthly_fixed" },
       });
 
-      if (payment?.code) {
-        setPaymentError(payment.message || "결제가 취소되었거나 실패했습니다.");
+      // 모바일(REDIRECTION)은 이 시점에 페이지가 이미 /payment/complete로 이동해 있어
+      // 아래 코드에 도달하지 않음 — 여기서부터는 PC(IFRAME) 응답 처리만 담당.
+      if (!payment || payment.code) {
+        setPaymentError(payment?.message || "결제가 취소되었거나 실패했습니다.");
+        return;
+      }
+      if (!payment.paymentId) {
+        setPaymentError("결제 정보를 확인하지 못했습니다.");
         return;
       }
 
@@ -148,7 +164,8 @@ export function ParentTuitionReminderCard({
 
       setPaid(true);
       onRefreshAction();
-    } catch {
+    } catch (err) {
+      console.error("[ParentTuitionReminderCard] 결제 처리 실패", err);
       setPaymentError("결제 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
       setPaying(false);

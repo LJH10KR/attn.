@@ -54,6 +54,46 @@ export function fcmTokenPrefix(token: string): string {
   return `${token.slice(0, 8)}…`;
 }
 
+/** `pushSubscriptions` 서브컬렉션 조회 결과를 토큰별로 묶는다(동일 토큰 중복 구독 병합) */
+export function buildTokenBuckets(
+  subsSnap: FirebaseFirestore.QuerySnapshot,
+): PushTokenBucket[] {
+  const buckets: PushTokenBucket[] = [];
+  const indexByToken = new Map<string, number>();
+
+  for (const d of subsSnap.docs) {
+    const t = d.get("token");
+    if (typeof t !== "string" || t.length <= 20) continue;
+
+    const updatedAt = d.get("updatedAt") as Timestamp | undefined;
+    const millis = updatedAt?.toMillis() ?? 0;
+    const invalidDeliveryCount =
+      typeof d.get("invalidDeliveryCount") === "number"
+        ? (d.get("invalidDeliveryCount") as number)
+        : 0;
+
+    const existing = indexByToken.get(t);
+    if (existing !== undefined) {
+      buckets[existing]!.refs.push(d.ref);
+      buckets[existing]!.invalidCounts.push(invalidDeliveryCount);
+      buckets[existing]!.updatedAtMillis = Math.max(
+        buckets[existing]!.updatedAtMillis,
+        millis,
+      );
+    } else {
+      indexByToken.set(t, buckets.length);
+      buckets.push({
+        token: t,
+        refs: [d.ref],
+        updatedAtMillis: millis,
+        invalidCounts: [invalidDeliveryCount],
+      });
+    }
+  }
+
+  return buckets;
+}
+
 function graceDeadlineMs(userLastSyncedAt: Timestamp | undefined, bucket: PushTokenBucket): number {
   const userMs = userLastSyncedAt?.toMillis() ?? 0;
   return Math.max(userMs, bucket.updatedAtMillis) + PUSH_INVALID_DELETE_GRACE_MS;

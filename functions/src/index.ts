@@ -386,3 +386,4 @@ export {
   sendSessionPaymentReminders,
   onStudentSessionBalanceChanged,
 } from "./session-payment-reminder";
+export { sendPaymentCompletedPush } from "./payment-completed-push";

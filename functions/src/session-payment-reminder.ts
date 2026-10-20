@@ -5,7 +5,7 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as logger from "firebase-functions/logger";
 import {
   applyMulticastDeliveryResults,
-  type PushTokenBucket,
+  buildTokenBuckets,
 } from "./push-subscription-delivery";
 
 const REGION = "asia-northeast3";
@@ -16,45 +16,6 @@ type TuitionSettings = {
   accountNumber?: string;
   accountHolder?: string;
 };
-
-function buildTokenBuckets(
-  subsSnap: FirebaseFirestore.QuerySnapshot,
-): PushTokenBucket[] {
-  const buckets: PushTokenBucket[] = [];
-  const indexByToken = new Map<string, number>();
-
-  for (const d of subsSnap.docs) {
-    const t = d.get("token");
-    if (typeof t !== "string" || t.length <= 20) continue;
-
-    const updatedAt = d.get("updatedAt") as Timestamp | undefined;
-    const millis = updatedAt?.toMillis() ?? 0;
-    const invalidDeliveryCount =
-      typeof d.get("invalidDeliveryCount") === "number"
-        ? (d.get("invalidDeliveryCount") as number)
-        : 0;
-
-    const existing = indexByToken.get(t);
-    if (existing !== undefined) {
-      buckets[existing]!.refs.push(d.ref);
-      buckets[existing]!.invalidCounts.push(invalidDeliveryCount);
-      buckets[existing]!.updatedAtMillis = Math.max(
-        buckets[existing]!.updatedAtMillis,
-        millis,
-      );
-    } else {
-      indexByToken.set(t, buckets.length);
-      buckets.push({
-        token: t,
-        refs: [d.ref],
-        updatedAtMillis: millis,
-        invalidCounts: [invalidDeliveryCount],
-      });
-    }
-  }
-
-  return buckets;
-}
 
 async function sendSessionPaymentReminderToParent(
   db: admin.firestore.Firestore,
