@@ -291,6 +291,10 @@ export {
 } from "./push";
 export { retryAttendancePushDelivery } from "./attendance-push-delivery";
 export {
+  recordStudentAbsences,
+  deleteStudentAttendanceRecord,
+} from "./attendance-records";
+export {
   activateParent,
   deactivateParent,
   deleteAcademyStudent,

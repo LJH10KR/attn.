@@ -3,12 +3,15 @@
 import { httpsCallable } from "firebase/functions";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DashboardNotificationRow } from "@/components/dashboard/dashboard-notifications-modal";
+import { ABSENCE_REASON_LABELS, isAbsenceReason } from "@/lib/firebase/attn-schema";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
 
 export type AttendanceLogItem = {
   id: string;
   academyId: string;
   kind: "present" | "absent";
+  /** 결석 사유(AbsenceReason) — 사유 도입 이전 기록은 null */
+  reason?: string | null;
   studentId: string;
   studentName: string;
   parentUserId: string;
@@ -19,6 +22,15 @@ export type AttendanceLogItem = {
   source: string;
   createdAtMillis: number | null;
 };
+
+/** "출석" / "결석" / "결석(질병)" — 일반 결석은 사유를 생략 */
+export function attendanceKindLabel(kind: "present" | "absent", reason?: string | null): string {
+  if (kind === "present") return "출석";
+  if (isAbsenceReason(reason) && reason !== "general") {
+    return `결석(${ABSENCE_REASON_LABELS[reason]})`;
+  }
+  return "결석";
+}
 
 function formatWhen(ms: number | null): string {
   if (!ms) return "시간 정보 없음";
@@ -145,7 +157,7 @@ export function useAttendanceNotificationLog(params: {
     () =>
       visibleItems.map((x) => ({
         id: x.id,
-        title: `${x.kind === "present" ? "출석" : "결석"} · ${x.studentName || x.studentId}`,
+        title: `${attendanceKindLabel(x.kind, x.reason)} · ${x.studentName || x.studentId}`,
         detail: `${formatWhen(x.createdAtMillis)} · ${x.senderDisplayName} · ${x.parentDisplayName} 학부모`,
       })),
     [visibleItems],

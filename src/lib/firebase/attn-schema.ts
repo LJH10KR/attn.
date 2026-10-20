@@ -340,6 +340,47 @@ export function academyStudentSessionLogsPath(academyId: string, studentId: stri
   return `${academyStudentsPath(academyId)}/${studentId}/sessionLogs`;
 }
 
+/** 출결 상태 */
+export type AttendanceStatus = "present" | "absent";
+
+/** 결석 사유 — illness·academy는 학원 측 사유로 원비 차감 대상, 원장·포털만 지정 가능 */
+export type AbsenceReason = "general" | "illness" | "academy";
+
+export const ABSENCE_REASONS: readonly AbsenceReason[] = ["general", "illness", "academy"];
+
+export const ABSENCE_REASON_LABELS: Record<AbsenceReason, string> = {
+  general: "일반",
+  illness: "질병",
+  academy: "학원 사정",
+};
+
+export function isAbsenceReason(raw: unknown): raw is AbsenceReason {
+  return typeof raw === "string" && (ABSENCE_REASONS as readonly string[]).includes(raw);
+}
+
+/**
+ * `academies/{academyId}/students/{studentId}/attendanceRecords/{YYYY-MM-DD}` — 학생·날짜당 1건.
+ * 쓰기는 Functions(`sendStudentAttendanceNotification`, `submitKioskCheckIn`, `recordStudentAbsences`,
+ * `deleteStudentAttendanceRecord`)만, 읽기는 학원(오너·포털)만.
+ */
+export type AttendanceRecordDoc = {
+  /** 서울 기준 날짜 — 문서 ID와 동일 */
+  date: string;
+  status: AttendanceStatus;
+  /** status가 "absent"일 때만 */
+  reason?: AbsenceReason;
+  note?: string;
+  recordedByUid: string;
+  recordedByRole: "teacher" | "owner" | "academy" | "student_kiosk";
+  source: "teacher_dashboard" | "academy_dashboard" | "student_kiosk";
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+};
+
+export function academyStudentAttendanceRecordsPath(academyId: string, studentId: string): string {
+  return `${academyStudentsPath(academyId)}/${studentId}/attendanceRecords`;
+}
+
 /** 카드 결제(포트원 V2 · 나이스정보통신) 상태 */
 export type AcademyPaymentStatus = "PENDING" | "PAID" | "FAILED" | "CANCELLED";
 

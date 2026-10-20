@@ -31,6 +31,13 @@ import {
 import { getFirebaseAuth, getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
 import { SessionLogModal } from "@/components/academy/session-log-modal";
+import { AbsenceRecordModal } from "@/components/academy/absence-record-modal";
+import { AttendanceHistoryModal } from "@/components/academy/attendance-history-modal";
+import {
+  attendanceButtonErrorMessage,
+  attendanceButtonResultMessage,
+  type AttendanceNotifyResult,
+} from "@/lib/academy/attendance-records";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
 import { cachedRead } from "@/lib/firebase/cached-read";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
@@ -1503,6 +1510,8 @@ export function AcademyParentStudentList({
   const [chargeTarget, setChargeTarget] = useState<StudentRowVM | null>(null);
   const [chargeBusy, setChargeBusy] = useState(false);
   const [logModalTarget, setLogModalTarget] = useState<StudentRowVM | null>(null);
+  const [absenceTarget, setAbsenceTarget] = useState<StudentRowVM | null>(null);
+  const [attendanceTarget, setAttendanceTarget] = useState<StudentRowVM | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const loadParentChildren = useCallback(async () => {
@@ -1684,14 +1693,10 @@ export function AcademyParentStudentList({
       setNotifyBusyKey(key);
       try {
         const fn = httpsCallable(getFirebaseFunctions(), "sendStudentAttendanceNotification");
-        await fn({ academyId, studentId, kind });
-        setNoticeAction(kind === "present" ? "출석 알림을 보냈습니다." : "결석 알림을 보냈습니다.");
+        const res = await fn({ academyId, studentId, kind });
+        setNoticeAction(attendanceButtonResultMessage(kind, res.data as AttendanceNotifyResult));
       } catch (e) {
-        if (e instanceof FirebaseError && e.code === "functions/resource-exhausted") {
-          setNoticeAction("같은 학생에게 너무 자주 보낼 수 없습니다. 잠시 후 다시 시도해 주세요.");
-        } else {
-          setNoticeAction("알림을 보내지 못했습니다. 잠시 후 다시 시도해 주세요.");
-        }
+        setNoticeAction(attendanceButtonErrorMessage(e));
       } finally {
         setNotifyBusyKey(null);
       }
@@ -1766,8 +1771,8 @@ export function AcademyParentStudentList({
                   <button type="button" className={miniBtnClass} disabled={notifyBusyKey !== null} onClick={() => void sendAttendanceNotify(s.id, "present")}>
                     {notifyBusyKey === `${s.id}-present` ? "전송 중…" : "출석"}
                   </button>
-                  <button type="button" className={miniBtnClass} disabled={notifyBusyKey !== null} onClick={() => void sendAttendanceNotify(s.id, "absent")}>
-                    {notifyBusyKey === `${s.id}-absent` ? "전송 중…" : "결석"}
+                  <button type="button" className={miniBtnClass} disabled={notifyBusyKey !== null} onClick={() => setAbsenceTarget(s)}>
+                    결석
                   </button>
                   {s.weeklySessionCount != null ? (
                     <>
@@ -1779,6 +1784,7 @@ export function AcademyParentStudentList({
               </div>
               {expandedId === s.id ? (
                 <div className="flex flex-wrap gap-1 border-t border-white/40 px-3 py-2">
+                  <button type="button" className={miniBtnClass} onClick={() => setAttendanceTarget(s)}>출결</button>
                   {s.weeklySessionCount != null ? (
                     <button type="button" className={miniBtnClass} onClick={() => setLogModalTarget(s)}>기록</button>
                   ) : null}
@@ -1865,6 +1871,27 @@ export function AcademyParentStudentList({
           onCancelled={refreshParentChildren}
         />
       ) : null}
+      {absenceTarget ? (
+        <AbsenceRecordModal
+          academyId={academyId}
+          studentId={absenceTarget.id}
+          studentName={absenceTarget.name}
+          onClose={() => setAbsenceTarget(null)}
+          onSaved={(message) => {
+            setAbsenceTarget(null);
+            setNoticeAction(message);
+          }}
+        />
+      ) : null}
+      {attendanceTarget ? (
+        <AttendanceHistoryModal
+          academyId={academyId}
+          studentId={attendanceTarget.id}
+          studentName={attendanceTarget.name}
+          onClose={() => setAttendanceTarget(null)}
+          onNotice={setNoticeAction}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1895,6 +1922,8 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
   const [chargeBusy, setChargeBusy] = useState(false);
   const [defaultTuitionModalOpen, setDefaultTuitionModalOpen] = useState(false);
   const [logModalTarget, setLogModalTarget] = useState<StudentRowVM | null>(null);
+  const [absenceTarget, setAbsenceTarget] = useState<StudentRowVM | null>(null);
+  const [attendanceTarget, setAttendanceTarget] = useState<StudentRowVM | null>(null);
   const [notifyBusyKey, setNotifyBusyKey] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -2006,14 +2035,10 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
       setNotifyBusyKey(key);
       try {
         const fn = httpsCallable(getFirebaseFunctions(), "sendStudentAttendanceNotification");
-        await fn({ academyId, studentId, kind });
-        setNotice(kind === "present" ? "출석 알림을 보냈습니다." : "결석 알림을 보냈습니다.");
+        const res = await fn({ academyId, studentId, kind });
+        setNotice(attendanceButtonResultMessage(kind, res.data as AttendanceNotifyResult));
       } catch (e) {
-        if (e instanceof FirebaseError && e.code === "functions/resource-exhausted") {
-          setNotice("같은 학생에게 너무 자주 보낼 수 없습니다. 잠시 후 다시 시도해 주세요.");
-        } else {
-          setNotice("알림을 보내지 못했습니다. 잠시 후 다시 시도해 주세요.");
-        }
+        setNotice(attendanceButtonErrorMessage(e));
       } finally {
         setNotifyBusyKey(null);
       }
@@ -2322,8 +2347,8 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                     <button type="button" className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 disabled:opacity-40" disabled={notifyBusyKey !== null} onClick={() => void sendAttendanceNotify(s.id, "present")}>
                       {notifyBusyKey === `${s.id}-present` ? "전송 중…" : "출석"}
                     </button>
-                    <button type="button" className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 disabled:opacity-40" disabled={notifyBusyKey !== null} onClick={() => void sendAttendanceNotify(s.id, "absent")}>
-                      {notifyBusyKey === `${s.id}-absent` ? "전송 중…" : "결석"}
+                    <button type="button" className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 disabled:opacity-40" disabled={notifyBusyKey !== null} onClick={() => setAbsenceTarget(s)}>
+                      결석
                     </button>
                     {s.weeklySessionCount != null ? (
                       <>
@@ -2335,6 +2360,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                 </div>
                 {expandedId === s.id ? (
                   <div className="flex flex-wrap gap-1.5 border-t border-white/40 px-2 py-2 sm:px-3.5">
+                    <button type="button" className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90" onClick={() => setAttendanceTarget(s)}>출결</button>
                     {s.weeklySessionCount != null ? (
                       <button type="button" className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90" onClick={() => setLogModalTarget(s)}>기록</button>
                     ) : null}
@@ -2437,6 +2463,27 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
           studentName={logModalTarget.name}
           onClose={() => setLogModalTarget(null)}
           onCancelled={refreshStudentPanel}
+        />
+      ) : null}
+      {absenceTarget ? (
+        <AbsenceRecordModal
+          academyId={academyId}
+          studentId={absenceTarget.id}
+          studentName={absenceTarget.name}
+          onClose={() => setAbsenceTarget(null)}
+          onSaved={(message) => {
+            setAbsenceTarget(null);
+            setNotice(message);
+          }}
+        />
+      ) : null}
+      {attendanceTarget ? (
+        <AttendanceHistoryModal
+          academyId={academyId}
+          studentId={attendanceTarget.id}
+          studentName={attendanceTarget.name}
+          onClose={() => setAttendanceTarget(null)}
+          onNotice={setNotice}
         />
       ) : null}
     </div>

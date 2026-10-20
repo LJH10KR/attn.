@@ -336,6 +336,17 @@ service cloud.firestore {
           allow read, write: if false;
         }
 
+        /**
+         * 출결 기록(문서 ID = 서울 기준 YYYY-MM-DD) — 결석 사유가 원비 차감 근거가 되므로
+         * 쓰기는 Functions(`recordStudentAbsences` 등)만, 읽기는 학원만.
+         */
+        match /attendanceRecords/{date} {
+          allow read: if isAdmin()
+            || isAcademyOwner(academyId)
+            || isAcademyPortalSession(academyId);
+          allow write: if false;
+        }
+
         /** 수업 완료 기록 로그 — 오너·포털·활성 선생님이 생성, 삭제는 오너만 */
         match /sessionLogs/{logId} {
           allow read: if isAdmin()

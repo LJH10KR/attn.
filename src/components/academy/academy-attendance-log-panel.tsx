@@ -1,7 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
-import { useAttendanceNotificationLog } from "@/lib/firebase/use-attendance-notification-log";
+import {
+  attendanceKindLabel,
+  useAttendanceNotificationLog,
+} from "@/lib/firebase/use-attendance-notification-log";
 
 const glassCard = "glass-card";
 
@@ -12,10 +15,6 @@ function roleLabel(role: string): string {
   if (role === "admin") return "관리자";
   if (role === "student_kiosk") return "키오스크";
   return role || "알 수 없음";
-}
-
-function kindLabel(kind: "present" | "absent"): string {
-  return kind === "present" ? "출석" : "결석";
 }
 
 function fmt(ms: number | null): string {
@@ -88,7 +87,7 @@ export function AcademyAttendanceLogPanel({
                       : "bg-amber-500/20 text-amber-900"
                   }`}
                 >
-                  {kindLabel(r.kind)}
+                  {attendanceKindLabel(r.kind, r.reason)}
                 </span>
                 <span className="text-xs font-medium text-foreground">
                   {r.studentName || r.studentId || "학생"}

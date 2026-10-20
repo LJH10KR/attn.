@@ -5,6 +5,7 @@ import * as logger from "firebase-functions/logger";
 import { assertFourDigitPin, hashPin, verifyPin } from "./pin-utils";
 import { countUserDashboardBellItems } from "./app-badge-count";
 import { sendStudentAttendanceNotificationCore } from "./attendance-send-core";
+import { upsertTodayAttendanceRecord } from "./attendance-records";
 
 const KIOSK_SETTINGS_DOC_ID = "kioskSettings";
 const MAX_PIN_ATTEMPTS = 5;
@@ -318,6 +319,8 @@ export const submitKioskCheckIn = onCall(async (request) => {
     source: "student_kiosk" as const,
     canBypassCooldown: false,
   };
+
+  await upsertTodayAttendanceRecord(db, { academyId, studentId, status: "present", sender });
 
   const result = await sendStudentAttendanceNotificationCore(db, {
     academyId,
