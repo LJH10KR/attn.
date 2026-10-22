@@ -10,6 +10,7 @@ type VerifyRequestBody = {
   academyId?: unknown;
   paymentType?: unknown;
   sessionCount?: unknown;
+  invoicePeriod?: unknown;
 };
 
 function isNonEmptyString(value: unknown): value is string {
@@ -54,6 +55,7 @@ export async function POST(request: NextRequest) {
     academyId,
     paymentType,
     sessionCount,
+    invoicePeriod: typeof body.invoicePeriod === "string" ? body.invoicePeriod : null,
   });
 
   if (!result.ok) {

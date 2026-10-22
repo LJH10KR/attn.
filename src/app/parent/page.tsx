@@ -24,7 +24,10 @@ import {
   type PaymentReminderPayload,
 } from "@/components/parent/payment-reminder-modal";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
-import { academyTuitionSettingsPath } from "@/lib/firebase/attn-schema";
+import {
+  academyTuitionSettingsPath,
+  type TuitionInvoiceSummary,
+} from "@/lib/firebase/attn-schema";
 import {
   getFirebaseAuth,
   getFirebaseDb,
@@ -78,12 +81,14 @@ type CallableStudentPayload = {
   sessionBalance?: number | null;
   extraSessionDates?: string[];
   hasPendingPaymentReminder?: boolean;
+  tuitionInvoice?: TuitionInvoiceSummary | null;
 };
 
 type ParentStudentRow = StudentRowVM & {
   hasCheckInPin?: boolean;
   tuitionDueDayOfMonth?: number | null;
   tuitionAmount?: number | null;
+  tuitionInvoice?: TuitionInvoiceSummary | null;
   weeklySessionCount?: number | null;
   pricePerSession?: number | null;
   sessionBalance?: number | null;
@@ -286,6 +291,7 @@ export default function ParentDashboardPage() {
             hasCheckInPin: s.hasCheckInPin === true,
             tuitionDueDayOfMonth: s.tuitionDueDayOfMonth ?? null,
             tuitionAmount: typeof s.tuitionAmount === "number" ? s.tuitionAmount : null,
+            tuitionInvoice: s.tuitionInvoice ?? null,
             weeklySessionCount: typeof s.weeklySessionCount === "number" ? s.weeklySessionCount : null,
             pricePerSession: typeof s.pricePerSession === "number" ? s.pricePerSession : null,
             sessionBalance: typeof s.sessionBalance === "number" ? s.sessionBalance : null,
@@ -446,6 +452,7 @@ export default function ParentDashboardPage() {
         hasCheckInPin: s.hasCheckInPin === true,
         tuitionDueDayOfMonth: s.tuitionDueDayOfMonth ?? null,
         tuitionAmount: typeof s.tuitionAmount === "number" ? s.tuitionAmount : null,
+        tuitionInvoice: s.tuitionInvoice ?? null,
         weeklySessionCount: typeof s.weeklySessionCount === "number" ? s.weeklySessionCount : null,
         pricePerSession: typeof s.pricePerSession === "number" ? s.pricePerSession : null,
         sessionBalance: typeof s.sessionBalance === "number" ? s.sessionBalance : null,
@@ -693,6 +700,7 @@ export default function ParentDashboardPage() {
                     academyId={academyId!}
                     tuitionDueDayOfMonth={s.tuitionDueDayOfMonth}
                     tuitionAmount={s.tuitionAmount}
+                    invoice={s.tuitionInvoice ?? null}
                     settings={tuitionSettings}
                     onRefreshAction={refreshChildrenList}
                   />

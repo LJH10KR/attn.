@@ -33,6 +33,7 @@ import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-re
 import { SessionLogModal } from "@/components/academy/session-log-modal";
 import { AbsenceRecordModal } from "@/components/academy/absence-record-modal";
 import { AttendanceHistoryModal } from "@/components/academy/attendance-history-modal";
+import { TuitionInvoiceModal } from "@/components/academy/tuition-invoice-modal";
 import {
   attendanceButtonErrorMessage,
   attendanceButtonResultMessage,
@@ -1512,6 +1513,7 @@ export function AcademyParentStudentList({
   const [logModalTarget, setLogModalTarget] = useState<StudentRowVM | null>(null);
   const [absenceTarget, setAbsenceTarget] = useState<StudentRowVM | null>(null);
   const [attendanceTarget, setAttendanceTarget] = useState<StudentRowVM | null>(null);
+  const [invoiceTarget, setInvoiceTarget] = useState<StudentRowVM | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const loadParentChildren = useCallback(async () => {
@@ -1785,6 +1787,9 @@ export function AcademyParentStudentList({
               {expandedId === s.id ? (
                 <div className="flex flex-wrap gap-1 border-t border-white/40 px-3 py-2">
                   <button type="button" className={miniBtnClass} onClick={() => setAttendanceTarget(s)}>출결</button>
+                  {s.tuitionDueDayOfMonth && s.tuitionAmount != null ? (
+                    <button type="button" className={miniBtnClass} onClick={() => setInvoiceTarget(s)}>청구</button>
+                  ) : null}
                   {s.weeklySessionCount != null ? (
                     <button type="button" className={miniBtnClass} onClick={() => setLogModalTarget(s)}>기록</button>
                   ) : null}
@@ -1892,6 +1897,17 @@ export function AcademyParentStudentList({
           onNotice={setNoticeAction}
         />
       ) : null}
+      {invoiceTarget?.tuitionDueDayOfMonth && invoiceTarget.tuitionAmount != null ? (
+        <TuitionInvoiceModal
+          academyId={academyId}
+          studentId={invoiceTarget.id}
+          studentName={invoiceTarget.name}
+          tuitionAmount={invoiceTarget.tuitionAmount}
+          tuitionDueDayOfMonth={invoiceTarget.tuitionDueDayOfMonth}
+          onClose={() => setInvoiceTarget(null)}
+          onNotice={setNoticeAction}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1924,6 +1940,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
   const [logModalTarget, setLogModalTarget] = useState<StudentRowVM | null>(null);
   const [absenceTarget, setAbsenceTarget] = useState<StudentRowVM | null>(null);
   const [attendanceTarget, setAttendanceTarget] = useState<StudentRowVM | null>(null);
+  const [invoiceTarget, setInvoiceTarget] = useState<StudentRowVM | null>(null);
   const [notifyBusyKey, setNotifyBusyKey] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -2361,6 +2378,9 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                 {expandedId === s.id ? (
                   <div className="flex flex-wrap gap-1.5 border-t border-white/40 px-2 py-2 sm:px-3.5">
                     <button type="button" className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90" onClick={() => setAttendanceTarget(s)}>출결</button>
+                    {s.tuitionDueDayOfMonth && s.tuitionAmount != null ? (
+                      <button type="button" className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90" onClick={() => setInvoiceTarget(s)}>청구</button>
+                    ) : null}
                     {s.weeklySessionCount != null ? (
                       <button type="button" className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90" onClick={() => setLogModalTarget(s)}>기록</button>
                     ) : null}
@@ -2483,6 +2503,17 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
           studentId={attendanceTarget.id}
           studentName={attendanceTarget.name}
           onClose={() => setAttendanceTarget(null)}
+          onNotice={setNotice}
+        />
+      ) : null}
+      {invoiceTarget?.tuitionDueDayOfMonth && invoiceTarget.tuitionAmount != null ? (
+        <TuitionInvoiceModal
+          academyId={academyId}
+          studentId={invoiceTarget.id}
+          studentName={invoiceTarget.name}
+          tuitionAmount={invoiceTarget.tuitionAmount}
+          tuitionDueDayOfMonth={invoiceTarget.tuitionDueDayOfMonth}
+          onClose={() => setInvoiceTarget(null)}
           onNotice={setNotice}
         />
       ) : null}

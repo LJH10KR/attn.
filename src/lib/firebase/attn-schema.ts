@@ -381,6 +381,56 @@ export function academyStudentAttendanceRecordsPath(academyId: string, studentId
   return `${academyStudentsPath(academyId)}/${studentId}/attendanceRecords`;
 }
 
+/** 청구서 조정 항목 — amount 음수는 차감, 양수는 추가 */
+export type TuitionInvoiceAdjustment = {
+  id: string;
+  amount: number;
+  memo: string;
+  source: "manual";
+  createdByUid: string;
+  createdAt: Timestamp;
+};
+
+/** open: 미납(금액은 원비 + 조정 합계로 실시간 계산) · paid: 납부 완료(금액 고정) */
+export type TuitionInvoiceStatus = "open" | "paid";
+
+/**
+ * `academies/{academyId}/students/{studentId}/tuitionInvoices/{YYYY-MM}` — 매월 지정일 납부의 월별 청구서.
+ * 문서 ID·period는 납부일이 속한 달. 조정 항목이 생기거나 납부될 때 생성됨(없으면 원비 그대로 청구).
+ * 쓰기는 Functions(조정·수동 납부)와 Next 서버(카드 결제 완결·취소)만, 읽기는 학원만.
+ */
+export type TuitionInvoiceDoc = {
+  period: string;
+  /** 서울 기준 YYYY-MM-DD */
+  dueDate: string;
+  status: TuitionInvoiceStatus;
+  adjustments: TuitionInvoiceAdjustment[];
+  /** status가 "paid"일 때만 — 납부 시점 원비·최종 금액 */
+  baseAmount?: number;
+  finalAmount?: number;
+  paidAt?: Timestamp;
+  /** card: 포트원 결제 · manual: 원장이 계좌이체·현금 등으로 확인 */
+  paidMethod?: "card" | "manual";
+  paymentId?: string;
+  paidByUid?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+};
+
+export function academyStudentTuitionInvoicesPath(academyId: string, studentId: string): string {
+  return `${academyStudentsPath(academyId)}/${studentId}/tuitionInvoices`;
+}
+
+/** 학부모 Callable(`listParentChildrenStudents`)이 내려주는 이번 납부 청구서 요약 */
+export type TuitionInvoiceSummary = {
+  period: string;
+  dueDate: string;
+  status: TuitionInvoiceStatus;
+  baseAmount: number;
+  adjustments: { amount: number; memo: string }[];
+  finalAmount: number;
+};
+
 /** 카드 결제(포트원 V2 · 나이스정보통신) 상태 */
 export type AcademyPaymentStatus = "PENDING" | "PAID" | "FAILED" | "CANCELLED";
 
@@ -396,6 +446,8 @@ export type AcademyPaymentDoc = {
   paymentType?: "monthly_fixed" | "session_based";
   /** paymentType이 "session_based"일 때 결제된 회차 수 */
   sessionCount?: number;
+  /** paymentType이 "monthly_fixed"일 때 납부한 청구서(YYYY-MM) — 청구서 도입 이전 결제는 없음 */
+  invoicePeriod?: string;
   portoneTransactionId?: string;
   cancelledAt?: Timestamp;
   createdAt: Timestamp;

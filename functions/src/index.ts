@@ -295,6 +295,11 @@ export {
   deleteStudentAttendanceRecord,
 } from "./attendance-records";
 export {
+  addTuitionInvoiceAdjustment,
+  removeTuitionInvoiceAdjustment,
+  setTuitionInvoiceManualPaid,
+} from "./tuition-invoices";
+export {
   activateParent,
   deactivateParent,
   deleteAcademyStudent,

@@ -7,6 +7,7 @@ import * as nodemailer from "nodemailer";
 import { createShortAuthLink, getAppOrigin } from "./auth-short-links";
 import { reconcileUserActivationMirror } from "./user-activation-mirror";
 import { getRequireStudentCheckInPin } from "./kiosk";
+import { loadNextDueInvoiceSummaries } from "./tuition-invoices";
 import {
   deleteAttnLoginIndexForMember,
   deleteMemberLoginSecrets,
@@ -594,12 +595,23 @@ export const listParentChildrenStudents = onCall(
     }
 
     const pinRefs = snap.docs.map((d) => db.doc(studentCheckInSecretPath(academyId, d.id)));
-    const pinSnaps = pinRefs.length ? await db.getAll(...pinRefs) : [];
+    const [pinSnaps, invoiceSummaries] = await Promise.all([
+      pinRefs.length ? db.getAll(...pinRefs) : Promise.resolve([]),
+      loadNextDueInvoiceSummaries(
+        db,
+        academyId,
+        snap.docs.map((d) => ({ id: d.id, data: d.data() })),
+      ),
+    ]);
     const students = snap.docs.map((d, i) => {
       const pinSnap = pinSnaps[i];
       const hasCheckInPin =
         typeof pinSnap?.get("pinHash") === "string" && (pinSnap.get("pinHash") as string).length > 0;
-      return serializeStudentDocForCallable(d, { hasCheckInPin });
+      return {
+        ...serializeStudentDocForCallable(d, { hasCheckInPin }),
+        // 매월 지정일 납부 학생의 다음 납부 청구서(조정 반영 금액·납부 여부)
+        tuitionInvoice: invoiceSummaries.get(d.id) ?? null,
+      };
     });
 
     return {

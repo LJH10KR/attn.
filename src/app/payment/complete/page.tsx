@@ -29,6 +29,7 @@ export default async function PaymentCompletePage({
   const academyId = first(params.academyId);
   const paymentTypeRaw = first(params.paymentType);
   const sessionCountRaw = first(params.sessionCount);
+  const invoicePeriod = first(params.invoicePeriod) ?? null;
 
   if (!paymentId) {
     redirect("/parent");
@@ -60,6 +61,7 @@ export default async function PaymentCompletePage({
       academyId,
       paymentType,
       sessionCount,
+      invoicePeriod,
     });
     if (result.ok) {
       status = "success";

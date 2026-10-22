@@ -3,6 +3,7 @@ import { PaymentClient } from "@portone/server-sdk";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { academyPaymentPath, COLLECTIONS } from "@/lib/firebase/attn-schema";
+import { reopenInvoiceForCancelledPayment } from "@/lib/payment/complete-payment";
 
 export const runtime = "nodejs";
 
@@ -101,6 +102,9 @@ export async function POST(request: NextRequest) {
     cancelledAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   });
+
+  // 월 원비 결제였다면 해당 청구서를 미납으로 되돌림(웹훅에서도 처리되지만 즉시 반영)
+  await reopenInvoiceForCancelledPayment(academyId, payment);
 
   return NextResponse.json({ ok: true, status: "CANCELLED" });
 }

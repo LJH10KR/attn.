@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { PaymentClient, Webhook } from "@portone/server-sdk";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
-import { completePayment, type PaymentType } from "@/lib/payment/complete-payment";
+import {
+  completePayment,
+  reopenInvoiceForCancelledPayment,
+  type PaymentType,
+} from "@/lib/payment/complete-payment";
 import type { AcademyPaymentStatus } from "@/lib/firebase/attn-schema";
 
 export const runtime = "nodejs";
@@ -12,6 +16,7 @@ type PaymentCustomData = {
   academyId?: unknown;
   paymentType?: unknown;
   sessionCount?: unknown;
+  invoicePeriod?: unknown;
 };
 
 function isNonEmptyString(value: unknown): value is string {
@@ -67,6 +72,7 @@ async function completeFromWebhookFallback(
     academyId,
     paymentType,
     sessionCount,
+    invoicePeriod: typeof customData.invoicePeriod === "string" ? customData.invoicePeriod : null,
   });
 
   if (!result.ok) {
@@ -114,6 +120,8 @@ export async function POST(request: NextRequest) {
   let status: AcademyPaymentStatus;
   let paymentId: string;
   let transactionId: string;
+  // 부분 취소는 납부 상태를 유지 — 전액 취소일 때만 청구서를 미납으로 되돌림
+  const fullyCancelled = event.type === "Transaction.Cancelled";
 
   switch (event.type) {
     case "Transaction.Paid":
@@ -173,7 +181,16 @@ export async function POST(request: NextRequest) {
     update.cancelledAt = FieldValue.serverTimestamp();
   }
 
-  await matches.docs[0].ref.update(update);
+  const paymentDoc = matches.docs[0];
+  await paymentDoc.ref.update(update);
+
+  if (fullyCancelled) {
+    // 경로: academies/{academyId}/payments/{paymentId}
+    const academyId = paymentDoc.ref.parent.parent?.id;
+    if (academyId) {
+      await reopenInvoiceForCancelledPayment(academyId, paymentDoc.data());
+    }
+  }
 
   return NextResponse.json({ ok: true });
 }

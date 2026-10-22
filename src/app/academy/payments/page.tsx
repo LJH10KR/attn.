@@ -77,7 +77,8 @@ function paymentTypeLabel(r: PaymentRow): string {
   if (r.paymentType === "session_based") {
     return `회차 ${r.sessionCount ?? "?"}회`;
   }
-  return "월정액";
+  // 청구서 도입 이후 결제는 납부한 달 표시
+  return r.invoicePeriod ? `월정액 · ${Number(r.invoicePeriod.slice(5))}월분` : "월정액";
 }
 
 function paymentTypeBadgeClass(r: PaymentRow): string {

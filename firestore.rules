@@ -347,6 +347,17 @@ service cloud.firestore {
           allow write: if false;
         }
 
+        /**
+         * 월별 청구서(문서 ID = YYYY-MM) — 결제 검증이 신뢰하는 금액 근거이므로 쓰기는
+         * Functions(조정·수동 납부)와 Next 서버(카드 결제)만. 학부모는 Callable 요약으로만 조회.
+         */
+        match /tuitionInvoices/{period} {
+          allow read: if isAdmin()
+            || isAcademyOwner(academyId)
+            || isAcademyPortalSession(academyId);
+          allow write: if false;
+        }
+
         /** 수업 완료 기록 로그 — 오너·포털·활성 선생님이 생성, 삭제는 오너만 */
         match /sessionLogs/{logId} {
           allow read: if isAdmin()
