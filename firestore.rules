@@ -268,22 +268,58 @@ service cloud.firestore {
         allow write: if false;
       }
 
-      /** 원비 납부 안내(카카오페이 링크·계좌) — 오너만 쓰기, 소속 활성 학부모도 읽기 허용 */
+      /**
+       * 원비 납부 안내(카카오페이 링크·계좌) — 오너 쓰기, 학원 포털은 납부 안내 필드만
+       * (`owner-tuition-settings-card.tsx`). 포트원 channelKey는 결제 경로를 바꾸므로 오너만.
+       * 소속 활성 학부모도 읽기 허용.
+       */
       match /meta/tuitionSettings {
+        function portalTuitionFields() {
+          return ['kakaoPayLink', 'bankName', 'accountNumber', 'accountHolder', 'updatedAt'];
+        }
         allow read: if isAdmin()
           || isAcademyOwner(academyId)
           || isAcademyPortalSession(academyId)
           || isAcademyParentActive(academyId);
-        allow write: if isAdmin()
+        allow create: if isAdmin()
+          || isAcademyOwner(academyId)
+          || (isAcademyPortalSession(academyId)
+              && request.resource.data.keys().hasOnly(portalTuitionFields()));
+        allow update: if isAdmin()
+          || isAcademyOwner(academyId)
+          || (isAcademyPortalSession(academyId)
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(portalTuitionFields()));
+        allow delete: if isAdmin()
           || isAcademyOwner(academyId);
       }
 
-      /** 회차 방식 원비 기본 설정 — 오너만 쓰기 */
+      /**
+       * 원비 납부 방식 기본 설정 — 오너·학원 포털 쓰기(포털은 기본값 필드만:
+       * `owner-session-tuition-settings-card.tsx`, 학생 패널 기본 납부 방식 모달).
+       */
       match /meta/sessionTuitionSettings {
+        function portalSessionTuitionFieldsOk(keys) {
+          return keys.hasOnly([
+              'defaultTuitionType', 'defaultTuitionDueDayOfMonth', 'defaultTuitionAmount',
+              'defaultWeeklySessionCount', 'defaultPricePerSession', 'updatedAt'
+            ])
+            && (!request.resource.data.keys().hasAny(['defaultTuitionType'])
+                || request.resource.data.defaultTuitionType in ['monthly_fixed', 'session_based']);
+        }
         allow read: if isAdmin()
           || isAcademyOwner(academyId)
           || isAcademyPortalSession(academyId);
-        allow write: if isAdmin()
+        allow create: if isAdmin()
+          || isAcademyOwner(academyId)
+          || (isAcademyPortalSession(academyId)
+              && portalSessionTuitionFieldsOk(request.resource.data.keys()));
+        allow update: if isAdmin()
+          || isAcademyOwner(academyId)
+          || (isAcademyPortalSession(academyId)
+              && portalSessionTuitionFieldsOk(
+                request.resource.data.diff(resource.data).affectedKeys()));
+        allow delete: if isAdmin()
           || isAcademyOwner(academyId);
       }
 
