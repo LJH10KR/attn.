@@ -3,6 +3,7 @@ import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { sendStudentAttendanceNotificationCore } from "./attendance-send-core";
+import { upsertTodayAttendanceRecord } from "./attendance-records";
 import { pruneStalePushSubscriptions } from "./push-subscription-delivery";
 
 function studentAssignedToTeacher(data: Record<string, unknown>, teacherUid: string): boolean {
@@ -147,7 +148,9 @@ export const syncParentPushSubscription = onCall(async (request) => {
 });
 
 /**
- * 전담 선생님이 학부모에게 출석/결석 알림(FCM data 메시지)을 보냅니다.
+ * 전담 선생님·학원이 오늘자 출결을 기록하고 학부모에게 출석/결석 알림(FCM data 메시지)을 보냅니다.
+ * 결석 사유는 "일반"으로 기록 — 질병·학원 사정은 `recordStudentAbsences`(학원 전용)로 지정.
+ * 알림이 쿨다운에 걸려도 기록은 저장되므로 reason: "cooldown"으로 정상 응답합니다.
  */
 export const sendStudentAttendanceNotification = onCall(async (request) => {
   if (!request.auth?.uid) {
@@ -180,13 +183,28 @@ export const sendStudentAttendanceNotification = onCall(async (request) => {
     studentData,
   });
 
-  return sendStudentAttendanceNotificationCore(db, {
+  const reason = await upsertTodayAttendanceRecord(db, {
     academyId,
     studentId,
-    kind,
+    status: kind,
     sender,
-    studentData,
   });
+
+  try {
+    return await sendStudentAttendanceNotificationCore(db, {
+      academyId,
+      studentId,
+      kind,
+      sender,
+      studentData,
+      ...(reason ? { reason } : {}),
+    });
+  } catch (e) {
+    if (e instanceof HttpsError && e.code === "resource-exhausted") {
+      return { ok: true as const, sent: 0, reason: "cooldown" as const };
+    }
+    throw e;
+  }
 });
 
 function clampInt(raw: unknown, fallback: number, min: number, max: number): number {
@@ -257,6 +275,7 @@ export const listAttendanceNotifications = onCall(async (request) => {
     const x = d.data() as {
       academyId?: unknown;
       kind?: unknown;
+      reason?: unknown;
       studentId?: unknown;
       studentName?: unknown;
       parentUserId?: unknown;
@@ -269,6 +288,7 @@ export const listAttendanceNotifications = onCall(async (request) => {
       id: d.id,
       academyId: typeof x.academyId === "string" ? x.academyId : "",
       kind: (x.kind === "absent" ? "absent" : "present") as "present" | "absent",
+      reason: typeof x.reason === "string" ? x.reason : null,
       studentId: typeof x.studentId === "string" ? x.studentId : "",
       studentName: typeof x.studentName === "string" ? x.studentName : "",
       parentUserId: typeof x.parentUserId === "string" ? x.parentUserId : "",

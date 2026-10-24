@@ -6,6 +6,7 @@ import {
   applyMulticastDeliveryResults,
   type PushTokenBucket,
 } from "./push-subscription-delivery";
+import { buildInvoiceSummary } from "./tuition-invoices";
 
 const REGION = "asia-northeast3";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -102,6 +103,7 @@ async function sendReminderToParent(
     studentId: string;
     studentName: string;
     parentUserId: string;
+    /** 조정이 반영된 이번 청구 금액 */
     tuitionAmount: number | undefined;
     dueDateLabel: string;
     reminderKey: string;
@@ -167,6 +169,8 @@ async function sendReminderToParent(
 
   if (tuitionAmount !== undefined) {
     dataPayload.tuitionAmount = String(tuitionAmount);
+    // 납부 안내 모달(`payment-reminder-modal.tsx`)이 표시하는 금액
+    dataPayload.suggestedAmount = String(tuitionAmount);
   }
   if (settings.kakaoPayLink) dataPayload.kakaoPayLink = settings.kakaoPayLink;
   if (settings.bankName) dataPayload.bankName = settings.bankName;
@@ -313,10 +317,33 @@ export const sendTuitionReminders = onSchedule(
 
         const studentName =
           typeof data.name === "string" && data.name ? data.name : "학생";
-        const tuitionAmount =
+        let tuitionAmount =
           typeof data.tuitionAmount === "number"
             ? data.tuitionAmount
             : undefined;
+
+        // 청구서 반영 — 이미 납부(카드·수동)했거나 조정 후 0원이면 알림 생략, 금액은 조정 반영 금액
+        if (tuitionAmount !== undefined) {
+          const period = `${ny}-${nm}`;
+          const invoiceSnap = await db
+            .doc(`academies/${academyId}/students/${studentId}/tuitionInvoices/${period}`)
+            .get();
+          const invoice = buildInvoiceSummary(
+            period,
+            dueDayOfMonth,
+            tuitionAmount,
+            invoiceSnap.data(),
+          );
+          if (invoice.status === "paid" || invoice.finalAmount === 0) {
+            logger.info("tuitionReminder: invoice settled, skipping", {
+              studentId,
+              period,
+              status: invoice.status,
+            });
+            continue;
+          }
+          tuitionAmount = invoice.finalAmount;
+        }
 
         const dueDateLabel = new Date(nextDueMs).toLocaleDateString("ko-KR", {
           timeZone: "Asia/Seoul",

@@ -316,7 +316,7 @@ export async function stripTeacherFromStudents(
   }
 }
 
-/** 학생 문서 + serverSecrets 삭제 */
+/** 학생 문서 + serverSecrets + attendanceRecords + tuitionInvoices 삭제 */
 export async function deleteStudentDocs(
   db: admin.firestore.Firestore,
   academyId: string,
@@ -324,6 +324,12 @@ export async function deleteStudentDocs(
 ): Promise<void> {
   const refs: DocumentReference[] = [];
   for (const studentId of studentIds) {
+    for (const sub of ["attendanceRecords", "tuitionInvoices"]) {
+      const subSnap = await db
+        .collection(`academies/${academyId}/students/${studentId}/${sub}`)
+        .get();
+      refs.push(...subSnap.docs.map((d) => d.ref));
+    }
     refs.push(db.doc(`academies/${academyId}/students/${studentId}`));
     refs.push(
       db.doc(`academies/${academyId}/students/${studentId}/serverSecrets/checkIn`),

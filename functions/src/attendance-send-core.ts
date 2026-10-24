@@ -48,12 +48,16 @@ export async function sendStudentAttendanceNotificationCore(
     kind: "present" | "absent";
     sender: AttendanceSender;
     studentData: Record<string, unknown>;
+    /** 미지정 시 kind별 기본 문구 — 기간 결석 등 요약 문구가 필요할 때 지정 */
+    body?: string;
+    /** 결석 사유(`attendance-records.ts`의 AbsenceReason) — 알림 기록에 함께 저장 */
+    reason?: string;
   },
 ): Promise<
   | { ok: true; sent: number; failureCount?: number; reason?: undefined }
   | { ok: true; sent: 0; reason: "no_parent" | "parent_opt_out" | "no_token" }
 > {
-  const { academyId, studentId, kind, sender, studentData } = params;
+  const { academyId, studentId, kind, sender, studentData, reason } = params;
 
   const parentUserId = studentData.parentUserId;
   if (typeof parentUserId !== "string" || !parentUserId) {
@@ -127,9 +131,10 @@ export async function sendStudentAttendanceNotificationCore(
     typeof studentData.name === "string" && studentData.name ? studentData.name : "학생";
   const timeLabel = formatCheckInTimeLabel(new Date());
   const body =
-    kind === "present"
+    params.body ??
+    (kind === "present"
       ? `'${studentName}' 학생이 안전하게 등원 했습니다. (등원 시간: ${timeLabel})`
-      : `'${studentName}' 학생이 결석 처리되었습니다. (${timeLabel})`;
+      : `'${studentName}' 학생이 결석 처리되었습니다. (${timeLabel})`);
 
   await parentUserRef.collection("dashboardBellItems").add({
     kind: kind === "present" ? "attendance_present" : "attendance_absent",
@@ -137,6 +142,7 @@ export async function sendStudentAttendanceNotificationCore(
     studentId,
     studentName,
     body,
+    ...(reason ? { reason } : {}),
     senderRole: sender.role,
     senderUid: sender.actorUid,
     source: sender.source,
@@ -145,6 +151,7 @@ export async function sendStudentAttendanceNotificationCore(
 
   const notifRef = await db.collection(`academies/${academyId}/attendanceNotifications`).add({
     kind,
+    ...(reason ? { reason } : {}),
     academyId,
     studentId,
     studentName,

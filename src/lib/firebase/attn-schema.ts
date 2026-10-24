@@ -75,7 +75,10 @@ export function academyKioskSettingsPath(academyId: string): string {
 /** `academies/{academyId}/adminInbox/{inboxId}` — 운영 알림(벨) */
 export const ACADEMY_ADMIN_INBOX_SCHEMA_VERSION = 1 as const;
 
-export type AcademyAdminInboxKind = "pending_registration" | "invitation_sent";
+export type AcademyAdminInboxKind =
+  | "pending_registration"
+  | "invitation_sent"
+  | "session_payment_received";
 
 export type AcademyAdminInboxDoc = {
   schemaVersion: typeof ACADEMY_ADMIN_INBOX_SCHEMA_VERSION;
@@ -86,6 +89,10 @@ export type AcademyAdminInboxDoc = {
   email: string;
   invitedAt?: Timestamp | null;
   invitationExpiresAt?: Timestamp | null;
+  /** kind가 "session_payment_received"일 때 사용 — 결제된 회차 수 */
+  sessionCount?: number;
+  /** kind가 "session_payment_received"일 때 사용 — 결제한 학생 이름 */
+  studentName?: string;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 };
@@ -281,6 +288,8 @@ export type AcademyStudent = {
   tuitionReminderConfirmedAt?: Timestamp;
   /** 납부 알림을 확인한 학부모 uid */
   tuitionReminderConfirmedByUid?: string;
+  /** 결석 차감 1일당 금액(원) — 미설정 시 학원 `absenceDeductionSettings` 기본값 사용 */
+  absenceDeductionPerDay?: number;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 };
@@ -296,6 +305,12 @@ export type AcademyTuitionSettingsDoc = {
   bankName: string;
   accountNumber: string;
   accountHolder: string;
+  /**
+   * 포트원 채널 키 — 학원별 프로덕션(나이스정보통신) 채널로 실연동 전환 시 사용.
+   * 테스트 단계에서는 비어있을 수 있으며, 그 경우 클라이언트는
+   * `NEXT_PUBLIC_PORTONE_CHANNEL_KEY`(공용 테스트 채널)로 폴백합니다.
+   */
+  channelKey?: string;
   updatedAt?: Timestamp;
 };
 
@@ -315,6 +330,25 @@ export function academySessionTuitionSettingsPath(academyId: string): string {
   return `${academyPath(academyId)}/meta/${ACADEMY_SESSION_TUITION_SETTINGS_DOC_ID}`;
 }
 
+/** `academies/{academyId}/meta/absenceDeductionSettings` — 결석 차감 제안 기본값(오너·포털 쓰기) */
+export const ACADEMY_ABSENCE_DEDUCTION_SETTINGS_DOC_ID = "absenceDeductionSettings" as const;
+
+/** per_day: 1일 고정 금액 · divide: 학생 원비 ÷ 월 수업일수 */
+export type AbsenceDeductionMethod = "per_day" | "divide";
+
+export type AcademyAbsenceDeductionSettingsDoc = {
+  method: AbsenceDeductionMethod;
+  /** method가 "per_day"일 때 1일 차감액(원) */
+  perDayAmount?: number;
+  /** method가 "divide"일 때 월 기준 수업일수(1~31) */
+  monthlyClassDays?: number;
+  updatedAt?: Timestamp;
+};
+
+export function academyAbsenceDeductionSettingsPath(academyId: string): string {
+  return `${academyPath(academyId)}/meta/${ACADEMY_ABSENCE_DEDUCTION_SETTINGS_DOC_ID}`;
+}
+
 /** `academies/{academyId}/students/{studentId}/sessionLogs/{logId}` */
 export type SessionLogDoc = {
   recordedAt: Timestamp;
@@ -325,4 +359,136 @@ export type SessionLogDoc = {
 
 export function academyStudentSessionLogsPath(academyId: string, studentId: string): string {
   return `${academyStudentsPath(academyId)}/${studentId}/sessionLogs`;
+}
+
+/** 출결 상태 */
+export type AttendanceStatus = "present" | "absent";
+
+/** 결석 사유 — illness·academy는 학원 측 사유로 원비 차감 대상, 원장·포털만 지정 가능 */
+export type AbsenceReason = "general" | "illness" | "academy";
+
+export const ABSENCE_REASONS: readonly AbsenceReason[] = ["general", "illness", "academy"];
+
+export const ABSENCE_REASON_LABELS: Record<AbsenceReason, string> = {
+  general: "일반",
+  illness: "질병",
+  academy: "학원 사정",
+};
+
+export function isAbsenceReason(raw: unknown): raw is AbsenceReason {
+  return typeof raw === "string" && (ABSENCE_REASONS as readonly string[]).includes(raw);
+}
+
+/**
+ * `academies/{academyId}/students/{studentId}/attendanceRecords/{YYYY-MM-DD}` — 학생·날짜당 1건.
+ * 쓰기는 Functions(`sendStudentAttendanceNotification`, `submitKioskCheckIn`, `recordStudentAbsences`,
+ * `deleteStudentAttendanceRecord`)만, 읽기는 학원(오너·포털)만.
+ */
+export type AttendanceRecordDoc = {
+  /** 서울 기준 날짜 — 문서 ID와 동일 */
+  date: string;
+  status: AttendanceStatus;
+  /** status가 "absent"일 때만 */
+  reason?: AbsenceReason;
+  note?: string;
+  recordedByUid: string;
+  recordedByRole: "teacher" | "owner" | "academy" | "student_kiosk";
+  source: "teacher_dashboard" | "academy_dashboard" | "student_kiosk";
+  /**
+   * 결석 차감이 반영된 청구서(YYYY-MM)·조정 항목 id — 설정된 동안 기록은 수정·삭제 불가(잠금).
+   * 해당 조정 항목을 삭제하면 해제됨.
+   */
+  billedInvoicePeriod?: string;
+  billedAdjustmentId?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+};
+
+export function academyStudentAttendanceRecordsPath(academyId: string, studentId: string): string {
+  return `${academyStudentsPath(academyId)}/${studentId}/attendanceRecords`;
+}
+
+/** 청구서 조정 항목 — amount 음수는 차감, 양수는 추가 */
+export type TuitionInvoiceAdjustment = {
+  id: string;
+  amount: number;
+  memo: string;
+  /** manual: 원장 직접 입력 · absence: 결석 기록 기반 차감(`applyAbsenceDeduction`) */
+  source: "manual" | "absence";
+  /** source가 "absence"일 때 차감 근거가 된 결석 날짜(YYYY-MM-DD)와 1일 차감액 */
+  absenceDates?: string[];
+  perDayAmount?: number;
+  createdByUid: string;
+  createdAt: Timestamp;
+};
+
+/** open: 미납(금액은 원비 + 조정 합계로 실시간 계산) · paid: 납부 완료(금액 고정) */
+export type TuitionInvoiceStatus = "open" | "paid";
+
+/**
+ * `academies/{academyId}/students/{studentId}/tuitionInvoices/{YYYY-MM}` — 매월 지정일 납부의 월별 청구서.
+ * 문서 ID·period는 납부일이 속한 달. 조정 항목이 생기거나 납부될 때 생성됨(없으면 원비 그대로 청구).
+ * 쓰기는 Functions(조정·수동 납부)와 Next 서버(카드 결제 완결·취소)만, 읽기는 학원만.
+ */
+export type TuitionInvoiceDoc = {
+  period: string;
+  /** 서울 기준 YYYY-MM-DD */
+  dueDate: string;
+  status: TuitionInvoiceStatus;
+  adjustments: TuitionInvoiceAdjustment[];
+  /** status가 "paid"일 때만 — 납부 시점 원비·최종 금액 */
+  baseAmount?: number;
+  finalAmount?: number;
+  paidAt?: Timestamp;
+  /** card: 포트원 결제 · manual: 원장이 계좌이체·현금 등으로 확인 */
+  paidMethod?: "card" | "manual";
+  paymentId?: string;
+  paidByUid?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+};
+
+export function academyStudentTuitionInvoicesPath(academyId: string, studentId: string): string {
+  return `${academyStudentsPath(academyId)}/${studentId}/tuitionInvoices`;
+}
+
+/** 학부모 Callable(`listParentChildrenStudents`)이 내려주는 이번 납부 청구서 요약 */
+export type TuitionInvoiceSummary = {
+  period: string;
+  dueDate: string;
+  status: TuitionInvoiceStatus;
+  baseAmount: number;
+  adjustments: { amount: number; memo: string }[];
+  finalAmount: number;
+};
+
+/** 카드 결제(포트원 V2 · 나이스정보통신) 상태 */
+export type AcademyPaymentStatus = "PENDING" | "PAID" | "FAILED" | "CANCELLED";
+
+/** `academies/{academyId}/payments/{paymentId}` — 카드 결제 이력 (paymentId는 클라이언트가 생성한 UUID) */
+export type AcademyPaymentDoc = {
+  paymentId: string;
+  studentId: string;
+  studentName: string;
+  parentUserId: string;
+  amount: number;
+  status: AcademyPaymentStatus;
+  /** 결제 종류 — 미설정 시 기존 데이터와의 호환을 위해 "monthly_fixed"로 취급 */
+  paymentType?: "monthly_fixed" | "session_based";
+  /** paymentType이 "session_based"일 때 결제된 회차 수 */
+  sessionCount?: number;
+  /** paymentType이 "monthly_fixed"일 때 납부한 청구서(YYYY-MM) — 청구서 도입 이전 결제는 없음 */
+  invoicePeriod?: string;
+  portoneTransactionId?: string;
+  cancelledAt?: Timestamp;
+  createdAt: Timestamp;
+  updatedAt?: Timestamp;
+};
+
+export function academyPaymentsPath(academyId: string): string {
+  return `${academyPath(academyId)}/payments`;
+}
+
+export function academyPaymentPath(academyId: string, paymentId: string): string {
+  return `${academyPaymentsPath(academyId)}/${paymentId}`;
 }

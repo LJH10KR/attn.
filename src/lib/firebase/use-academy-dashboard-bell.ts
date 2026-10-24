@@ -69,6 +69,29 @@ function mapInboxDoc(id: string, data: Record<string, unknown>, now: number): Da
     }
   }
 
+  if (kind === "session_payment_received") {
+    const studentName =
+      typeof data.studentName === "string" && data.studentName.trim()
+        ? data.studentName.trim()
+        : name;
+    const sessionCount =
+      typeof data.sessionCount === "number" &&
+      Number.isInteger(data.sessionCount) &&
+      data.sessionCount > 0
+        ? data.sessionCount
+        : null;
+    return [
+      {
+        id,
+        title:
+          sessionCount != null
+            ? `${studentName} 학생 ${sessionCount}회 자동 충전 완료`
+            : `${studentName} 학생 회차 자동 충전 완료`,
+        detail: "결제 및 회차 충전이 완료됐습니다. 결제 내역에서 확인하실 수 있습니다.",
+      },
+    ];
+  }
+
   return [];
 }
 

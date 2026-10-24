@@ -291,6 +291,16 @@ export {
 } from "./push";
 export { retryAttendancePushDelivery } from "./attendance-push-delivery";
 export {
+  recordStudentAbsences,
+  deleteStudentAttendanceRecord,
+} from "./attendance-records";
+export {
+  addTuitionInvoiceAdjustment,
+  applyAbsenceDeduction,
+  removeTuitionInvoiceAdjustment,
+  setTuitionInvoiceManualPaid,
+} from "./tuition-invoices";
+export {
   activateParent,
   deactivateParent,
   deleteAcademyStudent,
@@ -386,3 +396,4 @@ export {
   sendSessionPaymentReminders,
   onStudentSessionBalanceChanged,
 } from "./session-payment-reminder";
+export { sendPaymentCompletedPush } from "./payment-completed-push";

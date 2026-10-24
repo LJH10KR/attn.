@@ -771,6 +771,17 @@ export function AcademyDashboard() {
             : () => router.push(`/academy/settings?id=${encodeURIComponent(academyId)}`)
         }
         settingsLabel="학원 설정"
+        extraMenuActions={
+          kioskMode
+            ? []
+            : [
+                {
+                  label: "결제 내역",
+                  onSelectAction: () =>
+                    router.push(`/academy/payments?id=${encodeURIComponent(academyId)}`),
+                },
+              ]
+        }
         hideBottomNav={kioskMode}
         onHomeAction={kioskMode ? undefined : () => router.push("/")}
         onBellClickAction={() => setNotificationsOpen(true)}

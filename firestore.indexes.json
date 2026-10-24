@@ -24,6 +24,14 @@
         { "fieldPath": "authUid", "order": "ASCENDING" },
         { "fieldPath": "status", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "payments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "parentUserId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [
@@ -40,6 +48,16 @@
     {
       "collectionGroup": "parents",
       "fieldPath": "authUid",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "payments",
+      "fieldPath": "paymentId",
       "indexes": [
         {
           "order": "ASCENDING",

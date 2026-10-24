@@ -18,12 +18,16 @@ import { StudentListSectionSkeleton } from "@/components/dashboard/student-list-
 import { ParentCheckInPinCard } from "@/components/parent/parent-check-in-pin-card";
 import { ParentSessionBalanceCard } from "@/components/parent/parent-session-balance-card";
 import { ParentTuitionReminderCard } from "@/components/parent/parent-tuition-reminder-card";
+import { ParentPaymentHistory } from "@/components/parent/parent-payment-history";
 import {
   PaymentReminderModal,
   type PaymentReminderPayload,
 } from "@/components/parent/payment-reminder-modal";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
-import { academyTuitionSettingsPath } from "@/lib/firebase/attn-schema";
+import {
+  academyTuitionSettingsPath,
+  type TuitionInvoiceSummary,
+} from "@/lib/firebase/attn-schema";
 import {
   getFirebaseAuth,
   getFirebaseDb,
@@ -42,6 +46,10 @@ import { FirebaseError } from "firebase/app";
 import { formatKrPhoneDisplay } from "@/lib/phone/kr-phone";
 
 const glassCard = "glass-card";
+
+/** src/app/payment/complete/page.tsx가 남기는 결제 결과 크로스탭 신호 — 키를 그대로 공유 */
+const PAYMENT_RESULT_STORAGE_KEY = "attn_payment_result";
+const PAYMENT_RESULT_TTL_MS = 5 * 60 * 1000;
 
 function sortByName(a: StudentRowVM, b: StudentRowVM): number {
   return a.name.localeCompare(b.name, "ko");
@@ -73,12 +81,14 @@ type CallableStudentPayload = {
   sessionBalance?: number | null;
   extraSessionDates?: string[];
   hasPendingPaymentReminder?: boolean;
+  tuitionInvoice?: TuitionInvoiceSummary | null;
 };
 
 type ParentStudentRow = StudentRowVM & {
   hasCheckInPin?: boolean;
   tuitionDueDayOfMonth?: number | null;
   tuitionAmount?: number | null;
+  tuitionInvoice?: TuitionInvoiceSummary | null;
   weeklySessionCount?: number | null;
   pricePerSession?: number | null;
   sessionBalance?: number | null;
@@ -91,6 +101,7 @@ type TuitionSettingsState = {
   bankName?: string;
   accountNumber?: string;
   accountHolder?: string;
+  channelKey?: string;
 } | null;
 
 type ParentListPayload = {
@@ -280,6 +291,7 @@ export default function ParentDashboardPage() {
             hasCheckInPin: s.hasCheckInPin === true,
             tuitionDueDayOfMonth: s.tuitionDueDayOfMonth ?? null,
             tuitionAmount: typeof s.tuitionAmount === "number" ? s.tuitionAmount : null,
+            tuitionInvoice: s.tuitionInvoice ?? null,
             weeklySessionCount: typeof s.weeklySessionCount === "number" ? s.weeklySessionCount : null,
             pricePerSession: typeof s.pricePerSession === "number" ? s.pricePerSession : null,
             sessionBalance: typeof s.sessionBalance === "number" ? s.sessionBalance : null,
@@ -440,6 +452,7 @@ export default function ParentDashboardPage() {
         hasCheckInPin: s.hasCheckInPin === true,
         tuitionDueDayOfMonth: s.tuitionDueDayOfMonth ?? null,
         tuitionAmount: typeof s.tuitionAmount === "number" ? s.tuitionAmount : null,
+        tuitionInvoice: s.tuitionInvoice ?? null,
         weeklySessionCount: typeof s.weeklySessionCount === "number" ? s.weeklySessionCount : null,
         pricePerSession: typeof s.pricePerSession === "number" ? s.pricePerSession : null,
         sessionBalance: typeof s.sessionBalance === "number" ? s.sessionBalance : null,
@@ -458,6 +471,46 @@ export default function ParentDashboardPage() {
       setListRefreshBusy(false);
     }
   }, [academyId]);
+
+  // PWA에서 모바일 REDIRECTION 결제 시 나이스 결제 페이지가 시스템 브라우저로 열려
+  // 결제 완료 후 PWA로 자동 복귀되지 않는다 — /payment/complete가 localStorage에 남긴
+  // 결과를 PWA가 다시 포그라운드로 돌아왔을 때(visibilitychange) 읽어 학생 목록을 갱신한다.
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      let raw: string | null;
+      try {
+        raw = localStorage.getItem(PAYMENT_RESULT_STORAGE_KEY);
+      } catch {
+        return;
+      }
+      if (!raw) return;
+
+      let parsed: { status?: string; timestamp?: number } | null = null;
+      try {
+        parsed = JSON.parse(raw) as { status?: string; timestamp?: number };
+      } catch {
+        parsed = null;
+      }
+
+      try {
+        localStorage.removeItem(PAYMENT_RESULT_STORAGE_KEY);
+      } catch {
+        /* ignore */
+      }
+
+      const timestamp = typeof parsed?.timestamp === "number" ? parsed.timestamp : 0;
+      const isFresh = timestamp > 0 && Date.now() - timestamp <= PAYMENT_RESULT_TTL_MS;
+      if (!isFresh) return;
+
+      void refreshChildrenList();
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [refreshChildrenList]);
 
   useEffect(() => {
     if (!academyId) return;
@@ -500,6 +553,7 @@ export default function ParentDashboardPage() {
             bankName: typeof d?.bankName === "string" && d.bankName ? d.bankName : undefined,
             accountNumber: typeof d?.accountNumber === "string" && d.accountNumber ? d.accountNumber : undefined,
             accountHolder: typeof d?.accountHolder === "string" && d.accountHolder ? d.accountHolder : undefined,
+            channelKey: typeof d?.channelKey === "string" && d.channelKey ? d.channelKey : undefined,
           });
         } else {
           setTuitionSettings(null);
@@ -641,23 +695,34 @@ export default function ParentDashboardPage() {
                 ) : null}
                 {s.tuitionDueDayOfMonth ? (
                   <ParentTuitionReminderCard
+                    studentId={s.id}
+                    studentName={s.name}
+                    academyId={academyId!}
                     tuitionDueDayOfMonth={s.tuitionDueDayOfMonth}
                     tuitionAmount={s.tuitionAmount}
+                    invoice={s.tuitionInvoice ?? null}
                     settings={tuitionSettings}
+                    onRefreshAction={refreshChildrenList}
                   />
                 ) : s.weeklySessionCount != null ? (
                   <ParentSessionBalanceCard
+                    studentId={s.id}
+                    studentName={s.name}
+                    academyId={academyId!}
                     weeklySessionCount={s.weeklySessionCount}
                     pricePerSession={s.pricePerSession ?? null}
                     sessionBalance={s.sessionBalance ?? null}
                     extraSessionDates={s.extraSessionDates ?? []}
                     settings={tuitionSettings}
+                    onRefreshAction={refreshChildrenList}
                   />
                 ) : null}
               </div>
             ))
           )}
         </div>
+
+        <ParentPaymentHistory academyId={academyId} parentUid={authUid} />
 
         <IosPwaHintModal
           open={iosAutoModalOpen}

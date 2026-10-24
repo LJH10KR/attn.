@@ -74,45 +74,92 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/academies/$(academyId)/teachers/$(tid)).data.status == 'active';
     }
 
+    /** 전담 요소 하나 — 기존 전담(prev)이면 유지 허용, 새로 추가되는 경우에만 활성 선생 문서 필요 */
+    function assignedTeacherEntryOk(academyId, prev, tid) {
+      return prev.hasAny([tid]) || teacherDocActive(academyId, tid);
+    }
+
     /**
-     * assignedTeacherUids — 최대 20명, 요소마다 활성 선생 문서 필요.
+     * assignedTeacherUids — 최대 20명, 새로 추가되는 요소마다 활성 선생 문서 필요.
+     * 비활성화된 선생은 재활성화 시 복구를 위해 전담이 유지되므로(`deactivateTeacher`) 기존 요소는 재검증하지 않음.
      * (규칙은 고정 길이 분기로 검증 — `MAX_ASSIGNED_TEACHERS_PER_STUDENT`와 맞출 것)
      */
-    function assignedTeacherUidsListOk(academyId, u) {
+    function assignedTeacherUidsListOk(academyId, u, prev) {
       return u is list
         && u.size() <= 20
-        && (u.size() < 1 || teacherDocActive(academyId, u[0]))
-        && (u.size() < 2 || teacherDocActive(academyId, u[1]))
-        && (u.size() < 3 || teacherDocActive(academyId, u[2]))
-        && (u.size() < 4 || teacherDocActive(academyId, u[3]))
-        && (u.size() < 5 || teacherDocActive(academyId, u[4]))
-        && (u.size() < 6 || teacherDocActive(academyId, u[5]))
-        && (u.size() < 7 || teacherDocActive(academyId, u[6]))
-        && (u.size() < 8 || teacherDocActive(academyId, u[7]))
-        && (u.size() < 9 || teacherDocActive(academyId, u[8]))
-        && (u.size() < 10 || teacherDocActive(academyId, u[9]))
-        && (u.size() < 11 || teacherDocActive(academyId, u[10]))
-        && (u.size() < 12 || teacherDocActive(academyId, u[11]))
-        && (u.size() < 13 || teacherDocActive(academyId, u[12]))
-        && (u.size() < 14 || teacherDocActive(academyId, u[13]))
-        && (u.size() < 15 || teacherDocActive(academyId, u[14]))
-        && (u.size() < 16 || teacherDocActive(academyId, u[15]))
-        && (u.size() < 17 || teacherDocActive(academyId, u[16]))
-        && (u.size() < 18 || teacherDocActive(academyId, u[17]))
-        && (u.size() < 19 || teacherDocActive(academyId, u[18]))
-        && (u.size() < 20 || teacherDocActive(academyId, u[19]));
+        && (u.size() < 1 || assignedTeacherEntryOk(academyId, prev, u[0]))
+        && (u.size() < 2 || assignedTeacherEntryOk(academyId, prev, u[1]))
+        && (u.size() < 3 || assignedTeacherEntryOk(academyId, prev, u[2]))
+        && (u.size() < 4 || assignedTeacherEntryOk(academyId, prev, u[3]))
+        && (u.size() < 5 || assignedTeacherEntryOk(academyId, prev, u[4]))
+        && (u.size() < 6 || assignedTeacherEntryOk(academyId, prev, u[5]))
+        && (u.size() < 7 || assignedTeacherEntryOk(academyId, prev, u[6]))
+        && (u.size() < 8 || assignedTeacherEntryOk(academyId, prev, u[7]))
+        && (u.size() < 9 || assignedTeacherEntryOk(academyId, prev, u[8]))
+        && (u.size() < 10 || assignedTeacherEntryOk(academyId, prev, u[9]))
+        && (u.size() < 11 || assignedTeacherEntryOk(academyId, prev, u[10]))
+        && (u.size() < 12 || assignedTeacherEntryOk(academyId, prev, u[11]))
+        && (u.size() < 13 || assignedTeacherEntryOk(academyId, prev, u[12]))
+        && (u.size() < 14 || assignedTeacherEntryOk(academyId, prev, u[13]))
+        && (u.size() < 15 || assignedTeacherEntryOk(academyId, prev, u[14]))
+        && (u.size() < 16 || assignedTeacherEntryOk(academyId, prev, u[15]))
+        && (u.size() < 17 || assignedTeacherEntryOk(academyId, prev, u[16]))
+        && (u.size() < 18 || assignedTeacherEntryOk(academyId, prev, u[17]))
+        && (u.size() < 19 || assignedTeacherEntryOk(academyId, prev, u[18]))
+        && (u.size() < 20 || assignedTeacherEntryOk(academyId, prev, u[19]));
+    }
+
+    /**
+     * 수정 전 학생 문서의 전담 uid 목록(배열 + 구 단일 필드) — update에서만 사용(create에는 resource 없음).
+     * 클라이언트가 저장 시 구 단일 필드를 배열로 병합하므로 둘 다 기존 전담으로 취급.
+     */
+    function prevAssignedTeacherUids() {
+      let r = resource.data;
+      let arr = r.keys().hasAny(['assignedTeacherUids']) && r.assignedTeacherUids is list
+        ? r.assignedTeacherUids
+        : [];
+      let legacy = r.keys().hasAny(['assignedTeacherUid']) && r.assignedTeacherUid is string
+        ? [r.assignedTeacherUid]
+        : [];
+      return arr.concat(legacy);
     }
 
     /**
      * 학생 전담 필드 — assignedTeacherUids(권장) 또는 구 assignedTeacherUid(마이그레이션 대비).
+     * prev: 기존 전담 uid 목록(create는 []).
      */
-    function studentAssignedTeacherOk(academyId) {
+    function studentAssignedTeacherOk(academyId, prev) {
       let d = request.resource.data;
       return (!d.keys().hasAny(['assignedTeacherUids'])
-          || assignedTeacherUidsListOk(academyId, d.assignedTeacherUids))
+          || assignedTeacherUidsListOk(academyId, d.assignedTeacherUids, prev))
         && (!d.keys().hasAny(['assignedTeacherUid'])
             || d.assignedTeacherUid == null
-            || (d.assignedTeacherUid is string && teacherDocActive(academyId, d.assignedTeacherUid)));
+            || (d.assignedTeacherUid is string
+                && assignedTeacherEntryOk(academyId, prev, d.assignedTeacherUid)));
+    }
+
+    /**
+     * 학부모 클라이언트가 학생 문서를 생성할 때 허용하는 필드 — 원비·회차·납부 상태 필드는
+     * 결제 검증(`completePayment`)이 그대로 신뢰하므로 학부모가 지정할 수 없어야 함.
+     */
+    function parentStudentCreateFieldsOk() {
+      return request.resource.data.keys().hasOnly([
+        'parentUserId', 'name', 'age', 'phone', 'emergencyContact', 'createdAt', 'updatedAt'
+      ]);
+    }
+
+    /**
+     * 학부모 클라이언트의 학생 문서 수정 — 납부 안내 확인 표시(`payment-reminder-modal.tsx`)만 허용.
+     * 그 외 필드(tuitionAmount·sessionBalance 등)는 학원(오너·포털)만 수정.
+     */
+    function parentStudentUpdateFieldsOk() {
+      let d = request.resource.data;
+      return d.diff(resource.data).affectedKeys()
+          .hasOnly(['tuitionReminderConfirmedAt', 'tuitionReminderConfirmedByUid'])
+        && (!d.keys().hasAny(['tuitionReminderConfirmedAt'])
+            || d.tuitionReminderConfirmedAt == request.time)
+        && (!d.keys().hasAny(['tuitionReminderConfirmedByUid'])
+            || d.tuitionReminderConfirmedByUid == request.auth.uid);
     }
 
     /**
@@ -240,6 +287,29 @@ service cloud.firestore {
           || isAcademyOwner(academyId);
       }
 
+      /**
+       * 결석 차감 제안 기본값 — 오너·학원 포털 쓰기(값 형식 검증), 학부모 비공개.
+       * 차감은 원장이 청구 모달에서 확인 후 반영하므로 이 값 자체가 청구 금액을 바꾸지는 않음.
+       */
+      match /meta/absenceDeductionSettings {
+        allow read: if isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyPortalSession(academyId);
+        allow write: if (isAdmin()
+            || isAcademyOwner(academyId)
+            || isAcademyPortalSession(academyId))
+          && request.resource.data.keys().hasOnly(['method', 'perDayAmount', 'monthlyClassDays', 'updatedAt'])
+          && request.resource.data.method in ['per_day', 'divide']
+          && (request.resource.data.method != 'per_day'
+              || (request.resource.data.perDayAmount is int
+                  && request.resource.data.perDayAmount > 0
+                  && request.resource.data.perDayAmount <= 10000000))
+          && (request.resource.data.method != 'divide'
+              || (request.resource.data.monthlyClassDays is int
+                  && request.resource.data.monthlyClassDays >= 1
+                  && request.resource.data.monthlyClassDays <= 31));
+      }
+
       match /students/{studentId} {
         /**
          * list 쿼리 검증 시 OR 전체가 분석되므로, parentUserId 등 필드가 없을 때 직접 접근하면
@@ -264,22 +334,51 @@ service cloud.firestore {
           && isActiveParentForStudent(academyId, request.resource.data.parentUserId))
           || (isAcademyParentActive(academyId)
               && request.resource.data.keys().hasAll(['parentUserId', 'name', 'createdAt'])
-              && request.resource.data.parentUserId == request.auth.uid))
-          && studentAssignedTeacherOk(academyId);
+              && request.resource.data.parentUserId == request.auth.uid
+              && parentStudentCreateFieldsOk()))
+          && studentAssignedTeacherOk(academyId, []);
 
-        allow update: if (isAdmin()
+        /**
+         * 학부모는 전담 필드를 바꿀 수 없으므로(parentStudentUpdateFieldsOk) 전담 검증을 생략 —
+         * 전담 선생 중 비활성자가 있어도 납부 안내 확인 표시는 저장되도록.
+         */
+        allow update: if ((isAdmin()
           || isAcademyOwner(academyId)
-          || isAcademyPortalSession(academyId)
-          || (isAcademyParentActive(academyId) && resource.data.parentUserId == request.auth.uid))
-          && studentAssignedTeacherOk(academyId);
+          || isAcademyPortalSession(academyId))
+          && studentAssignedTeacherOk(academyId, prevAssignedTeacherUids()))
+          || (isAcademyParentActive(academyId)
+              && resource.data.parentUserId == request.auth.uid
+              && parentStudentUpdateFieldsOk());
 
+        /** 학부모 측 삭제는 미수 회차 등 기록 소실 우려로 차단 — 삭제는 `deleteAcademyStudent`(학원 전용) */
         allow delete: if isAdmin()
           || isAcademyOwner(academyId)
-          || isAcademyPortalSession(academyId)
-          || (isAcademyParentActive(academyId) && resource.data.parentUserId == request.auth.uid);
+          || isAcademyPortalSession(academyId);
 
         match /serverSecrets/{secretId} {
           allow read, write: if false;
+        }
+
+        /**
+         * 출결 기록(문서 ID = 서울 기준 YYYY-MM-DD) — 결석 사유가 원비 차감 근거가 되므로
+         * 쓰기는 Functions(`recordStudentAbsences` 등)만, 읽기는 학원만.
+         */
+        match /attendanceRecords/{date} {
+          allow read: if isAdmin()
+            || isAcademyOwner(academyId)
+            || isAcademyPortalSession(academyId);
+          allow write: if false;
+        }
+
+        /**
+         * 월별 청구서(문서 ID = YYYY-MM) — 결제 검증이 신뢰하는 금액 근거이므로 쓰기는
+         * Functions(조정·수동 납부)와 Next 서버(카드 결제)만. 학부모는 Callable 요약으로만 조회.
+         */
+        match /tuitionInvoices/{period} {
+          allow read: if isAdmin()
+            || isAcademyOwner(academyId)
+            || isAcademyPortalSession(academyId);
+          allow write: if false;
         }
 
         /** 수업 완료 기록 로그 — 오너·포털·활성 선생님이 생성, 삭제는 오너만 */
@@ -295,6 +394,22 @@ service cloud.firestore {
           allow update, delete: if isAdmin()
             || isAcademyOwner(academyId);
         }
+      }
+
+      /**
+       * 카드 결제(포트원 V2) 이력 — 검증·상태 갱신은 Cloud Functions(Admin SDK, onRequest)만 수행.
+       * 클라이언트 쓰기는 isAdmin/isAcademyOwner 외에는 항상 거부(위변조 방지).
+       */
+      match /payments/{paymentId} {
+        allow read: if isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyPortalSession(academyId)
+          || (isSignedIn()
+              && resource.data.keys().hasAny(['parentUserId'])
+              && resource.data.parentUserId is string
+              && resource.data.parentUserId == request.auth.uid);
+
+        allow create, update, delete: if isAdmin() || isAcademyOwner(academyId);
       }
     }
 

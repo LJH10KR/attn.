@@ -23,6 +23,11 @@ import {
   getFirebaseFunctions,
 } from "@/lib/firebase/client-app";
 import { useAttendanceNotificationLog } from "@/lib/firebase/use-attendance-notification-log";
+import {
+  attendanceButtonErrorMessage,
+  attendanceButtonResultMessage,
+  type AttendanceNotifyResult,
+} from "@/lib/academy/attendance-records";
 import { setLastDashboardRoleHint } from "@/lib/auth/last-dashboard-role";
 import { useBootOverlay } from "@/components/boot/boot-overlay";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
@@ -297,24 +302,12 @@ export default function TeacherDashboardPage() {
           getFirebaseFunctions(),
           "sendStudentAttendanceNotification",
         );
-        await fn({ academyId: aid, studentId, kind });
+        const res = await fn({ academyId: aid, studentId, kind });
         setNotifyMessage(
-          kind === "present"
-            ? "출석 알림을 보냈습니다."
-            : "결석 알림을 보냈습니다.",
+          attendanceButtonResultMessage(kind, res.data as AttendanceNotifyResult),
         );
       } catch (e) {
-        if (e instanceof FirebaseError) {
-          if (e.code === "functions/resource-exhausted") {
-            setNotifyMessage(
-              "같은 학생에게 너무 자주 보낼 수 없습니다. 잠시 후 다시 시도해 주세요.",
-            );
-            return;
-          }
-        }
-        setNotifyMessage(
-          "알림을 보내지 못했습니다. 잠시 후 다시 시도해 주세요.",
-        );
+        setNotifyMessage(attendanceButtonErrorMessage(e));
       } finally {
         setNotifyBusyKey(null);
       }
@@ -509,8 +502,8 @@ export default function TeacherDashboardPage() {
                     className="rounded-[8px] border border-emerald-400/60 bg-emerald-500/15 px-3 py-2 text-[11px] font-medium text-emerald-950 hover:bg-emerald-500/25 disabled:opacity-50"
                   >
                     {notifyBusyKey === `${s.id}-present`
-                      ? "전송 중…"
-                      : "출석 알림"}
+                      ? "기록 중…"
+                      : "출석"}
                   </button>
                   <button
                     type="button"
@@ -519,8 +512,8 @@ export default function TeacherDashboardPage() {
                     className="rounded-[8px] border border-amber-400/60 bg-amber-500/12 px-3 py-2 text-[11px] font-medium text-amber-950 hover:bg-amber-500/22 disabled:opacity-50"
                   >
                     {notifyBusyKey === `${s.id}-absent`
-                      ? "전송 중…"
-                      : "결석 알림"}
+                      ? "기록 중…"
+                      : "결석"}
                   </button>
                 </div>
               </div>
