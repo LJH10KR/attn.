@@ -20,6 +20,7 @@ import { SlideSwitch } from "@/components/ui/slide-switch";
 import { SettingsAccordionItem } from "@/components/ui/settings-accordion-item";
 import { OwnerTuitionSettingsCard } from "@/components/owner/owner-tuition-settings-card";
 import { OwnerSessionTuitionSettingsCard } from "@/components/owner/owner-session-tuition-settings-card";
+import { OwnerAbsenceDeductionSettingsCard } from "@/components/owner/owner-absence-deduction-settings-card";
 
 function callableMessage(err: unknown, fallback: string): string {
   if (err instanceof FirebaseError && err.message) return err.message;
@@ -247,6 +248,12 @@ function AcademySettingsInner() {
         <OwnerTuitionSettingsCard
           academyId={academyId}
           academyName=""
+          disabled={busy}
+          defaultCollapsed
+        />
+
+        <OwnerAbsenceDeductionSettingsCard
+          academyId={academyId}
           disabled={busy}
           defaultCollapsed
         />

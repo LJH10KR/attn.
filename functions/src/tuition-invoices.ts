@@ -15,6 +15,15 @@ const MAX_ADJUSTMENTS_PER_INVOICE = 20;
 const MAX_ADJUSTMENT_ABS_AMOUNT = 10_000_000;
 const MAX_ADJUSTMENT_MEMO_LENGTH = 100;
 const PERIOD_RE = /^(\d{4})-(\d{2})$/;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** 결석 차감 1건에 묶을 수 있는 최대 일수(청구 주기 2개월분) */
+const MAX_ABSENCE_DATES_PER_DEDUCTION = 62;
+/** `src/lib/payment/tuition-invoice.ts`의 MAX_ABSENCE_DEDUCTION_PER_DAY와 동일 */
+const MAX_ABSENCE_DEDUCTION_PER_DAY = 10_000_000;
+const DEDUCTIBLE_REASON_LABELS: Record<string, string> = {
+  illness: "질병",
+  academy: "학원 사정",
+};
 
 export type InvoiceSummary = {
   period: string;
@@ -274,15 +283,174 @@ export const removeTuitionInvoiceAdjustment = onCall(async (request) => {
       throw new HttpsError("failed-precondition", "이미 납부된 청구서는 수정할 수 없습니다.");
     }
     const adjustments = (snap.get("adjustments") as unknown[] | undefined) ?? [];
-    const next = adjustments.filter(
-      (a) => !(a && typeof a === "object" && (a as { id?: unknown }).id === adjustmentId),
-    );
-    if (next.length === adjustments.length) {
+    const removed = adjustments.find(
+      (a) => !!a && typeof a === "object" && (a as { id?: unknown }).id === adjustmentId,
+    ) as { absenceDates?: unknown } | undefined;
+    if (!removed) {
       throw new HttpsError("not-found", "조정 항목을 찾을 수 없습니다.");
     }
-    tx.update(req.ref, { adjustments: next, updatedAt: FieldValue.serverTimestamp() });
+
+    // 결석 차감 항목이면 근거가 된 출결 기록의 잠금 해제(트랜잭션 읽기는 쓰기보다 먼저)
+    const absenceDates = Array.isArray(removed.absenceDates)
+      ? removed.absenceDates.filter((d): d is string => typeof d === "string" && DATE_RE.test(d))
+      : [];
+    const recordSnaps = absenceDates.length
+      ? await tx.getAll(...absenceDates.map((d) => attendanceRecordRef(req, d)))
+      : [];
+
+    tx.update(req.ref, {
+      adjustments: adjustments.filter((a) => a !== removed),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    for (const r of recordSnaps) {
+      if (r.exists && r.get("billedAdjustmentId") === adjustmentId) {
+        tx.update(r.ref, {
+          billedInvoicePeriod: FieldValue.delete(),
+          billedAdjustmentId: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+    }
   });
   return { ok: true as const };
+});
+
+function attendanceRecordRef(req: InvoiceRequest, date: string) {
+  return req.db.doc(
+    `academies/${req.academyId}/students/${req.studentId}/attendanceRecords/${date}`,
+  );
+}
+
+/** "결석 차감 4일 (질병 3일·학원 사정 1일, 1일 7,500원)" */
+function absenceDeductionMemo(reasons: string[], perDayAmount: number): string {
+  // 날짜 순서와 무관하게 질병 → 학원 사정 순으로 표기
+  const parts = Object.entries(DEDUCTIBLE_REASON_LABELS).flatMap(([r, label]) => {
+    const n = reasons.filter((x) => x === r).length;
+    return n > 0 ? [`${label} ${n}일`] : [];
+  });
+  return `결석 차감 ${reasons.length}일 (${parts.join("·")}, 1일 ${perDayAmount.toLocaleString("ko-KR")}원)`;
+}
+
+/**
+ * 원장·학원 포털 — 질병·학원 사정 결석을 미납 청구서에 차감으로 반영(1일 차감액 × 일수).
+ * 반영된 출결 기록은 billedInvoicePeriod로 잠기며, 이 조정 항목을 삭제하면 해제됨.
+ * 이월 차감: 청구서 납부일 이전의, 아직 어떤 청구서에도 반영되지 않은 결석이 대상.
+ */
+export const applyAbsenceDeduction = onCall(async (request) => {
+  const req = await parseInvoiceRequest(request);
+  const rawDates = request.data?.dates;
+  const dates = Array.isArray(rawDates)
+    ? [...new Set(rawDates.filter((d): d is string => typeof d === "string" && DATE_RE.test(d)))].sort()
+    : [];
+  if (
+    dates.length === 0 ||
+    !Array.isArray(rawDates) ||
+    dates.length !== rawDates.length ||
+    dates.length > MAX_ABSENCE_DATES_PER_DEDUCTION
+  ) {
+    throw new HttpsError("invalid-argument", "차감할 결석 날짜가 올바르지 않습니다.");
+  }
+  const perDayAmount = request.data?.perDayAmount;
+  if (
+    typeof perDayAmount !== "number" ||
+    !Number.isInteger(perDayAmount) ||
+    perDayAmount <= 0 ||
+    perDayAmount > MAX_ABSENCE_DEDUCTION_PER_DAY
+  ) {
+    throw new HttpsError("invalid-argument", "1일 차감액이 올바르지 않습니다.");
+  }
+  const dueDate = invoiceDueDate(req.period, req.dueDay);
+  if (dates[dates.length - 1]! >= dueDate) {
+    throw new HttpsError(
+      "invalid-argument",
+      "청구서 납부일 이후의 결석은 다음 청구서에서 차감해 주세요.",
+    );
+  }
+  const saveAsStudentDefault = request.data?.saveAsStudentDefault === true;
+  const studentRef = req.db.doc(`academies/${req.academyId}/students/${req.studentId}`);
+  const adjustmentId = crypto.randomUUID();
+
+  const result = await req.db.runTransaction(async (tx) => {
+    const [invoiceSnap, studentSnap, ...recordSnaps] = await tx.getAll(
+      req.ref,
+      studentRef,
+      ...dates.map((d) => attendanceRecordRef(req, d)),
+    );
+    const prev = invoiceSnap!.data() ?? {};
+    if (prev.status === "paid") {
+      throw new HttpsError(
+        "failed-precondition",
+        "이미 납부된 청구서입니다. 다음 달 청구서에 반영해 주세요.",
+      );
+    }
+    const adjustments = Array.isArray(prev.adjustments) ? prev.adjustments : [];
+    if (adjustments.length >= MAX_ADJUSTMENTS_PER_INVOICE) {
+      throw new HttpsError(
+        "resource-exhausted",
+        `조정 항목은 청구서당 최대 ${MAX_ADJUSTMENTS_PER_INVOICE}개입니다.`,
+      );
+    }
+    if (perDayAmount > (studentSnap!.get("tuitionAmount") as number)) {
+      throw new HttpsError("invalid-argument", "1일 차감액이 원비보다 클 수 없습니다.");
+    }
+
+    const reasons: string[] = [];
+    recordSnaps.forEach((snap, i) => {
+      const d = snap.data();
+      if (!d || d.status !== "absent" || (d.reason !== "illness" && d.reason !== "academy")) {
+        throw new HttpsError(
+          "failed-precondition",
+          `${dates[i]}은(는) 질병·학원 사정 결석 기록이 아닙니다. 출결 기록을 확인해 주세요.`,
+        );
+      }
+      if (typeof d.billedInvoicePeriod === "string" && d.billedInvoicePeriod) {
+        throw new HttpsError(
+          "failed-precondition",
+          `${dates[i]} 결석은 이미 ${d.billedInvoicePeriod} 청구서에 반영되어 있습니다.`,
+        );
+      }
+      reasons.push(d.reason as string);
+    });
+
+    const amount = -perDayAmount * dates.length;
+    const memo = absenceDeductionMemo(reasons, perDayAmount);
+    tx.set(req.ref, {
+      period: req.period,
+      dueDate,
+      status: "open",
+      adjustments: [
+        ...adjustments,
+        {
+          id: adjustmentId,
+          amount,
+          memo,
+          source: "absence",
+          absenceDates: dates,
+          perDayAmount,
+          createdByUid: req.uid,
+          createdAt: Timestamp.now(),
+        },
+      ],
+      createdAt: prev.createdAt ?? FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    for (const snap of recordSnaps) {
+      tx.update(snap.ref, {
+        billedInvoicePeriod: req.period,
+        billedAdjustmentId: adjustmentId,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+    if (saveAsStudentDefault) {
+      tx.update(studentRef, {
+        absenceDeductionPerDay: perDayAmount,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+    return { amount, memo };
+  });
+
+  return { ok: true as const, adjustmentId, ...result };
 });
 
 /**

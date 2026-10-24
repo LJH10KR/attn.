@@ -288,6 +288,8 @@ export type AcademyStudent = {
   tuitionReminderConfirmedAt?: Timestamp;
   /** 납부 알림을 확인한 학부모 uid */
   tuitionReminderConfirmedByUid?: string;
+  /** 결석 차감 1일당 금액(원) — 미설정 시 학원 `absenceDeductionSettings` 기본값 사용 */
+  absenceDeductionPerDay?: number;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 };
@@ -326,6 +328,25 @@ export type AcademySessionTuitionSettingsDoc = {
 
 export function academySessionTuitionSettingsPath(academyId: string): string {
   return `${academyPath(academyId)}/meta/${ACADEMY_SESSION_TUITION_SETTINGS_DOC_ID}`;
+}
+
+/** `academies/{academyId}/meta/absenceDeductionSettings` — 결석 차감 제안 기본값(오너·포털 쓰기) */
+export const ACADEMY_ABSENCE_DEDUCTION_SETTINGS_DOC_ID = "absenceDeductionSettings" as const;
+
+/** per_day: 1일 고정 금액 · divide: 학생 원비 ÷ 월 수업일수 */
+export type AbsenceDeductionMethod = "per_day" | "divide";
+
+export type AcademyAbsenceDeductionSettingsDoc = {
+  method: AbsenceDeductionMethod;
+  /** method가 "per_day"일 때 1일 차감액(원) */
+  perDayAmount?: number;
+  /** method가 "divide"일 때 월 기준 수업일수(1~31) */
+  monthlyClassDays?: number;
+  updatedAt?: Timestamp;
+};
+
+export function academyAbsenceDeductionSettingsPath(academyId: string): string {
+  return `${academyPath(academyId)}/meta/${ACADEMY_ABSENCE_DEDUCTION_SETTINGS_DOC_ID}`;
 }
 
 /** `academies/{academyId}/students/{studentId}/sessionLogs/{logId}` */
@@ -373,6 +394,12 @@ export type AttendanceRecordDoc = {
   recordedByUid: string;
   recordedByRole: "teacher" | "owner" | "academy" | "student_kiosk";
   source: "teacher_dashboard" | "academy_dashboard" | "student_kiosk";
+  /**
+   * 결석 차감이 반영된 청구서(YYYY-MM)·조정 항목 id — 설정된 동안 기록은 수정·삭제 불가(잠금).
+   * 해당 조정 항목을 삭제하면 해제됨.
+   */
+  billedInvoicePeriod?: string;
+  billedAdjustmentId?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 };
@@ -386,7 +413,11 @@ export type TuitionInvoiceAdjustment = {
   id: string;
   amount: number;
   memo: string;
-  source: "manual";
+  /** manual: 원장 직접 입력 · absence: 결석 기록 기반 차감(`applyAbsenceDeduction`) */
+  source: "manual" | "absence";
+  /** source가 "absence"일 때 차감 근거가 된 결석 날짜(YYYY-MM-DD)와 1일 차감액 */
+  absenceDates?: string[];
+  perDayAmount?: number;
   createdByUid: string;
   createdAt: Timestamp;
 };

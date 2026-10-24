@@ -296,6 +296,7 @@ export {
 } from "./attendance-records";
 export {
   addTuitionInvoiceAdjustment,
+  applyAbsenceDeduction,
   removeTuitionInvoiceAdjustment,
   setTuitionInvoiceManualPaid,
 } from "./tuition-invoices";

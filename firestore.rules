@@ -287,6 +287,29 @@ service cloud.firestore {
           || isAcademyOwner(academyId);
       }
 
+      /**
+       * 결석 차감 제안 기본값 — 오너·학원 포털 쓰기(값 형식 검증), 학부모 비공개.
+       * 차감은 원장이 청구 모달에서 확인 후 반영하므로 이 값 자체가 청구 금액을 바꾸지는 않음.
+       */
+      match /meta/absenceDeductionSettings {
+        allow read: if isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyPortalSession(academyId);
+        allow write: if (isAdmin()
+            || isAcademyOwner(academyId)
+            || isAcademyPortalSession(academyId))
+          && request.resource.data.keys().hasOnly(['method', 'perDayAmount', 'monthlyClassDays', 'updatedAt'])
+          && request.resource.data.method in ['per_day', 'divide']
+          && (request.resource.data.method != 'per_day'
+              || (request.resource.data.perDayAmount is int
+                  && request.resource.data.perDayAmount > 0
+                  && request.resource.data.perDayAmount <= 10000000))
+          && (request.resource.data.method != 'divide'
+              || (request.resource.data.monthlyClassDays is int
+                  && request.resource.data.monthlyClassDays >= 1
+                  && request.resource.data.monthlyClassDays <= 31));
+      }
+
       match /students/{studentId} {
         /**
          * list 쿼리 검증 시 OR 전체가 분석되므로, parentUserId 등 필드가 없을 때 직접 접근하면

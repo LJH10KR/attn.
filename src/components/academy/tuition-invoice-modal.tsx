@@ -1,26 +1,50 @@
 import { FirebaseError } from "firebase/app";
-import { collection, getDocs, limit, orderBy, query } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  where,
+} from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { academyStudentTuitionInvoicesPath } from "@/lib/firebase/attn-schema";
+import {
+  ABSENCE_REASON_LABELS,
+  academyAbsenceDeductionSettingsPath,
+  academyStudentAttendanceRecordsPath,
+  academyStudentTuitionInvoicesPath,
+  type AcademyAbsenceDeductionSettingsDoc,
+} from "@/lib/firebase/attn-schema";
 import { getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { formatRecordDate, seoulDateString } from "@/lib/academy/attendance-records";
 import {
   computeInvoiceFinalAmount,
   formatInvoicePeriod,
   invoiceDueDate,
+  MAX_ABSENCE_DEDUCTION_PER_DAY,
   nextDueInvoicePeriod,
+  resolveAbsenceDeductionPerDay,
   shiftInvoicePeriod,
 } from "@/lib/payment/tuition-invoice";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 
 const HISTORY_LIMIT = 8;
 const MAX_MEMO_LENGTH = 100;
+/** 차감 제안 대상 결석을 찾는 범위 — 청구서 납부일 이전 120일(출결 소급 입력 한도 92일 + 여유) */
+const ABSENCE_LOOKBACK_DAYS = 120;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const inputClass =
   "min-w-0 w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-3 py-2 text-sm text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50 focus:bg-white/70";
 
-type Adjustment = { id: string; amount: number; memo: string };
+type Adjustment = { id: string; amount: number; memo: string; source: "manual" | "absence" };
+
+/** 아직 청구서에 반영되지 않은 질병·학원 사정 결석 */
+type DeductibleAbsence = { date: string; reason: "illness" | "academy" };
 
 type InvoiceRow = {
   period: string;
@@ -34,9 +58,16 @@ type InvoiceRow = {
 function parseInvoice(period: string, x: Record<string, unknown>): InvoiceRow {
   const adjustments = Array.isArray(x.adjustments)
     ? (x.adjustments as unknown[]).flatMap((a) => {
-        const v = a as { id?: unknown; amount?: unknown; memo?: unknown } | null;
+        const v = a as { id?: unknown; amount?: unknown; memo?: unknown; source?: unknown } | null;
         if (!v || typeof v.id !== "string" || typeof v.amount !== "number") return [];
-        return [{ id: v.id, amount: v.amount, memo: typeof v.memo === "string" ? v.memo : "" }];
+        return [
+          {
+            id: v.id,
+            amount: v.amount,
+            memo: typeof v.memo === "string" ? v.memo : "",
+            source: v.source === "absence" ? ("absence" as const) : ("manual" as const),
+          },
+        ];
       })
     : [];
   return {
@@ -72,6 +103,7 @@ export function TuitionInvoiceModal({
   studentName,
   tuitionAmount,
   tuitionDueDayOfMonth,
+  studentPerDayDeduction,
   onClose,
   onNotice,
 }: {
@@ -80,6 +112,8 @@ export function TuitionInvoiceModal({
   studentName: string;
   tuitionAmount: number;
   tuitionDueDayOfMonth: number;
+  /** 학생별 결석 1일 차감액(`absenceDeductionPerDay`) */
+  studentPerDayDeduction: number | null;
   onClose: () => void;
   onNotice: (message: string) => void;
 }) {
@@ -91,6 +125,14 @@ export function TuitionInvoiceModal({
   const [amountText, setAmountText] = useState("");
   const [memo, setMemo] = useState("");
   const [confirm, setConfirm] = useState<{ period: string; paid: boolean } | null>(null);
+  const [deductionSettings, setDeductionSettings] =
+    useState<Partial<AcademyAbsenceDeductionSettingsDoc> | null>(null);
+  const [savedPerDay, setSavedPerDay] = useState<number | null>(studentPerDayDeduction);
+  const [absences, setAbsences] = useState<DeductibleAbsence[]>([]);
+  const [excludedDates, setExcludedDates] = useState<Set<string>>(() => new Set());
+  /** null이면 기본값(학생별 > 학원 설정) 사용 */
+  const [perDayText, setPerDayText] = useState<string | null>(null);
+  const [saveAsStudentDefault, setSaveAsStudentDefault] = useState(false);
   const closeRef = useRef<HTMLButtonElement>(null);
 
   useBodyScrollLock(true);
@@ -133,6 +175,20 @@ export function TuitionInvoiceModal({
     void fetchInvoices();
   }, [fetchInvoices]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void getDoc(doc(getFirebaseDb(), academyAbsenceDeductionSettingsPath(academyId)))
+      .then((snap) => {
+        if (!cancelled) setDeductionSettings(snap.exists() ? snap.data() : null);
+      })
+      .catch(() => {
+        /* 기본값 없이 직접 입력 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [academyId]);
+
   const nextPeriod = nextDueInvoicePeriod(tuitionDueDayOfMonth);
   const nextPaid = invoices[nextPeriod]?.status === "paid";
   // 이번 납부가 끝났으면 조정은 다음 달 청구서에 반영
@@ -153,6 +209,69 @@ export function TuitionInvoiceModal({
   const history = Object.values(invoices)
     .filter((r) => r.period !== targetPeriod)
     .sort((a, b) => (a.period < b.period ? 1 : -1));
+
+  const targetDueDate = invoiceDueDate(targetPeriod, tuitionDueDayOfMonth);
+
+  // 이월 차감 대상: 이 청구서 납부일 이전의, 아직 어떤 청구서에도 반영되지 않은 질병·학원 사정 결석
+  const fetchAbsences = useCallback(async () => {
+    const from = seoulDateString(
+      new Date(new Date(`${targetDueDate}T00:00:00+09:00`).getTime() - ABSENCE_LOOKBACK_DAYS * DAY_MS),
+    );
+    try {
+      const snap = await getDocs(
+        query(
+          collection(getFirebaseDb(), academyStudentAttendanceRecordsPath(academyId, studentId)),
+          where("date", ">=", from),
+          where("date", "<", targetDueDate),
+          orderBy("date", "asc"),
+        ),
+      );
+      setAbsences(
+        snap.docs.flatMap((d) => {
+          const x = d.data();
+          if (x.status !== "absent" || x.billedInvoicePeriod) return [];
+          if (x.reason !== "illness" && x.reason !== "academy") return [];
+          return [{ date: d.id, reason: x.reason as DeductibleAbsence["reason"] }];
+        }),
+      );
+      setExcludedDates(new Set());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "결석 기록을 불러오지 못했습니다.");
+    }
+  }, [academyId, studentId, targetDueDate]);
+
+  useEffect(() => {
+    if (!loading) void fetchAbsences();
+  }, [loading, fetchAbsences]);
+
+  const suggestedPerDay = resolveAbsenceDeductionPerDay(deductionSettings, tuitionAmount, savedPerDay);
+  const perDay = perDayText !== null ? Number(perDayText) : suggestedPerDay?.amount ?? 0;
+  const selectedAbsences = absences.filter((a) => !excludedDates.has(a.date));
+  const perDayValid =
+    Number.isInteger(perDay) &&
+    perDay > 0 &&
+    perDay <= Math.min(tuitionAmount, MAX_ABSENCE_DEDUCTION_PER_DAY);
+  const canApplyDeduction = !actionBusy && selectedAbsences.length > 0 && perDayValid;
+
+  const applyDeduction = async () => {
+    if (!canApplyDeduction) return;
+    const total = perDay * selectedAbsences.length;
+    const ok = await callAction(
+      "applyAbsenceDeduction",
+      {
+        period: targetPeriod,
+        dates: selectedAbsences.map((a) => a.date),
+        perDayAmount: perDay,
+        saveAsStudentDefault,
+      },
+      `${studentName} ${formatInvoicePeriod(targetPeriod)} 청구서에 결석 ${selectedAbsences.length}일 차감(−${total.toLocaleString("ko-KR")}원)을 반영했습니다.`,
+    );
+    if (ok) {
+      if (saveAsStudentDefault) setSavedPerDay(perDay);
+      setPerDayText(null);
+      setSaveAsStudentDefault(false);
+    }
+  };
 
   const parsedAmount = Number(amountText.replace(/[^\d]/g, ""));
   const canAdd =
@@ -296,6 +415,11 @@ export function TuitionInvoiceModal({
                   {target.adjustments.map((a) => (
                     <li key={a.id} className="flex items-center justify-between gap-2">
                       <span className="min-w-0 truncate text-neutral-700 dark:text-neutral-300">
+                        {a.source === "absence" ? (
+                          <span className="mr-1 rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900 dark:text-amber-200">
+                            결석
+                          </span>
+                        ) : null}
                         {a.memo}
                       </span>
                       <span className="flex shrink-0 items-center gap-1.5">
@@ -306,6 +430,7 @@ export function TuitionInvoiceModal({
                           type="button"
                           disabled={actionBusy}
                           aria-label={`${a.memo} 조정 삭제`}
+                          title={a.source === "absence" ? "삭제하면 해당 결석 기록의 잠금이 풀리고 다시 차감 제안에 나타납니다." : undefined}
                           className="rounded-[6px] border border-red-200/80 px-1.5 py-0.5 text-[10px] text-red-600 hover:bg-red-50 disabled:opacity-40"
                           onClick={() =>
                             void callAction(
@@ -330,6 +455,101 @@ export function TuitionInvoiceModal({
                     차감액이 원비보다 커서 0원으로 청구됩니다. 남는 금액은 이월되지 않습니다.
                   </p>
                 ) : null}
+
+                <div className="mt-3 space-y-2 border-t border-neutral-200/70 pt-3 dark:border-white/10">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="text-xs font-semibold text-foreground">결석 차감 제안</p>
+                    <span className="text-[10px] text-neutral-500">
+                      {targetDueDate.slice(5).replace("-", ".")} 이전 · 미반영 질병·학원 사정 결석
+                    </span>
+                  </div>
+                  {absences.length === 0 ? (
+                    <p className="text-[11px] text-neutral-500">
+                      차감할 결석이 없습니다. 출결 기록에서 질병·학원 사정 결석을 기록하면 여기에 나타납니다.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap gap-1">
+                        {absences.map((a) => {
+                          const on = !excludedDates.has(a.date);
+                          return (
+                            <button
+                              key={a.date}
+                              type="button"
+                              disabled={actionBusy}
+                              aria-pressed={on}
+                              onClick={() =>
+                                setExcludedDates((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(a.date)) next.delete(a.date);
+                                  else next.add(a.date);
+                                  return next;
+                                })
+                              }
+                              className={`rounded-full border px-2 py-1 text-[10px] font-medium disabled:opacity-50 ${
+                                on
+                                  ? "border-amber-400/70 bg-amber-500/15 text-amber-950 dark:text-amber-200"
+                                  : "border-neutral-300/60 text-neutral-400 line-through"
+                              }`}
+                            >
+                              {formatRecordDate(a.date)} {ABSENCE_REASON_LABELS[a.reason]}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="shrink-0 text-[11px] text-neutral-600" htmlFor="per-day-deduction">
+                          1일 차감액
+                        </label>
+                        <input
+                          id="per-day-deduction"
+                          type="text"
+                          inputMode="numeric"
+                          className={inputClass}
+                          placeholder="금액(원)"
+                          value={perDay > 0 ? perDay.toLocaleString("ko-KR") : perDayText ?? ""}
+                          disabled={actionBusy}
+                          onChange={(e) => setPerDayText(e.target.value.replace(/[^\d]/g, "").slice(0, 8))}
+                        />
+                      </div>
+                      <p className="text-[11px] text-neutral-500">
+                        {perDayText === null && suggestedPerDay
+                          ? `기준: ${suggestedPerDay.basis}`
+                          : perDayText === null
+                            ? "학원 설정에서 결석 차감 기본값을 정하면 자동으로 채워집니다."
+                            : "직접 입력한 금액"}
+                        {perDayValid ? (
+                          <span className="font-medium text-foreground">
+                            {" "}· {selectedAbsences.length}일 × {perDay.toLocaleString("ko-KR")}원 = −
+                            {(perDay * selectedAbsences.length).toLocaleString("ko-KR")}원
+                          </span>
+                        ) : perDay > tuitionAmount ? (
+                          <span className="text-red-600"> · 원비보다 클 수 없습니다.</span>
+                        ) : null}
+                      </p>
+                      {perDayValid && perDay !== savedPerDay ? (
+                        <label className="flex items-center gap-1.5 text-[11px] text-neutral-600">
+                          <input
+                            type="checkbox"
+                            checked={saveAsStudentDefault}
+                            disabled={actionBusy}
+                            onChange={(e) => setSaveAsStudentDefault(e.target.checked)}
+                            className="accent-[#4a90e2]"
+                          />
+                          이 금액을 {studentName} 학생의 1일 차감액으로 저장
+                        </label>
+                      ) : null}
+                      <button
+                        type="button"
+                        disabled={!canApplyDeduction}
+                        onClick={() => void applyDeduction()}
+                        className="w-full rounded-2xl border border-amber-500/70 bg-amber-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-amber-600 disabled:opacity-50"
+                      >
+                        {actionBusy ? "처리 중…" : `결석 ${selectedAbsences.length}일 차감 반영`}
+                      </button>
+                    </>
+                  )}
+                </div>
 
                 <div className="mt-3 space-y-2 border-t border-neutral-200/70 pt-3 dark:border-white/10">
                   <p className="text-xs font-semibold text-foreground">조정 추가</p>

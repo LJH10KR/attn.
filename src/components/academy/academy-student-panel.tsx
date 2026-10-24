@@ -73,6 +73,8 @@ export type StudentRowVM = {
   sessionBalance?: number | null;
   /** 학부모가 납부 안내 알림을 확인한 시각 */
   tuitionReminderConfirmedAt?: Timestamp | null;
+  /** 학생별 결석 1일 차감액 — 없으면 학원 기본값 */
+  absenceDeductionPerDay?: number | null;
 };
 
 type StudentRowWithParent = StudentRowVM & { parentName: string; teacherLabel: string };
@@ -180,6 +182,10 @@ export function docToStudentRow(id: string, data: Record<string, unknown>): Stud
     pricePerSession,
     sessionBalance,
     tuitionReminderConfirmedAt,
+    absenceDeductionPerDay:
+      typeof data.absenceDeductionPerDay === "number" && data.absenceDeductionPerDay > 0
+        ? data.absenceDeductionPerDay
+        : null,
   };
 }
 
@@ -1904,6 +1910,7 @@ export function AcademyParentStudentList({
           studentName={invoiceTarget.name}
           tuitionAmount={invoiceTarget.tuitionAmount}
           tuitionDueDayOfMonth={invoiceTarget.tuitionDueDayOfMonth}
+          studentPerDayDeduction={invoiceTarget.absenceDeductionPerDay ?? null}
           onClose={() => setInvoiceTarget(null)}
           onNotice={setNoticeAction}
         />
@@ -2513,6 +2520,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
           studentName={invoiceTarget.name}
           tuitionAmount={invoiceTarget.tuitionAmount}
           tuitionDueDayOfMonth={invoiceTarget.tuitionDueDayOfMonth}
+          studentPerDayDeduction={invoiceTarget.absenceDeductionPerDay ?? null}
           onClose={() => setInvoiceTarget(null)}
           onNotice={setNotice}
         />

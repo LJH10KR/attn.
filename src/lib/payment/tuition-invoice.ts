@@ -62,6 +62,39 @@ export function sanitizeInvoiceAdjustments(raw: unknown): { amount: number; memo
   });
 }
 
+/** 서버(`applyAbsenceDeduction`)와 동일한 1일 차감액 상한 */
+export const MAX_ABSENCE_DEDUCTION_PER_DAY = 10_000_000;
+
+/**
+ * 결석 1일 차감액 기본값 — 학생별 지정값 > 학원 고정 금액 > 학원 "원비 ÷ 월 수업일수"(10원 미만 절사).
+ * 정해진 값이 없으면 null(원장이 직접 입력).
+ */
+export function resolveAbsenceDeductionPerDay(
+  settings: {
+    method?: unknown;
+    perDayAmount?: unknown;
+    monthlyClassDays?: unknown;
+  } | null,
+  tuitionAmount: number,
+  studentPerDay: number | null | undefined,
+): { amount: number; basis: string } | null {
+  const isPositiveInt = (v: unknown): v is number =>
+    typeof v === "number" && Number.isInteger(v) && v > 0;
+  if (isPositiveInt(studentPerDay)) {
+    return { amount: studentPerDay, basis: "학생별 지정" };
+  }
+  if (settings?.method === "per_day" && isPositiveInt(settings.perDayAmount)) {
+    return { amount: settings.perDayAmount, basis: "학원 기본값(1일 고정)" };
+  }
+  if (settings?.method === "divide" && isPositiveInt(settings.monthlyClassDays)) {
+    const amount = Math.floor(tuitionAmount / settings.monthlyClassDays / 10) * 10;
+    if (amount > 0) {
+      return { amount, basis: `학원 기본값(원비 ÷ ${settings.monthlyClassDays}일)` };
+    }
+  }
+  return null;
+}
+
 /** "2026-11" → "2026년 11월" */
 export function formatInvoicePeriod(period: string): string {
   const [y, m] = period.split("-").map(Number);

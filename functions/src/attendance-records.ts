@@ -72,6 +72,20 @@ function isDeductibleReason(raw: unknown): boolean {
   return typeof raw === "string" && (DEDUCTIBLE_ABSENCE_REASONS as readonly string[]).includes(raw);
 }
 
+/** 청구서 결석 차감에 반영된 기록(`applyAbsenceDeduction`이 설정) */
+function isBilled(data: FirebaseFirestore.DocumentData | undefined): boolean {
+  return typeof data?.billedInvoicePeriod === "string" && data.billedInvoicePeriod.length > 0;
+}
+
+function billedLockError(dates: string[], period: string): HttpsError {
+  const [, m] = period.split("-").map(Number);
+  return new HttpsError(
+    "failed-precondition",
+    `${dates.map(formatDateLabel).join(", ")} 기록은 ${m}월 청구서 결석 차감에 반영되어 있어 변경할 수 없습니다. ` +
+      "청구서에서 해당 차감을 먼저 삭제해 주세요.",
+  );
+}
+
 function formatDateLabel(dateStr: string): string {
   const [, m, d] = dateStr.split("-").map(Number);
   return `${m}월 ${d}일`;
@@ -99,6 +113,12 @@ export async function upsertTodayAttendanceRecord(
   return db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     const prev = snap.exists ? snap.data() ?? {} : {};
+
+    // 청구서 차감에 반영된 기록은 잠금 — 버튼·키오스크 출석으로도 바꾸지 않음(알림은 그대로 발송)
+    if (isBilled(prev)) {
+      logger.info("upsertTodayAttendanceRecord: billed record kept", { academyId, studentId, date });
+      return prev.status === "absent" && isAbsenceReason(prev.reason) ? prev.reason : null;
+    }
 
     if (status === "absent" && prev.status === "absent" && isDeductibleReason(prev.reason)) {
       return prev.reason as AbsenceReason;
@@ -199,6 +219,13 @@ export const recordStudentAbsences = onCall(async (request) => {
 
   await db.runTransaction(async (tx) => {
     const snaps = await tx.getAll(...refs);
+    const billed = snaps.filter((s) => isBilled(s.data()));
+    if (billed.length > 0) {
+      throw billedLockError(
+        billed.map((s) => s.id),
+        billed[0]!.get("billedInvoicePeriod") as string,
+      );
+    }
     snaps.forEach((snap, i) => {
       const prevCreatedAt = snap.exists ? snap.get("createdAt") : null;
       tx.set(refs[i]!, {
@@ -256,7 +283,7 @@ export const recordStudentAbsences = onCall(async (request) => {
   }
 });
 
-/** 원장·학원 포털 — 특정 날짜의 출결 기록 삭제(잘못 입력한 기록 정정) */
+/** 원장·학원 포털 — 특정 날짜의 출결 기록 삭제(잘못 입력한 기록 정정, 청구 반영 기록은 불가) */
 export const deleteStudentAttendanceRecord = onCall(async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
@@ -277,6 +304,9 @@ export const deleteStudentAttendanceRecord = onCall(async (request) => {
   const snap = await ref.get();
   if (!snap.exists) {
     throw new HttpsError("not-found", "출결 기록을 찾을 수 없습니다.");
+  }
+  if (isBilled(snap.data())) {
+    throw billedLockError([date], snap.get("billedInvoicePeriod") as string);
   }
   await ref.delete();
   return { ok: true as const };

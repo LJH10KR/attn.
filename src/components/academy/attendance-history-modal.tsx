@@ -21,6 +21,8 @@ type RecordRow = {
   reason: AbsenceReason | null;
   note: string;
   recordedByRole: string;
+  /** 결석 차감이 반영된 청구서(YYYY-MM) — 있으면 수정·삭제 잠금 */
+  billedInvoicePeriod: string | null;
 };
 
 function roleLabel(role: string): string {
@@ -101,6 +103,10 @@ export function AttendanceHistoryModal({
             reason: isAbsenceReason(x.reason) ? x.reason : null,
             note: typeof x.note === "string" ? x.note : "",
             recordedByRole: typeof x.recordedByRole === "string" ? x.recordedByRole : "",
+            billedInvoicePeriod:
+              typeof x.billedInvoicePeriod === "string" && x.billedInvoicePeriod
+                ? x.billedInvoicePeriod
+                : null,
           };
         }),
       );
@@ -151,6 +157,7 @@ export function AttendanceHistoryModal({
   const deductibleCount = absences.filter(
     (r) => r.reason === "illness" || r.reason === "academy",
   ).length;
+  const billedCount = absences.filter((r) => r.billedInvoicePeriod).length;
   const now = currentYearMonth();
   const isMaxMonth = year * 12 + month >= now.year * 12 + now.month + 1;
 
@@ -175,7 +182,7 @@ export function AttendanceHistoryModal({
             <p className="mt-0.5 text-[11px] text-neutral-500">
               {busy
                 ? "불러오는 중…"
-                : `${year}년 ${month}월 · 결석 ${absences.length}일 (차감 대상 ${deductibleCount}일)`}
+                : `${year}년 ${month}월 · 결석 ${absences.length}일 (차감 대상 ${deductibleCount}일, 청구 반영 ${billedCount}일)`}
             </p>
           </div>
           <div className="flex shrink-0 gap-1.5">
@@ -266,6 +273,11 @@ export function AttendanceHistoryModal({
                             {ABSENCE_REASON_LABELS[r.reason]}
                           </span>
                         ) : null}
+                        {r.billedInvoicePeriod ? (
+                          <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-semibold text-sky-900 dark:text-sky-200">
+                            {Number(r.billedInvoicePeriod.slice(5))}월 청구 반영
+                          </span>
+                        ) : null}
                         <span className="text-[10px] text-neutral-500">{roleLabel(r.recordedByRole)}</span>
                       </div>
                       {r.note ? (
@@ -273,7 +285,14 @@ export function AttendanceHistoryModal({
                       ) : null}
                     </div>
                     <div className="flex shrink-0 gap-1.5">
-                      {confirming ? (
+                      {r.billedInvoicePeriod ? (
+                        <span
+                          className="text-[10px] text-neutral-500"
+                          title="청구서에서 해당 결석 차감을 삭제하면 다시 수정할 수 있습니다."
+                        >
+                          수정 잠금
+                        </span>
+                      ) : confirming ? (
                         <>
                           <button
                             type="button"
