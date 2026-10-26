@@ -25,6 +25,7 @@ const STAFF = {
   "staff-attendance": ["active", ["lessons.attendance"]],
   "staff-members": ["active", ["settings.members"]],
   "staff-payments": ["active", ["billing.payments"]],
+  "staff-refunds": ["active", ["billing.refunds"]],
   "staff-teacher": ["active", []],
   "staff-inactive": ["inactive", ["operations.students", "settings.members"]],
 };
@@ -181,6 +182,12 @@ describe("출결 권한(lessons.attendance)", () => {
 describe("결제 내역 권한(billing.payments)", () => {
   it("결제 내역은 읽지만 쓰지 못한다", async () => {
     const db = dbAs("staff-payments");
+    await assertSucceeds(getDoc(doc(db, academyPath("payments", "pay-1"))));
+    await assertFails(updateDoc(doc(db, academyPath("payments", "pay-1")), { status: "CANCELLED" }));
+  });
+
+  it("환불 권한만 있어도 결제 내역은 읽되, 취소 상태는 클라이언트가 쓰지 못한다", async () => {
+    const db = dbAs("staff-refunds");
     await assertSucceeds(getDoc(doc(db, academyPath("payments", "pay-1"))));
     await assertFails(updateDoc(doc(db, academyPath("payments", "pay-1")), { status: "CANCELLED" }));
   });

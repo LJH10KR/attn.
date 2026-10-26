@@ -15,7 +15,13 @@ import {
 export type AcademyActor =
   | { kind: "owner"; uid: string; permissions: readonly AcademyPermission[] }
   | { kind: "portal"; uid: string; permissions: readonly AcademyPermission[] }
-  | { kind: "staff"; uid: string; permissions: readonly AcademyPermission[] };
+  | {
+      kind: "staff";
+      uid: string;
+      permissions: readonly AcademyPermission[];
+      /** 본인에게 배정된 역할 — 자기 역할 수정(권한 자기 상승) 차단에 사용 */
+      roleId: string | null;
+    };
 
 export function actorHasPermission(
   actor: AcademyActor,
@@ -45,10 +51,12 @@ export async function resolveAcademyActor(
   }
   const staffSnap = await db.doc(`academies/${academyId}/teachers/${uid}`).get();
   if (staffSnap.exists && staffSnap.get("status") === "active") {
+    const roleId = staffSnap.get("roleId");
     return {
       kind: "staff",
       uid,
       permissions: normalizePermissionList(staffSnap.get("permissions")),
+      roleId: typeof roleId === "string" && roleId ? roleId : null,
     };
   }
   return null;

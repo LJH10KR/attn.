@@ -11,6 +11,7 @@ export const ACADEMY_PERMISSIONS = [
   "billing.invoices",
   "billing.collections",
   "billing.payments",
+  "billing.refunds",
   "lessons.attendance",
   "lessons.notices",
   "lessons.notificationLog",
@@ -56,6 +57,7 @@ export const ACADEMY_PERMISSION_GROUPS: {
       { key: "billing.invoices", label: "청구서 관리" },
       { key: "billing.collections", label: "수납/미납" },
       { key: "billing.payments", label: "결제 내역" },
+      { key: "billing.refunds", label: "결제 취소(환불)" },
     ],
   },
   {

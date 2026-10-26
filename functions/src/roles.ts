@@ -3,6 +3,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { assertPermission } from "./lib/academy-access";
 import { chunkArray } from "./lib/firestore-cleanup";
+import { roleAssignViolation, roleDeleteViolation, roleSaveViolation } from "./lib/role-policy";
 import {
   isAcademyPermission,
   isRoleTemplateKey,
@@ -149,9 +150,23 @@ export const saveAcademyRole = onCall(async (request) => {
   const permissions = parsePermissions(request.data?.permissions);
 
   const db = admin.firestore();
-  await assertPermission(db, academyId, request.auth.uid, request.auth.token, "settings.members");
+  const actor = await assertPermission(
+    db,
+    academyId,
+    request.auth.uid,
+    request.auth.token,
+    "settings.members",
+  );
 
   if (!roleId) {
+    const violation = roleSaveViolation(actor, {
+      roleId: null,
+      currentPermissions: null,
+      nextPermissions: permissions,
+    });
+    if (violation) {
+      throw new HttpsError("permission-denied", violation);
+    }
     const all = await rolesCol(db, academyId).get();
     if (all.size >= MAX_ROLES_PER_ACADEMY) {
       throw new HttpsError(
@@ -180,6 +195,14 @@ export const saveAcademyRole = onCall(async (request) => {
   if (!snap.exists) {
     throw new HttpsError("not-found", "권한을 찾을 수 없습니다.");
   }
+  const violation = roleSaveViolation(actor, {
+    roleId,
+    currentPermissions: normalizePermissionList(snap.get("permissions")),
+    nextPermissions: permissions,
+  });
+  if (violation) {
+    throw new HttpsError("permission-denied", violation);
+  }
   await ref.update({ name, permissions, updatedAt: FieldValue.serverTimestamp() });
   await syncRolePermissionsToStaff(db, academyId, roleId, permissions);
   return { ok: true as const, roleId };
@@ -194,12 +217,25 @@ export const deleteAcademyRole = onCall(async (request) => {
   const roleId = requireString(request.data?.roleId, "역할 ID가 올바르지 않습니다.");
 
   const db = admin.firestore();
-  await assertPermission(db, academyId, request.auth.uid, request.auth.token, "settings.members");
+  const actor = await assertPermission(
+    db,
+    academyId,
+    request.auth.uid,
+    request.auth.token,
+    "settings.members",
+  );
 
   const ref = rolesCol(db, academyId).doc(roleId);
   const snap = await ref.get();
   if (!snap.exists) {
     throw new HttpsError("not-found", "권한을 찾을 수 없습니다.");
+  }
+  const violation = roleDeleteViolation(actor, {
+    roleId,
+    currentPermissions: normalizePermissionList(snap.get("permissions")),
+  });
+  if (violation) {
+    throw new HttpsError("permission-denied", violation);
   }
   if (isRoleTemplateKey(snap.get("template"))) {
     throw new HttpsError("failed-precondition", "기본 권한은 삭제할 수 없습니다.");
@@ -215,7 +251,10 @@ export const deleteAcademyRole = onCall(async (request) => {
   return { ok: true as const };
 });
 
-/** 직원에게 역할 배정 — 원장이 아닌 사람은 본인 역할을 바꿀 수 없음(실수로 잠기는 것 방지) */
+/**
+ * 직원에게 역할 배정 — 직원은 본인 역할을 바꿀 수 없고, 본인 권한을 넘는 역할을 주거나
+ * 본인보다 넓은 권한의 직원을 바꿀 수 없음(`role-policy.ts`)
+ */
 export const assignStaffRole = onCall(async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
@@ -232,10 +271,6 @@ export const assignStaffRole = onCall(async (request) => {
     request.auth.token,
     "settings.members",
   );
-  if (actor.kind === "staff" && staffId === actor.uid) {
-    throw new HttpsError("failed-precondition", "본인의 권한은 바꿀 수 없습니다.");
-  }
-
   await ensureAcademyRoleTemplates(db, academyId);
   const [staffSnap, roleSnap] = await Promise.all([
     staffCol(db, academyId).doc(staffId).get(),
@@ -248,6 +283,14 @@ export const assignStaffRole = onCall(async (request) => {
     throw new HttpsError("not-found", "권한을 찾을 수 없습니다.");
   }
   const permissions = normalizePermissionList(roleSnap.get("permissions"));
+  const violation = roleAssignViolation(actor, {
+    staffId,
+    staffCurrentPermissions: normalizePermissionList(staffSnap.get("permissions")),
+    rolePermissions: permissions,
+  });
+  if (violation) {
+    throw new HttpsError("permission-denied", violation);
+  }
   await staffSnap.ref.update({
     roleId,
     permissions,

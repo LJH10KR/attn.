@@ -199,6 +199,8 @@ service cloud.firestore {
     /**
      * 수납 권한(`billing.invoices`) 직원의 학생 문서 수정 — 원비·회차 필드만.
      * 이름·연락처·전담 등 원생 정보는 원생 관리 권한(`operations.students`)만 수정.
+     * TODO(4단계 청구서): 원비·회차 값 자체는 검증하지 않음(sessionBalance 등 임의 값 가능) —
+     * 청구서·회차제 통합으로 이 필드들이 서버 전용이 되면 이 분기를 제거할 것.
      */
     function studentBillingFieldsOnly() {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -209,7 +211,11 @@ service cloud.firestore {
       ]);
     }
 
-    /** 출결 권한(`lessons.attendance`) 직원 — 수업 완료 기록 시 잔여 회차 차감 필드만 */
+    /**
+     * 출결 권한(`lessons.attendance`) 직원 — 수업 완료 기록 시 잔여 회차 차감 필드만.
+     * TODO(3단계 출결): sessionBalance를 아무 값으로나 바꿀 수 있음(1회 차감인지 검증 안 함) —
+     * 출석·지각 처리 시 서버가 자동 차감하는 구조로 바뀌면 이 분기를 제거할 것.
+     */
     function studentSessionFieldsOnly() {
       return request.resource.data.diff(resource.data).affectedKeys()
         .hasOnly(['sessionBalance', 'extraSessionDates', 'updatedAt']);
@@ -503,9 +509,15 @@ service cloud.firestore {
        * 카드 결제(포트원 V2) 이력 — 검증·상태 갱신은 Cloud Functions(Admin SDK, onRequest)만 수행.
        * 클라이언트 쓰기는 isAdmin/isAcademyOwner 외에는 항상 거부(위변조 방지).
        */
+      /**
+       * 결제 취소(환불)는 Next 서버(`/api/payment/cancel`)가 `billing.refunds`로 검사하고 Admin SDK로 갱신 —
+       * 환불 권한만 받은 직원도 취소할 결제를 찾을 수 있게 읽기를 허용.
+       */
       match /payments/{paymentId} {
         allow read: if isAdmin()
-          || hasAnyPermission(academyId, ['billing.payments', 'billing.collections'])
+          || hasAnyPermission(academyId, [
+            'billing.payments', 'billing.collections', 'billing.refunds'
+          ])
           || (isSignedIn()
               && resource.data.keys().hasAny(['parentUserId'])
               && resource.data.parentUserId is string

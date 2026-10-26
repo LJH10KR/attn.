@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
     decoded.uid,
     decoded.role,
     decoded.academyId,
-    "billing.payments",
+    "billing.refunds",
   );
   if (!allowed) {
     return NextResponse.json({ error: "이 학원을 관리할 권한이 없습니다." }, { status: 403 });

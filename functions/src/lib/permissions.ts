@@ -14,6 +14,8 @@ export const ACADEMY_PERMISSIONS = [
   "billing.invoices",
   "billing.collections",
   "billing.payments",
+  /** 카드 결제 취소(환불) — PortOne 취소를 일으키므로 결제 내역 조회와 분리, 기본값은 슈퍼관리자만 */
+  "billing.refunds",
   "lessons.attendance",
   "lessons.notices",
   "lessons.notificationLog",
@@ -52,7 +54,11 @@ export function isRoleTemplateKey(raw: unknown): raw is RoleTemplateKey {
 /** 새 직원 계정의 기본 역할 — 권한 없음("내 반"만) */
 export const DEFAULT_STAFF_ROLE_ID: RoleTemplateKey = "teacher";
 
-/** 템플릿 역할 — 문서 ID = 템플릿 키. 이름·권한은 학원이 수정 가능, 삭제는 불가. */
+/**
+ * 템플릿 역할 — 문서 ID = 템플릿 키. 이름·권한은 학원이 수정 가능, 삭제는 불가.
+ * 슈퍼관리자 = 전부, 관리자 = 설정·환불 제외 업무 전부, 행정담당 = 운영+수납(환불 제외),
+ * 수업관리 = 반·원생+수업, 선생님 = 없음(담당 학생만).
+ */
 export const ROLE_TEMPLATES: Record<
   RoleTemplateKey,
   { name: string; permissions: readonly AcademyPermission[] }
@@ -63,7 +69,9 @@ export const ROLE_TEMPLATES: Record<
   },
   admin: {
     name: "관리자",
-    permissions: ACADEMY_PERMISSIONS.filter((p) => p !== "settings.members"),
+    permissions: ACADEMY_PERMISSIONS.filter(
+      (p) => !p.startsWith("settings.") && p !== "billing.refunds",
+    ),
   },
   office: {
     name: "행정담당",
@@ -74,7 +82,6 @@ export const ROLE_TEMPLATES: Record<
       "billing.invoices",
       "billing.collections",
       "billing.payments",
-      "lessons.notices",
     ],
   },
   lessonManager: {
