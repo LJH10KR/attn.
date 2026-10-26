@@ -68,7 +68,7 @@ export async function deleteMemberLoginSecrets(
   role: "teacher" | "parent",
   memberDocId: string,
 ): Promise<void> {
-  const col = role === "teacher" ? "teachers" : "parents";
+  const col = role === "teacher" ? "staff" : "parents";
   await deleteCollectionDocs(db, `academies/${academyId}/${col}/${memberDocId}/secrets`);
 }
 
@@ -98,7 +98,8 @@ type UserMembershipSummary = {
 };
 
 function academyIdFromMemberPath(path: string, role: "teacher" | "parent"): string | null {
-  const m = path.match(new RegExp(`^academies\\/([^/]+)\\/${role}s\\/`));
+  const col = role === "teacher" ? "staff" : "parents";
+  const m = path.match(new RegExp(`^academies\\/([^/]+)\\/${col}\\/`));
   return m ? m[1] : null;
 }
 
@@ -110,7 +111,7 @@ export async function syncUserAdminProfile(
   if (!authUid || authUid.startsWith("academy_")) return;
 
   const [teacherSnaps, parentSnaps] = await Promise.all([
-    db.collectionGroup("teachers").where("authUid", "==", authUid).limit(10).get(),
+    db.collectionGroup("staff").where("authUid", "==", authUid).limit(10).get(),
     db.collectionGroup("parents").where("authUid", "==", authUid).limit(10).get(),
   ]);
   if (teacherSnaps.empty && parentSnaps.empty) return;
@@ -207,7 +208,7 @@ export async function deleteAcademyFirestoreCascade(
 ): Promise<{ teacherSnapshots: AcademyMemberSnapshot[]; parentSnapshots: AcademyMemberSnapshot[] }> {
   const teachersSnap = members
     ? null
-    : await db.collection(`academies/${academyId}/teachers`).get();
+    : await db.collection(`academies/${academyId}/staff`).get();
   const parentsSnap = members
     ? null
     : await db.collection(`academies/${academyId}/parents`).get();
@@ -238,9 +239,9 @@ export async function deleteAcademyFirestoreCascade(
   const deleteOps: DocumentReference[] = [];
 
   for (const t of teacherSnapshots) {
-    deleteOps.push(db.doc(`academies/${academyId}/teachers/${t.docId}`));
+    deleteOps.push(db.doc(`academies/${academyId}/staff/${t.docId}`));
     deleteOps.push(
-      db.doc(`academies/${academyId}/teachers/${t.docId}/secrets/login`),
+      db.doc(`academies/${academyId}/staff/${t.docId}/secrets/login`),
     );
   }
   for (const p of parentSnapshots) {

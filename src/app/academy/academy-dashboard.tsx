@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { AcademyParentPanel } from "@/components/academy/academy-parent-panel";
 import { AcademyParentSignupLink } from "@/components/academy/academy-parent-signup-link";
@@ -37,6 +37,7 @@ import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { useRoleLogout } from "@/lib/auth/use-role-logout";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { useAcademyDashboardBell } from "@/lib/firebase/use-academy-dashboard-bell";
+import { usePermissions } from "@/lib/academy/use-permissions";
 import {
   AcademyKioskPanel,
   type KioskStudentRow,
@@ -311,6 +312,7 @@ export function AcademyDashboard() {
     dismissAllVisible: dismissAcademyBellAll,
     refresh: refreshAcademyBell,
   } = useAcademyDashboardBell(academyId);
+  const { can: canAccess } = usePermissions(academyId);
 
   const fromOwner = searchParams.get("from") === "owner";
   const queryAcademyId = searchParams.get("id")?.trim() ?? "";
@@ -589,22 +591,22 @@ export function AcademyDashboard() {
   const loadDashboardStatsFallback = useCallback(async () => {
     if (gate !== "ready" || !academyId) return;
     const db = getFirebaseDb();
-    const sub = (name: "teachers" | "parents" | "students") =>
+    const sub = (name: "staff" | "parents" | "students") =>
       collection(db, COLLECTIONS.academies, academyId, name);
     try {
       const [teachersSnap, parentsSnap, studentsSnap, stu, tp, tiNeed, tiSent, pp, piNeed, piSent] =
         await Promise.all([
-          getCountFromServer(sub("teachers")),
+          getCountFromServer(sub("staff")),
           getCountFromServer(sub("parents")),
           getCountFromServer(sub("students")),
           getCountFromServer(sub("students")),
           getCountFromServer(
-            query(sub("teachers"), where("status", "==", "pending_registration")),
+            query(sub("staff"), where("status", "==", "pending_registration")),
           ),
           getCountFromServer(
-            query(sub("teachers"), where("status", "==", "invitation_needed")),
+            query(sub("staff"), where("status", "==", "invitation_needed")),
           ),
-          getCountFromServer(query(sub("teachers"), where("status", "==", "invitation_sent"))),
+          getCountFromServer(query(sub("staff"), where("status", "==", "invitation_sent"))),
           getCountFromServer(
             query(sub("parents"), where("status", "==", "pending_registration")),
           ),
@@ -780,6 +782,15 @@ export function AcademyDashboard() {
                   onSelectAction: () =>
                     router.push(`/academy/payments?id=${encodeURIComponent(academyId)}`),
                 },
+                ...(canAccess("settings.staff")
+                  ? [
+                      {
+                        label: "직원 관리",
+                        onSelectAction: () =>
+                          router.push(`/academy/settings/staff?id=${encodeURIComponent(academyId)}`),
+                      },
+                    ]
+                  : []),
               ]
         }
         hideBottomNav={kioskMode}

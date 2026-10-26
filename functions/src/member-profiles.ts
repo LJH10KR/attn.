@@ -13,7 +13,7 @@ import { isParentLoginEmail, normalizeParentLoginEmail } from "./lib/parent-logi
 import { syncUserAdminProfile } from "./lib/firestore-cleanup";
 
 function teacherAcademyIdFromMemberPath(path: string): string | null {
-  const m = path.match(/^academies\/([^/]+)\/teachers\//);
+  const m = path.match(/^academies\/([^/]+)\/staff\//);
   return m ? m[1] : null;
 }
 
@@ -32,7 +32,7 @@ async function assertTeacherAuth(request: {
 
   const snaps = await admin
     .firestore()
-    .collectionGroup("teachers")
+    .collectionGroup("staff")
     .where("authUid", "==", uid)
     .limit(10)
     .get();
@@ -71,7 +71,7 @@ async function verifyMemberLoginPassword(
   role: "teacher" | "parent",
   password: string,
 ): Promise<void> {
-  const col = role === "teacher" ? "teachers" : "parents";
+  const col = role === "teacher" ? "staff" : "parents";
   const secretSnap = await admin
     .firestore()
     .doc(`academies/${academyId}/${col}/${uid}/secrets/login`)
@@ -118,7 +118,7 @@ export const updateTeacherProfile = onCall(async (request) => {
   const displayName = assertDisplayName(request.data?.displayName);
   const hasPhoneField = request.data != null && "phone" in request.data;
   const phone = hasPhoneField ? parseOptionalKrPhone(request.data?.phone) : undefined;
-  const ref = admin.firestore().doc(`academies/${academyId}/teachers/${memberDocId}`);
+  const ref = admin.firestore().doc(`academies/${academyId}/staff/${memberDocId}`);
   const snap = await ref.get();
   if (!snap.exists) {
     throw new HttpsError("not-found", "선생님 정보를 찾을 수 없습니다.");
@@ -278,7 +278,7 @@ export const syncTeacherGoogleLink = onCall(async (request) => {
 
   const memberRef = admin
     .firestore()
-    .doc(`academies/${academyId}/teachers/${memberDocId}`);
+    .doc(`academies/${academyId}/staff/${memberDocId}`);
   const snap = await memberRef.get();
   if (!snap.exists) {
     throw new HttpsError("not-found", "선생님 정보를 찾을 수 없습니다.");
@@ -291,7 +291,7 @@ export const syncTeacherGoogleLink = onCall(async (request) => {
   });
   await admin
     .firestore()
-    .doc(`academies/${academyId}/teachers/${memberDocId}/secrets/login`)
+    .doc(`academies/${academyId}/staff/${memberDocId}/secrets/login`)
     .set({ googleLinked: true, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
 
   return { ok: true, googleEmail };
@@ -314,7 +314,7 @@ export const checkTeacherLoginIdAvailable = onCall(async (request) => {
 
   const memberSnap = await admin
     .firestore()
-    .doc(`academies/${academyId}/teachers/${memberDocId}`)
+    .doc(`academies/${academyId}/staff/${memberDocId}`)
     .get();
   const currentLoginId =
     typeof memberSnap.get("loginId") === "string" ? memberSnap.get("loginId") : "";
@@ -349,7 +349,7 @@ export const updateTeacherLoginId = onCall(async (request) => {
   await verifyMemberLoginPassword(academyId, uid, "teacher", currentPassword);
 
   const db = admin.firestore();
-  const memberRef = db.doc(`academies/${academyId}/teachers/${memberDocId}`);
+  const memberRef = db.doc(`academies/${academyId}/staff/${memberDocId}`);
   const memberSnap = await memberRef.get();
   if (!memberSnap.exists) {
     throw new HttpsError("not-found", "선생님 정보를 찾을 수 없습니다.");
@@ -575,7 +575,7 @@ export const updateTeacherPassword = onCall(async (request) => {
   await admin.auth().updateUser(uid, { password: newPassword });
   await admin
     .firestore()
-    .doc(`academies/${academyId}/teachers/${memberDocId}/secrets/login`)
+    .doc(`academies/${academyId}/staff/${memberDocId}/secrets/login`)
     .set(
       {
         password: newPassword,

@@ -314,6 +314,8 @@ export {
   sendParentInvitation,
   updateParentInvite,
 } from "./parents";
+export { deleteStaffMember, saveStaffMember } from "./staff";
+export { saveAcademyOptionList } from "./academy-options";
 export {
   assignStaffRole,
   deleteAcademyRole,

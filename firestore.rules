@@ -22,9 +22,9 @@ service cloud.firestore {
       return isSignedIn() && academyData(academyId).ownerUid == request.auth.uid;
     }
 
-    /** 선생님 멤버 문서 경로 — 초청 후 문서 ID = Auth uid */
+    /** 직원 문서 경로(`staff`) — 계정이 있는 직원은 문서 ID = Auth uid(계정 없는 직원은 임의 ID) */
     function academyTeacherMemberPath(academyId) {
-      return /databases/$(database)/documents/academies/$(academyId)/teachers/$(request.auth.uid);
+      return /databases/$(database)/documents/academies/$(academyId)/staff/$(request.auth.uid);
     }
 
     function isAcademyTeacherMember(academyId) {
@@ -65,7 +65,7 @@ service cloud.firestore {
         && request.auth.token.academyId == academyId;
     }
 
-    /** 직원 멤버 문서 — 컬렉션 이름이 바뀌면 이 경로만 고칠 것 */
+    /** 권한 판별에 쓰는 본인 직원 문서 */
     function staffMemberPath(academyId) {
       return academyTeacherMemberPath(academyId);
     }
@@ -104,8 +104,8 @@ service cloud.firestore {
 
     function teacherDocActive(academyId, tid) {
       return tid is string
-        && exists(/databases/$(database)/documents/academies/$(academyId)/teachers/$(tid))
-        && get(/databases/$(database)/documents/academies/$(academyId)/teachers/$(tid)).data.status == 'active';
+        && exists(/databases/$(database)/documents/academies/$(academyId)/staff/$(tid))
+        && get(/databases/$(database)/documents/academies/$(academyId)/staff/$(tid)).data.status == 'active';
     }
 
     /** 전담 요소 하나 — 기존 전담(prev)이면 유지 허용, 새로 추가되는 경우에만 활성 선생 문서 필요 */
@@ -287,10 +287,11 @@ service cloud.firestore {
       }
 
       /**
-       * 직원(선생님) 멤버 문서 — 역할·권한(`roleId`, `permissions`)도 여기 있으므로 쓰기는 Functions만.
+       * 직원 — 인사 정보 + 선택적 계정(`authUid`, `status`)과 역할·권한(`roleId`, `permissions`)이 한 문서.
+       * 권한이 들어 있으므로 쓰기는 Functions(`staff.ts`, `teachers.ts`, `roles.ts`)만.
        * 원생 관리·반 관리는 담당 선생님 지정 때문에 목록을 읽는다.
        */
-      match /teachers/{teacherId} {
+      match /staff/{staffId} {
         allow read: if isAdmin()
           || hasAnyPermission(academyId, [
             'settings.staff', 'settings.members', 'operations.students', 'operations.classes'
@@ -330,6 +331,18 @@ service cloud.firestore {
           || hasAnyPermission(academyId, [
             'settings.members', 'operations.parents', 'billing.payments'
           ]);
+        allow write: if false;
+      }
+
+      /**
+       * 학원 선택지 목록(직무 등, `{id, label}` 배열) — 민감 정보가 없어 원장·포털·활성 직원 읽기,
+       * 쓰기는 Functions(`saveAcademyOptionList`, 목록 종류별 권한 검사)만.
+       */
+      match /meta/options {
+        allow read: if isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyPortalSession(academyId)
+          || isAcademyTeacherActive(academyId);
         allow write: if false;
       }
 

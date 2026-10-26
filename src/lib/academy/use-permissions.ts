@@ -76,7 +76,7 @@ export function usePermissions(academyId: string | null): AcademyPermissionState
           }
           if (cancelled) return;
           unsubMember = onSnapshot(
-            doc(db, COLLECTIONS.academies, academyId, "teachers", user.uid),
+            doc(db, COLLECTIONS.academies, academyId, "staff", user.uid),
             (snap) => {
               const active = snap.exists() && snap.get("status") === "active";
               publish({

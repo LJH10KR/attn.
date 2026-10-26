@@ -49,7 +49,7 @@ export async function resolveAcademyActor(
   if (token.role === "academy" && token.academyId === academyId) {
     return { kind: "portal", uid, permissions: ACADEMY_PERMISSIONS };
   }
-  const staffSnap = await db.doc(`academies/${academyId}/teachers/${uid}`).get();
+  const staffSnap = await db.doc(`academies/${academyId}/staff/${uid}`).get();
   if (staffSnap.exists && staffSnap.get("status") === "active") {
     const roleId = staffSnap.get("roleId");
     return {

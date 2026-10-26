@@ -1526,8 +1526,8 @@ export function AcademyParentStudentList({
     try {
       const db = getFirebaseDb();
       const [teachersSnap, studentsSnap] = await Promise.all([
-        cachedRead(`teachers:${academyId}`, () =>
-          getDocs(collection(db, "academies", academyId, "teachers")),
+        cachedRead(`staff:${academyId}`, () =>
+          getDocs(collection(db, "academies", academyId, "staff")),
         ),
         getDocs(
           query(
@@ -1956,8 +1956,8 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
       const db = getFirebaseDb();
       const [studentsSnap, teachersSnap, parentsSnap] = await Promise.all([
         getDocs(query(collection(db, "academies", academyId, "students"))),
-        cachedRead(`teachers:${academyId}`, () =>
-          getDocs(collection(db, "academies", academyId, "teachers")),
+        cachedRead(`staff:${academyId}`, () =>
+          getDocs(collection(db, "academies", academyId, "staff")),
         ),
         getDocs(query(collection(db, "academies", academyId, "parents"))),
       ]);

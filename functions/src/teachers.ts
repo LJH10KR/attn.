@@ -6,8 +6,9 @@ import * as logger from "firebase-functions/logger";
 import * as nodemailer from "nodemailer";
 import { createShortAuthLink, getAppOrigin } from "./auth-short-links";
 import { reconcileUserActivationMirror } from "./user-activation-mirror";
-import { assertPermission } from "./lib/academy-access";
-import { DEFAULT_STAFF_ROLE_ID } from "./lib/permissions";
+import { assertPermission, type AcademyActor } from "./lib/academy-access";
+import { DEFAULT_STAFF_ROLE_ID, normalizePermissionList } from "./lib/permissions";
+import { staffAccountChangeViolation } from "./lib/role-policy";
 import {
   deleteAttnLoginIndexForMember,
   deleteMemberLoginSecrets,
@@ -30,6 +31,40 @@ function invitationExpiresAtFromNow(): Timestamp {
 
 function isFunctionsEmulator(): boolean {
   return process.env.FUNCTIONS_EMULATOR === "true";
+}
+
+/** 직원은 본인·더 넓은 권한의 직원 계정을 바꿀 수 없음(`role-policy.ts`) */
+function assertStaffAccountChangeAllowed(
+  actor: AcademyActor,
+  staffSnap: admin.firestore.DocumentSnapshot,
+): void {
+  const violation = staffAccountChangeViolation(actor, {
+    staffId: staffSnap.id,
+    staffCurrentPermissions: normalizePermissionList(staffSnap.get("permissions")),
+  });
+  if (violation) {
+    throw new HttpsError("permission-denied", violation);
+  }
+}
+
+/** 직원 계정 비활성화 — 로그인 차단(Auth disabled)과 클레임 정리. 선생님 비활성·퇴사 처리에서 공용 */
+export async function deactivateStaffAccount(
+  db: admin.firestore.Firestore,
+  academyId: string,
+  authUid: string,
+): Promise<void> {
+  await db.doc(`academies/${academyId}/staff/${authUid}`).update({
+    status: "inactive" satisfies TeacherStatus,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  await admin.auth().setCustomUserClaims(authUid, {
+    role: "teacher",
+    academyId,
+    teacherDisabled: true,
+  });
+
+  await admin.auth().updateUser(authUid, { disabled: true });
 }
 
 function normalizeEmail(raw: unknown): string {
@@ -126,7 +161,7 @@ export const registerTeacherInvite = onCall(async (request) => {
   const db = admin.firestore();
   await assertPermission(db, academyId, uid, token, "settings.members");
 
-  const col = db.collection(`academies/${academyId}/teachers`);
+  const col = db.collection(`academies/${academyId}/staff`);
   const dup = await col.where("email", "==", email).limit(5).get();
   if (!dup.empty) {
     throw new HttpsError("already-exists", "이미 등록된 이메일입니다.");
@@ -142,6 +177,7 @@ export const registerTeacherInvite = onCall(async (request) => {
     academyId,
     roleId: DEFAULT_STAFF_ROLE_ID,
     permissions: [],
+    employmentStatus: "employed",
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   });
@@ -165,7 +201,7 @@ export const updateTeacherInvite = onCall(async (request) => {
   const db = admin.firestore();
   await assertPermission(db, academyId, uid, token, "settings.members");
 
-  const ref = db.doc(`academies/${academyId}/teachers/${teacherId}`);
+  const ref = db.doc(`academies/${academyId}/staff/${teacherId}`);
   const snap = await ref.get();
   if (!snap.exists) {
     throw new HttpsError("not-found", "선생님 정보를 찾을 수 없습니다.");
@@ -187,7 +223,7 @@ export const updateTeacherInvite = onCall(async (request) => {
     typeof request.data?.phone === "string" ? request.data.phone.trim().slice(0, 30) : "";
 
   const dup = await db
-    .collection(`academies/${academyId}/teachers`)
+    .collection(`academies/${academyId}/staff`)
     .where("email", "==", email)
     .limit(5)
     .get();
@@ -222,7 +258,7 @@ export const sendTeacherInvitation = onCall(async (request) => {
   const db = admin.firestore();
   await assertPermission(db, academyId, uid, token, "settings.members");
 
-  const docRef = db.doc(`academies/${academyId}/teachers/${teacherId}`);
+  const docRef = db.doc(`academies/${academyId}/staff/${teacherId}`);
   const snap = await docRef.get();
   if (!snap.exists) {
     throw new HttpsError("not-found", "선생님 정보를 찾을 수 없습니다.");
@@ -325,7 +361,7 @@ export const sendTeacherInvitation = onCall(async (request) => {
 
   await sendInviteEmail(email, displayName, links.shortResetLink, links.shortVerifyLink);
 
-  const newRef = db.doc(`academies/${academyId}/teachers/${authUid}`);
+  const newRef = db.doc(`academies/${academyId}/staff/${authUid}`);
   const batch = db.batch();
   batch.set(newRef, {
     ...data,
@@ -351,7 +387,7 @@ export const sendTeacherInvitation = onCall(async (request) => {
 });
 
 function teacherDocAcademyId(ref: admin.firestore.DocumentReference): string | null {
-  const m = ref.path.match(/^academies\/([^/]+)\/teachers\//);
+  const m = ref.path.match(/^academies\/([^/]+)\/staff\//);
   return m ? m[1] : null;
 }
 
@@ -370,7 +406,7 @@ export const finalizeTeacherOnboarding = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  const snaps = await db.collectionGroup("teachers").where("authUid", "==", uid).limit(25).get();
+  const snaps = await db.collectionGroup("staff").where("authUid", "==", uid).limit(25).get();
 
   let candidates = snaps.docs.filter((d) => {
     const s = d.data().status as TeacherStatus;
@@ -463,7 +499,7 @@ export const listTeacherAssignedStudents = onCall(
     }
 
     const db = admin.firestore();
-    const teacherRef = db.doc(`academies/${academyId}/teachers/${uid}`);
+    const teacherRef = db.doc(`academies/${academyId}/staff/${uid}`);
     const col = db.collection(`academies/${academyId}/students`);
 
     const [teacherSnap, byArrSnap, byLegacySnap] = await Promise.all([
@@ -526,16 +562,23 @@ export const activateTeacher = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  await assertPermission(db, academyId, callerUid, token, "settings.members");
+  const actor = await assertPermission(db, academyId, callerUid, token, "settings.members");
 
-  const ref = db.doc(`academies/${academyId}/teachers/${teacherAuthUid}`);
+  const ref = db.doc(`academies/${academyId}/staff/${teacherAuthUid}`);
   const snap = await ref.get();
   if (!snap.exists) {
     throw new HttpsError("not-found", "선생님 정보를 찾을 수 없습니다.");
   }
+  assertStaffAccountChangeAllowed(actor, snap);
   const st = snap.get("status") as TeacherStatus;
   if (st !== "pending_registration" && st !== "inactive") {
     throw new HttpsError("failed-precondition", "활성화할 수 있는 상태가 아닙니다.");
+  }
+  if (snap.get("employmentStatus") === "resigned") {
+    throw new HttpsError(
+      "failed-precondition",
+      "퇴사 처리된 직원입니다. 직원 관리에서 재직 상태로 바꾼 뒤 활성화해 주세요.",
+    );
   }
 
   await ref.update({
@@ -569,29 +612,19 @@ export const deactivateTeacher = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  await assertPermission(db, academyId, callerUid, token, "settings.members");
+  const actor = await assertPermission(db, academyId, callerUid, token, "settings.members");
 
-  const ref = db.doc(`academies/${academyId}/teachers/${teacherAuthUid}`);
+  const ref = db.doc(`academies/${academyId}/staff/${teacherAuthUid}`);
   const snap = await ref.get();
   if (!snap.exists) {
     throw new HttpsError("not-found", "선생님 정보를 찾을 수 없습니다.");
   }
+  assertStaffAccountChangeAllowed(actor, snap);
   if (snap.get("status") !== "active") {
     throw new HttpsError("failed-precondition", "활성 상태의 선생님만 비활성화할 수 있습니다.");
   }
 
-  await ref.update({
-    status: "inactive" satisfies TeacherStatus,
-    updatedAt: FieldValue.serverTimestamp(),
-  });
-
-  await admin.auth().setCustomUserClaims(teacherAuthUid, {
-    role: "teacher",
-    academyId,
-    teacherDisabled: true,
-  });
-
-  await admin.auth().updateUser(teacherAuthUid, { disabled: true });
+  await deactivateStaffAccount(db, academyId, teacherAuthUid);
 
   return { ok: true };
 });
@@ -610,13 +643,14 @@ export const deleteTeacherInvite = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  await assertPermission(db, academyId, callerUid, token, "settings.members");
+  const actor = await assertPermission(db, academyId, callerUid, token, "settings.members");
 
-  const ref = db.doc(`academies/${academyId}/teachers/${teacherId}`);
+  const ref = db.doc(`academies/${academyId}/staff/${teacherId}`);
   const snap = await ref.get();
   if (!snap.exists) {
     throw new HttpsError("not-found", "선생님 정보를 찾을 수 없습니다.");
   }
+  assertStaffAccountChangeAllowed(actor, snap);
   const st = snap.get("status") as TeacherStatus;
   if (st === "pending_registration") {
     throw new HttpsError(

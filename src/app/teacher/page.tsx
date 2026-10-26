@@ -346,7 +346,7 @@ export default function TeacherDashboardPage() {
       }
 
       if (uid) {
-        const snap = await getDoc(doc(db, "academies", academyId, "teachers", uid));
+        const snap = await getDoc(doc(db, "academies", academyId, "staff", uid));
         if (cancelled) return;
         const d = snap.data();
         setMemberDisplayName(

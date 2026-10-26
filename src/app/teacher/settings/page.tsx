@@ -84,7 +84,7 @@ export default function TeacherSettingsPage() {
     const uid = getFirebaseAuth().currentUser?.uid;
     if (!uid) return;
     const db = getFirebaseDb();
-    const snap = await getDoc(doc(db, "academies", academyId, "teachers", uid));
+    const snap = await getDoc(doc(db, "academies", academyId, "staff", uid));
     const d = snap.data();
     setDisplayName(typeof d?.displayName === "string" ? d.displayName : "");
     setPhone(formatKrPhoneDisplay(typeof d?.phone === "string" ? d.phone : ""));

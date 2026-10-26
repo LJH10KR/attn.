@@ -25,8 +25,8 @@ export function academyPath(academyId: string) {
   return `${COLLECTIONS.academies}/${academyId}`;
 }
 
-export function academyTeachersPath(academyId: string) {
-  return `${academyPath(academyId)}/teachers`;
+export function academyStaffPath(academyId: string) {
+  return `${academyPath(academyId)}/staff`;
 }
 
 export function academyParentsPath(academyId: string) {
@@ -173,10 +173,7 @@ export type Academy = {
   status?: "active" | "archived";
 };
 
-/**
- * 학원 선생님 — 초청 전에는 임의 문서 ID, 초청 발송 후 `authUid` 부여 및 문서 ID를 Auth uid로 이전.
- * 생성·수정·삭제는 Cloud Functions(Admin SDK)만 수행.
- */
+/** 선생님(직원) 계정 등록 단계 — 초청 발송 후 `authUid` 부여 및 문서 ID를 Auth uid로 이전 */
 export type TeacherRegistrationStatus =
   | "pending_setup"
   | "invitation_needed"
@@ -195,16 +192,50 @@ export const PARENT_INVITE_TTL_MS = TEACHER_INVITE_TTL_MS;
 /** 학부모 등록 단계 — 선생님과 동일 상태 값 */
 export type ParentRegistrationStatus = TeacherRegistrationStatus;
 
-export type AcademyTeacher = {
+/** 직원 계정 상태 — 계정 없이 인사 정보만 등록한 직원은 "no_account" */
+export type StaffAccountStatus = TeacherRegistrationStatus | "no_account";
+
+/** 재직 상태 — 퇴사로 바꾸면 활성 계정도 서버가 비활성화(`staff.ts`) */
+export type StaffEmploymentStatus = "employed" | "on_leave" | "resigned";
+
+export const STAFF_EMPLOYMENT_STATUS_LABELS: Record<StaffEmploymentStatus, string> = {
+  employed: "재직",
+  on_leave: "휴직",
+  resigned: "퇴사",
+};
+
+/** 미설정(이전 문서)은 재직으로 취급 */
+export function readStaffEmploymentStatus(raw: unknown): StaffEmploymentStatus {
+  return raw === "on_leave" || raw === "resigned" ? raw : "employed";
+}
+
+export function academyStaffDocPath(academyId: string, staffId: string) {
+  return `${academyStaffPath(academyId)}/${staffId}`;
+}
+
+/**
+ * 직원 — 인사 정보 + 선택적 계정이 한 문서(`academies/{academyId}/staff/{staffId}`).
+ * 계정이 있으면 문서 ID = Auth uid, 계정 없는 직원·초청 전은 임의 ID.
+ * 생성·수정·삭제는 Cloud Functions(Admin SDK)만 수행.
+ */
+export type AcademyStaff = {
   attnId?: string;
   /** 로그인용 별칭 — attnLoginIndex 키 (관리 번호와 분리) */
   loginId?: string;
-  email: string;
+  email?: string;
   displayName: string;
   subject?: string | null;
   phone?: string | null;
+  /** 직무 — `meta/options.jobTitles`의 id(지워진 id면 없음으로 표시) */
+  jobTitleId?: string | null;
+  /** 입사일 YYYY-MM-DD */
+  hireDate?: string | null;
+  employmentStatus?: StaffEmploymentStatus;
+  memo?: string;
+  /** 인사 정보 없이 계정만 있는 게스트 — 직원 목록에서 숨김 */
+  isGuest?: boolean;
   academyId: string;
-  status: TeacherRegistrationStatus;
+  status: StaffAccountStatus;
   authProvider?: "password" | "google";
   googleLinked?: boolean;
   googleEmail?: string;
@@ -221,6 +252,17 @@ export type AcademyTeacher = {
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 };
+
+/** `academies/{academyId}/meta/options` — 종류별 선택지 `{id, label}[]`(쓰기는 `saveAcademyOptionList`만) */
+export const ACADEMY_OPTIONS_DOC_ID = "options" as const;
+
+export type AcademyOptionListKind = "jobTitles";
+
+export type AcademyOptionItem = { id: string; label: string };
+
+export function academyOptionsPath(academyId: string): string {
+  return `${academyPath(academyId)}/meta/${ACADEMY_OPTIONS_DOC_ID}`;
+}
 
 export function academyRolesPath(academyId: string) {
   return `${academyPath(academyId)}/roles`;

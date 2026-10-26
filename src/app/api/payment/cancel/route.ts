@@ -32,7 +32,7 @@ async function hasAcademyPermission(
   if (!academySnap.exists) return false;
   if (academySnap.get("ownerUid") === uid) return true;
   const staffSnap = await adminDb
-    .doc(`${COLLECTIONS.academies}/${academyId}/teachers/${uid}`)
+    .doc(`${COLLECTIONS.academies}/${academyId}/staff/${uid}`)
     .get();
   return (
     staffSnap.exists &&

@@ -14,7 +14,7 @@ import {
 
 /**
  * 학원 역할 — `academies/{academyId}/roles/{roleId}`. 템플릿 역할은 문서 ID = 템플릿 키.
- * 직원 멤버 문서(`teachers/{uid}`)에 `roleId`와 함께 `permissions`를 복사해 두어
+ * 직원 문서(`staff/{uid}`)에 `roleId`와 함께 `permissions`를 복사해 두어
  * 보안 규칙이 문서 하나만 읽고 판별하도록 한다(역할을 고치면 여기서 다시 복사).
  */
 
@@ -26,7 +26,7 @@ function rolesCol(db: admin.firestore.Firestore, academyId: string) {
 }
 
 function staffCol(db: admin.firestore.Firestore, academyId: string) {
-  return db.collection(`academies/${academyId}/teachers`);
+  return db.collection(`academies/${academyId}/staff`);
 }
 
 function requireString(raw: unknown, message: string): string {

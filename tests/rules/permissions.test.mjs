@@ -26,6 +26,7 @@ const STAFF = {
   "staff-members": ["active", ["settings.members"]],
   "staff-payments": ["active", ["billing.payments"]],
   "staff-refunds": ["active", ["billing.refunds"]],
+  "staff-hr": ["active", ["settings.staff"]],
   "staff-teacher": ["active", []],
   "staff-inactive": ["inactive", ["operations.students", "settings.members"]],
 };
@@ -55,7 +56,7 @@ beforeEach(async () => {
     const db = ctx.firestore();
     await setDoc(doc(db, academyPath()), { ownerUid: OWNER, name: "테스트 학원" });
     for (const [uid, [status, permissions]] of Object.entries(STAFF)) {
-      await setDoc(doc(db, academyPath("teachers", uid)), {
+      await setDoc(doc(db, academyPath("staff", uid)), {
         authUid: uid,
         displayName: uid,
         status,
@@ -197,7 +198,7 @@ describe("멤버 초대/권한 관리(settings.members)", () => {
   it("역할과 직원 목록을 읽는다", async () => {
     const db = dbAs("staff-members");
     await assertSucceeds(getDocs(collection(db, academyPath("roles"))));
-    await assertSucceeds(getDocs(collection(db, academyPath("teachers"))));
+    await assertSucceeds(getDocs(collection(db, academyPath("staff"))));
   });
 
   it("역할·직원 권한은 클라이언트가 쓰지 못한다(원장 포함)", async () => {
@@ -207,11 +208,38 @@ describe("멤버 초대/권한 관리(settings.members)", () => {
         setDoc(doc(db, academyPath("roles", "teacher")), { name: "x", permissions: ["settings.members"] }),
       );
       await assertFails(
-        updateDoc(doc(db, academyPath("teachers", "staff-teacher")), {
+        updateDoc(doc(db, academyPath("staff", "staff-teacher")), {
           permissions: ["settings.members"],
         }),
       );
     }
+  });
+});
+
+describe("직원 관리(settings.staff)·선택지 목록", () => {
+  it("직원 관리 권한은 직원 목록을 읽지만 직원 문서를 쓰지 못한다", async () => {
+    const db = dbAs("staff-hr");
+    await assertSucceeds(getDocs(collection(db, academyPath("staff"))));
+    await assertFails(
+      setDoc(doc(db, academyPath("staff", "new-staff")), { displayName: "x", status: "no_account" }),
+    );
+  });
+
+  it("직무 등 선택지는 원장·활성 직원이 읽고, 클라이언트는 쓰지 못한다", async () => {
+    await assertSucceeds(getDoc(doc(dbAs(OWNER), academyPath("meta", "options"))));
+    await assertSucceeds(getDoc(doc(dbAs("staff-teacher"), academyPath("meta", "options"))));
+    await assertFails(getDoc(doc(dbAs("staff-inactive"), academyPath("meta", "options"))));
+    await assertFails(getDoc(doc(dbAs(PARENT), academyPath("meta", "options"))));
+    await assertFails(
+      setDoc(doc(dbAs(OWNER), academyPath("meta", "options")), {
+        jobTitles: [{ id: "a", label: "강사" }],
+      }),
+    );
+  });
+
+  it("학부모·무관한 계정은 직원 목록을 읽지 못한다", async () => {
+    await assertFails(getDocs(collection(dbAs(PARENT), academyPath("staff"))));
+    await assertFails(getDocs(collection(dbAs("stranger"), academyPath("staff"))));
   });
 });
 
@@ -229,10 +257,10 @@ describe("권한 없는 직원·비활성·무관한 계정", () => {
 
   it("본인 멤버 문서(권한 포함)는 읽는다", async () => {
     await assertSucceeds(
-      getDoc(doc(dbAs("staff-teacher"), academyPath("teachers", "staff-teacher"))),
+      getDoc(doc(dbAs("staff-teacher"), academyPath("staff", "staff-teacher"))),
     );
     await assertFails(
-      getDoc(doc(dbAs("staff-teacher"), academyPath("teachers", "staff-members"))),
+      getDoc(doc(dbAs("staff-teacher"), academyPath("staff", "staff-members"))),
     );
   });
 

@@ -50,7 +50,7 @@ const PARENT_INVITE_TTL_MS = TEACHER_INVITE_TTL_MS;
 async function countCollection(
   db: admin.firestore.Firestore,
   academyId: string,
-  sub: "teachers" | "parents" | "students",
+  sub: "staff" | "parents" | "students",
   status?: MemberStatus,
 ): Promise<number> {
   let q: admin.firestore.Query = db.collection(`academies/${academyId}/${sub}`);
@@ -79,13 +79,13 @@ export async function reconcileAcademyDashboardStats(
     parentsInviteNeeded,
     parentsInviteSent,
   ] = await Promise.all([
-    countCollection(db, academyId, "teachers"),
+    countCollection(db, academyId, "staff"),
     countCollection(db, academyId, "parents"),
     countCollection(db, academyId, "students"),
-    countCollection(db, academyId, "teachers", "pending_registration"),
-    countCollection(db, academyId, "teachers", "pending_setup"),
-    countCollection(db, academyId, "teachers", "invitation_needed"),
-    countCollection(db, academyId, "teachers", "invitation_sent"),
+    countCollection(db, academyId, "staff", "pending_registration"),
+    countCollection(db, academyId, "staff", "pending_setup"),
+    countCollection(db, academyId, "staff", "invitation_needed"),
+    countCollection(db, academyId, "staff", "invitation_sent"),
     countCollection(db, academyId, "parents", "pending_registration"),
     countCollection(db, academyId, "parents", "pending_setup"),
     countCollection(db, academyId, "parents", "invitation_needed"),
@@ -214,7 +214,7 @@ export async function reconcileAcademyAdminInbox(
   academyId: string,
 ): Promise<void> {
   const [teachersSnap, parentsSnap] = await Promise.all([
-    db.collection(`academies/${academyId}/teachers`).get(),
+    db.collection(`academies/${academyId}/staff`).get(),
     db.collection(`academies/${academyId}/parents`).get(),
   ]);
 
@@ -257,7 +257,7 @@ export async function onAcademyStudentDashboardMetaChange(
 
 /** 선생님 멤버십 변경 — activation 미러는 `user-activation-mirror`에서 처리 */
 export const onAcademyTeacherDashboardMetaWritten = onDocumentWritten(
-  { document: "academies/{academyId}/teachers/{teacherId}", ...firestoreTriggerOpts },
+  { document: "academies/{academyId}/staff/{teacherId}", ...firestoreTriggerOpts },
   async (event) => {
     const academyId = event.params.academyId;
     const teacherId = event.params.teacherId;

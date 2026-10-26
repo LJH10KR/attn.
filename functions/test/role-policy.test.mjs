@@ -7,6 +7,7 @@ import {
   roleAssignViolation,
   roleDeleteViolation,
   roleSaveViolation,
+  staffAccountChangeViolation,
 } from "../lib/lib/role-policy.js";
 import { ROLE_TEMPLATES } from "../lib/lib/permissions.js";
 
@@ -170,6 +171,44 @@ describe("roleAssignViolation", () => {
       }),
       null,
     );
+  });
+});
+
+describe("staffAccountChangeViolation (비활성·삭제·임시 비밀번호·퇴사)", () => {
+  it("직원은 본인 계정을 바꿀 수 없다", () => {
+    assert.notEqual(
+      staffAccountChangeViolation(staff, { staffId: "staff-1", staffCurrentPermissions: [] }),
+      null,
+    );
+  });
+
+  it("직원은 본인보다 넓은 권한의 직원 계정을 바꿀 수 없다(계정 탈취 차단)", () => {
+    assert.notEqual(
+      staffAccountChangeViolation(staff, {
+        staffId: "staff-2",
+        staffCurrentPermissions: ROLE_TEMPLATES.superAdmin.permissions,
+      }),
+      null,
+    );
+  });
+
+  it("범위 안의 직원 계정은 바꿀 수 있고, 원장·포털은 제한 없다", () => {
+    assert.equal(
+      staffAccountChangeViolation(staff, {
+        staffId: "staff-2",
+        staffCurrentPermissions: ["operations.students"],
+      }),
+      null,
+    );
+    for (const actor of [owner, portal]) {
+      assert.equal(
+        staffAccountChangeViolation(actor, {
+          staffId: "staff-2",
+          staffCurrentPermissions: ROLE_TEMPLATES.superAdmin.permissions,
+        }),
+        null,
+      );
+    }
   });
 });
 

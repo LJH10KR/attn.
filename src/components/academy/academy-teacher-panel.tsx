@@ -471,10 +471,13 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
   const loadTeachersList = useCallback(async () => {
     try {
       const db = getFirebaseDb();
-      const qy = query(collection(db, "academies", academyId, "teachers"));
+      const qy = query(collection(db, "academies", academyId, "staff"));
       const snap = await getDocs(qy);
       setListError(null);
-      const list = snap.docs.map((d) => docToRow(d.id, d.data() as Record<string, unknown>));
+      // 계정 없이 인사 정보만 있는 직원은 직원 관리에서만 보임
+      const list = snap.docs
+        .filter((d) => d.get("status") !== "no_account")
+        .map((d) => docToRow(d.id, d.data() as Record<string, unknown>));
       list.sort((a, b) => compareAttnIdAsc(a.attnId, b.attnId));
       setRows(list);
     } catch (err) {

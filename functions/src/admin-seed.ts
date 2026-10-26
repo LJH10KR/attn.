@@ -306,7 +306,7 @@ export const createSeedBatch = onCall(async (request) => {
   // teachers
   for (const t of teacherAuths) {
     writes.push({
-      ref: db.doc(`academies/${academyId}/teachers/${t.uid}`),
+      ref: db.doc(`academies/${academyId}/staff/${t.uid}`),
       data: {
         email: t.email,
         displayName: t.displayName,
@@ -317,6 +317,7 @@ export const createSeedBatch = onCall(async (request) => {
         authUid: t.uid,
         roleId: DEFAULT_STAFF_ROLE_ID,
         permissions: [],
+        employmentStatus: "employed",
         activatedAt: FieldValue.serverTimestamp(),
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
@@ -478,7 +479,7 @@ export const deleteSeedBatch = onCall(async (request) => {
   }
 
   // Firestore 삭제
-  const academyTeachersRef = db.collection(`academies/${academyId}/teachers`);
+  const academyTeachersRef = db.collection(`academies/${academyId}/staff`);
   const academyParentsRef = db.collection(`academies/${academyId}/parents`);
   const academyStudentsRef = db.collection(`academies/${academyId}/students`);
   const academyRolesRef = db.collection(`academies/${academyId}/roles`);

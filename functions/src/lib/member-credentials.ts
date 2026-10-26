@@ -9,6 +9,11 @@ export type MemberKind = "teacher" | "parent";
 
 export type MemberStatus = "pending_setup" | "active" | "inactive";
 
+/** 멤버 문서 컬렉션 — 선생님(직원)은 `staff`, 학부모는 `parents` */
+export function memberCollectionName(role: MemberKind): "staff" | "parents" {
+  return role === "teacher" ? "staff" : "parents";
+}
+
 export type ProvisionedMember = {
   authUid: string;
   attnId: string;
@@ -71,7 +76,7 @@ export async function provisionMemberAccount(params: {
   }
 
   const authUid = userRecord.uid;
-  const col = role === "teacher" ? "teachers" : "parents";
+  const col = role === "teacher" ? "staff" : "parents";
   const memberRef = db.doc(`academies/${academyId}/${col}/${authUid}`);
 
   const memberData: Record<string, unknown> = {
@@ -88,6 +93,7 @@ export async function provisionMemberAccount(params: {
     memberData.loginId = loginId;
     memberData.roleId = DEFAULT_STAFF_ROLE_ID;
     memberData.permissions = [];
+    memberData.employmentStatus = "employed";
   }
   if (role === "parent") {
     memberData.childrenCount = 0;

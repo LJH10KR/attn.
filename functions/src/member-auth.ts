@@ -4,8 +4,14 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { attnLoginIndexPath, PARENT_ATTN_ID_RE, TEACHER_ATTN_ID_RE } from "./lib/attn-id";
 import { normalizeMemberLoginId } from "./lib/member-login-id";
 import { normalizeParentLoginId } from "./lib/parent-login-id";
-import { randomTempPassword, type MemberKind } from "./lib/member-credentials";
+import {
+  memberCollectionName,
+  randomTempPassword,
+  type MemberKind,
+} from "./lib/member-credentials";
 import { assertPermission } from "./lib/academy-access";
+import { normalizePermissionList } from "./lib/permissions";
+import { staffAccountChangeViolation } from "./lib/role-policy";
 
 async function verifyMemberPassword(
   academyId: string,
@@ -15,7 +21,7 @@ async function verifyMemberPassword(
 ): Promise<{ status: string; contactEmail?: string }> {
   const secretSnap = await admin
     .firestore()
-    .doc(`academies/${academyId}/${role}s/${authUid}/secrets/login`)
+    .doc(`academies/${academyId}/${memberCollectionName(role)}/${authUid}/secrets/login`)
     .get();
   if (!secretSnap.exists) {
     throw new HttpsError("failed-precondition", "로그인 정보가 설정되지 않았습니다.");
@@ -30,7 +36,7 @@ async function verifyMemberPassword(
   }
   const memberSnap = await admin
     .firestore()
-    .doc(`academies/${academyId}/${role}s/${authUid}`)
+    .doc(`academies/${academyId}/${memberCollectionName(role)}/${authUid}`)
     .get();
   if (!memberSnap.exists) {
     throw new HttpsError("not-found", "계정을 찾을 수 없습니다.");
@@ -169,7 +175,7 @@ export const signInTeacher = onCall(async (request) => {
 export const TEACHER_GOOGLE_LINK_REQUIRED_MSG = "구글 로그인 연동 후 진행해 주세요.";
 
 function teacherAcademyIdFromMemberPath(path: string): string | null {
-  const m = path.match(/^academies\/([^/]+)\/teachers\//);
+  const m = path.match(/^academies\/([^/]+)\/staff\//);
   return m ? m[1] : null;
 }
 
@@ -186,7 +192,7 @@ export const signInTeacherGoogle = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  const snaps = await db.collectionGroup("teachers").where("authUid", "==", uid).limit(25).get();
+  const snaps = await db.collectionGroup("staff").where("authUid", "==", uid).limit(25).get();
   if (snaps.empty) {
     throw new HttpsError("not-found", "연결된 선생님 계정을 찾을 수 없습니다.");
   }
@@ -251,7 +257,7 @@ export const completeMemberFirstLogin = onCall(async (request) => {
     throw new HttpsError("failed-precondition", "선생님 또는 학부모 계정만 처리할 수 있습니다.");
   }
 
-  const col = role === "teacher" ? "teachers" : "parents";
+  const col = role === "teacher" ? "staff" : "parents";
   const memberRef = admin.firestore().doc(`academies/${academyId}/${col}/${uid}`);
   const memberSnap = await memberRef.get();
   if (!memberSnap.exists) {
@@ -299,7 +305,7 @@ export const regenerateMemberTempPassword = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  await assertPermission(
+  const actor = await assertPermission(
     db,
     academyId,
     uid,
@@ -307,11 +313,20 @@ export const regenerateMemberTempPassword = onCall(async (request) => {
     role === "teacher" ? "settings.members" : "operations.parents",
   );
 
-  const col = role === "teacher" ? "teachers" : "parents";
-  const memberRef = db.doc(`academies/${academyId}/${col}/${memberAuthUid}`);
+  const memberRef = db.doc(`academies/${academyId}/${memberCollectionName(role)}/${memberAuthUid}`);
   const memberSnap = await memberRef.get();
   if (!memberSnap.exists) {
     throw new HttpsError("not-found", "계정을 찾을 수 없습니다.");
+  }
+  if (role === "teacher") {
+    // 직원이 상위 관리자 계정의 임시 비밀번호를 받아 로그인하는 것(계정 탈취) 차단
+    const violation = staffAccountChangeViolation(actor, {
+      staffId: memberAuthUid,
+      staffCurrentPermissions: normalizePermissionList(memberSnap.get("permissions")),
+    });
+    if (violation) {
+      throw new HttpsError("permission-denied", violation);
+    }
   }
   const status = memberSnap.get("status");
   if (status === "active") {
@@ -323,7 +338,7 @@ export const regenerateMemberTempPassword = onCall(async (request) => {
 
   const tempPassword = randomTempPassword();
   await admin.auth().updateUser(memberAuthUid, { password: tempPassword });
-  await db.doc(`academies/${academyId}/${col}/${memberAuthUid}/secrets/login`).set(
+  await memberRef.collection("secrets").doc("login").set(
     {
       tempPassword,
       updatedAt: FieldValue.serverTimestamp(),
@@ -358,7 +373,7 @@ export const listAcademyIssuedAccounts = onCall(async (request) => {
   await assertPermission(db, academyId, uid, token, "settings.members");
 
   const [teachersSnap, parentsSnap] = await Promise.all([
-    db.collection(`academies/${academyId}/teachers`).get(),
+    db.collection(`academies/${academyId}/staff`).get(),
     db.collection(`academies/${academyId}/parents`).get(),
   ]);
 
@@ -377,7 +392,10 @@ export const listAcademyIssuedAccounts = onCall(async (request) => {
   };
 
   return {
-    teachers: teachersSnap.docs.map((d) => mapRow(d, "teacher")),
+    // 계정 없는 직원(인사 정보만)은 발급 계정 목록에서 제외
+    teachers: teachersSnap.docs
+      .filter((d) => d.get("status") !== "no_account")
+      .map((d) => mapRow(d, "teacher")),
     parents: parentsSnap.docs.map((d) => mapRow(d, "parent")),
   };
 });

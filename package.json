@@ -10,7 +10,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:rules": "cross-env NODE_OPTIONS= firebase emulators:exec --only firestore --project demo-attn \"node --test tests/rules/*.test.mjs\""
+    "test:functions": "npm --prefix functions run build && cross-env NODE_OPTIONS= firebase emulators:exec --only auth,firestore,functions --project demo-attn \"node tests/functions/staff-callables.smoke.mjs\"",
+    "test:rules":"cross-env NODE_OPTIONS= firebase emulators:exec --only firestore --project demo-attn \"node --test tests/rules/*.test.mjs\""
   },
   "dependencies": {
     "@portone/browser-sdk": "^0.1.10",

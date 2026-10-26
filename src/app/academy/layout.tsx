@@ -10,7 +10,7 @@ function AcademyLayoutInner({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const academyId = searchParams.get("id")?.trim() ?? "";
-  const isSettings = pathname === "/academy/settings";
+  const isSettings = pathname === "/academy/settings" || pathname.startsWith("/academy/settings/");
 
   const historyGuard = academyId ? <KioskHistoryGuard academyId={academyId} /> : null;
 

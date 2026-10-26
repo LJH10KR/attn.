@@ -326,7 +326,7 @@ export const listAttendanceNotifications = onCall(async (request) => {
   }
 
   const [teacherSnaps, ownerSnaps, parentSnaps] = await Promise.all([
-    Promise.all(teacherKeys.map((k) => db.doc(`academies/${k.academyId}/teachers/${k.uid}`).get())),
+    Promise.all(teacherKeys.map((k) => db.doc(`academies/${k.academyId}/staff/${k.uid}`).get())),
     Promise.all(ownerKeys.map((uid) => db.doc(`users/${uid}`).get())),
     Promise.all(parentKeys.map((k) => db.doc(`academies/${k.academyId}/parents/${k.uid}`).get())),
   ]);
