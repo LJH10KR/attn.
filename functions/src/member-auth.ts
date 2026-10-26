@@ -5,7 +5,7 @@ import { attnLoginIndexPath, PARENT_ATTN_ID_RE, TEACHER_ATTN_ID_RE } from "./lib
 import { normalizeMemberLoginId } from "./lib/member-login-id";
 import { normalizeParentLoginId } from "./lib/parent-login-id";
 import { randomTempPassword, type MemberKind } from "./lib/member-credentials";
-import { assertCanManageAcademy } from "./lib/academy-access";
+import { assertPermission } from "./lib/academy-access";
 
 async function verifyMemberPassword(
   academyId: string,
@@ -299,7 +299,13 @@ export const regenerateMemberTempPassword = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  await assertCanManageAcademy(db, academyId, uid, token);
+  await assertPermission(
+    db,
+    academyId,
+    uid,
+    token,
+    role === "teacher" ? "settings.members" : "operations.parents",
+  );
 
   const col = role === "teacher" ? "teachers" : "parents";
   const memberRef = db.doc(`academies/${academyId}/${col}/${memberAuthUid}`);
@@ -349,7 +355,7 @@ export const listAcademyIssuedAccounts = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  await assertCanManageAcademy(db, academyId, uid, token);
+  await assertPermission(db, academyId, uid, token, "settings.members");
 
   const [teachersSnap, parentsSnap] = await Promise.all([
     db.collection(`academies/${academyId}/teachers`).get(),

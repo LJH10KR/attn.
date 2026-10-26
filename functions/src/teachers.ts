@@ -6,6 +6,8 @@ import * as logger from "firebase-functions/logger";
 import * as nodemailer from "nodemailer";
 import { createShortAuthLink, getAppOrigin } from "./auth-short-links";
 import { reconcileUserActivationMirror } from "./user-activation-mirror";
+import { assertPermission } from "./lib/academy-access";
+import { DEFAULT_STAFF_ROLE_ID } from "./lib/permissions";
 import {
   deleteAttnLoginIndexForMember,
   deleteMemberLoginSecrets,
@@ -28,26 +30,6 @@ function invitationExpiresAtFromNow(): Timestamp {
 
 function isFunctionsEmulator(): boolean {
   return process.env.FUNCTIONS_EMULATOR === "true";
-}
-
-async function assertCanManageAcademy(
-  db: admin.firestore.Firestore,
-  academyId: string,
-  uid: string,
-  token: admin.auth.DecodedIdToken,
-): Promise<void> {
-  const academySnap = await db.doc(`academies/${academyId}`).get();
-  if (!academySnap.exists) {
-    throw new HttpsError("not-found", "학원을 찾을 수 없습니다.");
-  }
-  const ownerUid = academySnap.get("ownerUid");
-  if (typeof ownerUid === "string" && ownerUid === uid) {
-    return;
-  }
-  if (token.role === "academy" && token.academyId === academyId) {
-    return;
-  }
-  throw new HttpsError("permission-denied", "학원을 관리할 권한이 없습니다.");
 }
 
 function normalizeEmail(raw: unknown): string {
@@ -142,7 +124,7 @@ export const registerTeacherInvite = onCall(async (request) => {
     typeof request.data?.phone === "string" ? request.data.phone.trim().slice(0, 30) : "";
 
   const db = admin.firestore();
-  await assertCanManageAcademy(db, academyId, uid, token);
+  await assertPermission(db, academyId, uid, token, "settings.members");
 
   const col = db.collection(`academies/${academyId}/teachers`);
   const dup = await col.where("email", "==", email).limit(5).get();
@@ -158,6 +140,8 @@ export const registerTeacherInvite = onCall(async (request) => {
     phone: phone || null,
     status: "invitation_needed" satisfies TeacherStatus,
     academyId,
+    roleId: DEFAULT_STAFF_ROLE_ID,
+    permissions: [],
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   });
@@ -179,7 +163,7 @@ export const updateTeacherInvite = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  await assertCanManageAcademy(db, academyId, uid, token);
+  await assertPermission(db, academyId, uid, token, "settings.members");
 
   const ref = db.doc(`academies/${academyId}/teachers/${teacherId}`);
   const snap = await ref.get();
@@ -236,7 +220,7 @@ export const sendTeacherInvitation = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  await assertCanManageAcademy(db, academyId, uid, token);
+  await assertPermission(db, academyId, uid, token, "settings.members");
 
   const docRef = db.doc(`academies/${academyId}/teachers/${teacherId}`);
   const snap = await docRef.get();
@@ -542,7 +526,7 @@ export const activateTeacher = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  await assertCanManageAcademy(db, academyId, callerUid, token);
+  await assertPermission(db, academyId, callerUid, token, "settings.members");
 
   const ref = db.doc(`academies/${academyId}/teachers/${teacherAuthUid}`);
   const snap = await ref.get();
@@ -585,7 +569,7 @@ export const deactivateTeacher = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  await assertCanManageAcademy(db, academyId, callerUid, token);
+  await assertPermission(db, academyId, callerUid, token, "settings.members");
 
   const ref = db.doc(`academies/${academyId}/teachers/${teacherAuthUid}`);
   const snap = await ref.get();
@@ -626,7 +610,7 @@ export const deleteTeacherInvite = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  await assertCanManageAcademy(db, academyId, callerUid, token);
+  await assertPermission(db, academyId, callerUid, token, "settings.members");
 
   const ref = db.doc(`academies/${academyId}/teachers/${teacherId}`);
   const snap = await ref.get();

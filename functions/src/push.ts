@@ -5,6 +5,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { sendStudentAttendanceNotificationCore } from "./attendance-send-core";
 import { upsertTodayAttendanceRecord } from "./attendance-records";
 import { pruneStalePushSubscriptions } from "./push-subscription-delivery";
+import { actorHasPermission, resolveAcademyActor } from "./lib/academy-access";
 
 function studentAssignedToTeacher(data: Record<string, unknown>, teacherUid: string): boolean {
   const raw = data.assignedTeacherUids;
@@ -32,9 +33,12 @@ async function resolveAttendanceSender(params: {
   studentData: Record<string, unknown>;
 }): Promise<AttendanceSender> {
   const { db, academyId, callerUid, token, studentData } = params;
+  const actor = await resolveAcademyActor(db, academyId, callerUid, token);
+  if (!actor) {
+    throw new HttpsError("permission-denied", "출석/결석 알림을 보낼 권한이 없습니다.");
+  }
 
-  // 학원 포털 세션(custom token role=academy)
-  if (token.role === "academy" && token.academyId === academyId) {
+  if (actor.kind === "portal") {
     return {
       role: "academy",
       actorUid: callerUid,
@@ -43,24 +47,7 @@ async function resolveAttendanceSender(params: {
     };
   }
 
-  // 활성 선생님 + 전담 학생 여부
-  const teacherRef = db.doc(`academies/${academyId}/teachers/${callerUid}`);
-  const teacherSnap = await teacherRef.get();
-  if (teacherSnap.exists && teacherSnap.get("status") === "active") {
-    if (!studentAssignedToTeacher(studentData, callerUid)) {
-      throw new HttpsError("permission-denied", "전담 학생에게만 알림을 보낼 수 있습니다.");
-    }
-    return {
-      role: "teacher",
-      actorUid: callerUid,
-      source: "teacher_dashboard",
-      canBypassCooldown: true,
-    };
-  }
-
-  // 오너(학원 문서 ownerUid)
-  const academySnap = await db.doc(`academies/${academyId}`).get();
-  if (academySnap.exists && academySnap.get("ownerUid") === callerUid) {
+  if (actor.kind === "owner") {
     return {
       role: "owner",
       actorUid: callerUid,
@@ -69,7 +56,19 @@ async function resolveAttendanceSender(params: {
     };
   }
 
-  throw new HttpsError("permission-denied", "출석/결석 알림을 보낼 권한이 없습니다.");
+  // 활성 직원 — 출결관리 권한이 없으면 전담 학생만
+  if (
+    !actorHasPermission(actor, "lessons.attendance") &&
+    !studentAssignedToTeacher(studentData, callerUid)
+  ) {
+    throw new HttpsError("permission-denied", "전담 학생에게만 알림을 보낼 수 있습니다.");
+  }
+  return {
+    role: "teacher",
+    actorUid: callerUid,
+    source: "teacher_dashboard",
+    canBypassCooldown: true,
+  };
 }
 
 /**
@@ -230,7 +229,6 @@ export const listAttendanceNotifications = onCall(async (request) => {
 
   const db = admin.firestore();
   const isAdmin = Boolean(token && (token as Record<string, unknown>).admin === true);
-  const isAcademyPortal = token.role === "academy";
 
   if (!isAdmin && !academyId) {
     throw new HttpsError("invalid-argument", "academyId가 필요합니다.");
@@ -239,23 +237,15 @@ export const listAttendanceNotifications = onCall(async (request) => {
   let mode: "admin_all" | "academy_all" | "teacher_own";
   if (isAdmin && !academyId) {
     mode = "admin_all";
-  } else if (isAcademyPortal) {
-    if (!academyId || token.academyId !== academyId) {
-      throw new HttpsError("permission-denied", "해당 학원 기록을 조회할 권한이 없습니다.");
-    }
+  } else if (isAdmin) {
     mode = "academy_all";
   } else {
-    const academySnap = await db.doc(`academies/${academyId}`).get();
-    const ownerUid = academySnap.exists ? academySnap.get("ownerUid") : null;
-    if (ownerUid === uid || isAdmin) {
-      mode = "academy_all";
-    } else {
-      const teacherSnap = await db.doc(`academies/${academyId}/teachers/${uid}`).get();
-      if (!teacherSnap.exists || teacherSnap.get("status") !== "active") {
-        throw new HttpsError("permission-denied", "알림 전송 기록을 조회할 권한이 없습니다.");
-      }
-      mode = "teacher_own";
+    // 원장·포털·알림 기록 권한 직원은 학원 전체, 그 외 활성 직원은 본인 전송 기록만
+    const actor = await resolveAcademyActor(db, academyId, uid, token);
+    if (!actor) {
+      throw new HttpsError("permission-denied", "알림 전송 기록을 조회할 권한이 없습니다.");
     }
+    mode = actorHasPermission(actor, "lessons.notificationLog") ? "academy_all" : "teacher_own";
   }
 
   const snaps =

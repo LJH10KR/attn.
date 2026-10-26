@@ -4,6 +4,8 @@ import type { DocumentReference } from "firebase-admin/firestore";
 import { FieldValue } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
+import { DEFAULT_STAFF_ROLE_ID } from "./lib/permissions";
+import { ensureAcademyRoleTemplates } from "./roles";
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -313,6 +315,8 @@ export const createSeedBatch = onCall(async (request) => {
         academyId,
         status: "active",
         authUid: t.uid,
+        roleId: DEFAULT_STAFF_ROLE_ID,
+        permissions: [],
         activatedAt: FieldValue.serverTimestamp(),
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
@@ -402,6 +406,7 @@ export const createSeedBatch = onCall(async (request) => {
     for (const w of c) batch.set(w.ref, w.data);
     await batch.commit();
   }
+  await ensureAcademyRoleTemplates(db, academyId);
 
   logger.info("seedBatch created", {
     batchId,
@@ -476,13 +481,15 @@ export const deleteSeedBatch = onCall(async (request) => {
   const academyTeachersRef = db.collection(`academies/${academyId}/teachers`);
   const academyParentsRef = db.collection(`academies/${academyId}/parents`);
   const academyStudentsRef = db.collection(`academies/${academyId}/students`);
+  const academyRolesRef = db.collection(`academies/${academyId}/roles`);
   const secretsLoginRef = db.doc(`academies/${academyId}/secrets/login`);
   const academyRef = db.doc(`academies/${academyId}`);
 
-  const [teachersSnap, parentsSnap, studentsSnap, secretsSnap] = await Promise.all([
+  const [teachersSnap, parentsSnap, studentsSnap, rolesSnap, secretsSnap] = await Promise.all([
     academyTeachersRef.get(),
     academyParentsRef.get(),
     academyStudentsRef.get(),
+    academyRolesRef.get(),
     secretsLoginRef.get(),
   ]);
 
@@ -490,6 +497,7 @@ export const deleteSeedBatch = onCall(async (request) => {
   teachersSnap.docs.forEach((d) => deleteOps.push(d.ref));
   parentsSnap.docs.forEach((d) => deleteOps.push(d.ref));
   studentsSnap.docs.forEach((d) => deleteOps.push(d.ref));
+  rolesSnap.docs.forEach((d) => deleteOps.push(d.ref));
   if (secretsSnap.exists) deleteOps.push(secretsLoginRef);
   deleteOps.push(academyRef);
 

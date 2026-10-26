@@ -2,7 +2,7 @@ import * as crypto from "node:crypto";
 import * as admin from "firebase-admin";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { assertCanManageAcademy } from "./lib/academy-access";
+import { assertPermission } from "./lib/academy-access";
 
 /**
  * 매월 지정일 납부 청구서 — `academies/{academyId}/students/{studentId}/tuitionInvoices/{YYYY-MM}`.
@@ -178,7 +178,7 @@ async function parseInvoiceRequest(
   }
 
   const db = admin.firestore();
-  await assertCanManageAcademy(db, academyId, request.auth.uid, request.auth.token);
+  await assertPermission(db, academyId, request.auth.uid, request.auth.token, "billing.invoices");
 
   const studentSnap = await db.doc(`academies/${academyId}/students/${studentId}`).get();
   if (!studentSnap.exists) {

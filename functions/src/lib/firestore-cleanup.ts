@@ -259,6 +259,9 @@ export async function deleteAcademyFirestoreCascade(
   const metaSnap = await db.collection(`academies/${academyId}/meta`).get();
   metaSnap.docs.forEach((d) => deleteOps.push(d.ref));
 
+  const rolesSnap = await db.collection(`academies/${academyId}/roles`).get();
+  rolesSnap.docs.forEach((d) => deleteOps.push(d.ref));
+
   const inboxSnap = await db.collection(`academies/${academyId}/adminInbox`).get();
   inboxSnap.docs.forEach((d) => deleteOps.push(d.ref));
 

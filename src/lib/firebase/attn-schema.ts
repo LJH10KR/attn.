@@ -1,4 +1,5 @@
 import type { Timestamp } from "firebase/firestore";
+import type { AcademyPermission, RoleTemplateKey } from "@/lib/academy/permissions";
 
 /**
  * attn. Firestore 데이터 모델 — 사용자·학원 계층
@@ -213,6 +214,27 @@ export type AcademyTeacher = {
   invitationExpiresAt?: Timestamp | null;
   onboardingCompleteAt?: Timestamp | null;
   activatedAt?: Timestamp | null;
+  /** 배정된 역할(`academies/{academyId}/roles/{roleId}`) */
+  roleId?: string | null;
+  /** 역할에서 서버가 복사한 세부 권한 — 보안 규칙이 이 필드로 판별(클라이언트 쓰기 불가) */
+  permissions?: AcademyPermission[];
+  createdAt: Timestamp;
+  updatedAt?: Timestamp;
+};
+
+export function academyRolesPath(academyId: string) {
+  return `${academyPath(academyId)}/roles`;
+}
+
+/**
+ * 학원 역할(권한 묶음) — 템플릿 역할은 문서 ID = 템플릿 키.
+ * 생성·수정·삭제·배정은 Functions(`roles.ts`)만 수행.
+ */
+export type AcademyRoleDoc = {
+  name: string;
+  permissions: AcademyPermission[];
+  template: RoleTemplateKey | null;
+  sortOrder: number;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 };

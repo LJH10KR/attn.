@@ -6,6 +6,7 @@ import { assertFourDigitPin, hashPin, verifyPin } from "./pin-utils";
 import { countUserDashboardBellItems } from "./app-badge-count";
 import { sendStudentAttendanceNotificationCore } from "./attendance-send-core";
 import { upsertTodayAttendanceRecord } from "./attendance-records";
+import { actorHasPermission, assertPermission, resolveAcademyActor } from "./lib/academy-access";
 
 const KIOSK_SETTINGS_DOC_ID = "kioskSettings";
 const MAX_PIN_ATTEMPTS = 5;
@@ -24,40 +25,17 @@ function studentCheckInSecretRef(
   );
 }
 
-async function assertCanManageAcademy(
-  db: admin.firestore.Firestore,
-  academyId: string,
-  uid: string,
-  token: admin.auth.DecodedIdToken,
-): Promise<void> {
-  const academySnap = await db.doc(`academies/${academyId}`).get();
-  if (!academySnap.exists) {
-    throw new HttpsError("not-found", "학원을 찾을 수 없습니다.");
-  }
-  const ownerUid = academySnap.get("ownerUid");
-  if (typeof ownerUid === "string" && ownerUid === uid) {
-    return;
-  }
-  if (token.role === "academy" && token.academyId === academyId) {
-    return;
-  }
-  throw new HttpsError("permission-denied", "학원을 관리할 권한이 없습니다.");
-}
-
+/** 키오스크 화면(체크인·종료 PIN) — 출결 권한이 있는 세션에서만 */
 async function assertAcademyKioskSession(
   db: admin.firestore.Firestore,
   academyId: string,
   uid: string,
   token: admin.auth.DecodedIdToken,
 ): Promise<void> {
-  if (token.role === "academy" && token.academyId === academyId) {
-    return;
+  const actor = await resolveAcademyActor(db, academyId, uid, token);
+  if (!actor || !actorHasPermission(actor, "lessons.attendance")) {
+    throw new HttpsError("permission-denied", "출석 키오스크를 사용할 권한이 없습니다.");
   }
-  const academySnap = await db.doc(`academies/${academyId}`).get();
-  if (academySnap.exists && academySnap.get("ownerUid") === uid) {
-    return;
-  }
-  throw new HttpsError("permission-denied", "출석 키오스크를 사용할 권한이 없습니다.");
 }
 
 type KioskSettingsPublic = {
@@ -105,7 +83,10 @@ export const getAcademyKioskSettings = onCall(async (request) => {
     throw new HttpsError("invalid-argument", "학원 ID가 필요합니다.");
   }
   const db = admin.firestore();
-  await assertCanManageAcademy(db, academyId, request.auth.uid, request.auth.token);
+  await assertPermission(db, academyId, request.auth.uid, request.auth.token, [
+    "lessons.attendance",
+    "settings.general",
+  ]);
   const settings = await loadKioskSettingsPublic(db, academyId);
   return { ok: true as const, settings };
 });
@@ -120,7 +101,7 @@ export const updateAcademyKioskSettings = onCall(async (request) => {
     throw new HttpsError("invalid-argument", "학원 ID가 필요합니다.");
   }
   const db = admin.firestore();
-  await assertCanManageAcademy(db, academyId, request.auth.uid, request.auth.token);
+  await assertPermission(db, academyId, request.auth.uid, request.auth.token, "settings.general");
 
   const ref = kioskSettingsRef(db, academyId);
   const snap = await ref.get();

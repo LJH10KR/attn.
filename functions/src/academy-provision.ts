@@ -9,7 +9,8 @@ import {
   formatParentAttnId,
   formatTeacherAttnId,
 } from "./lib/attn-id";
-import { assertCanManageAcademy } from "./lib/academy-access";
+import { assertPermission } from "./lib/academy-access";
+import { ensureAcademyRoleTemplates } from "./roles";
 import {
   provisionMemberAccount,
   provisionTemplateStudentsForParent,
@@ -121,6 +122,7 @@ export const createAcademyEasy = onCall(async (request) => {
     nextTeacherSeq: 1,
     nextParentSeq: 1,
   });
+  await ensureAcademyRoleTemplates(db, academyId);
 
   return {
     academyId,
@@ -146,7 +148,7 @@ async function runProvisionTemplateTeachers(request: {
   }
 
   const db = admin.firestore();
-  await assertCanManageAcademy(db, academyId, uid, token as admin.auth.DecodedIdToken);
+  await assertPermission(db, academyId, uid, token as admin.auth.DecodedIdToken, "settings.members");
 
   if (count === 0) {
     return { teachers: [] as Array<{
@@ -229,7 +231,7 @@ async function runProvisionTemplateParents(request: {
   }
 
   const db = admin.firestore();
-  await assertCanManageAcademy(db, academyId, uid, token as admin.auth.DecodedIdToken);
+  await assertPermission(db, academyId, uid, token as admin.auth.DecodedIdToken, "operations.parents");
 
   const usedNames = new Set<string>();
   const parentAttnIds: string[] = [];
@@ -313,7 +315,7 @@ export const provisionStudentsBatch = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  await assertCanManageAcademy(db, academyId, uid, token as admin.auth.DecodedIdToken);
+  await assertPermission(db, academyId, uid, token as admin.auth.DecodedIdToken, "operations.students");
 
   const parentSnap = await db.doc(`academies/${academyId}/parents/${parentAuthUid}`).get();
   if (!parentSnap.exists) {

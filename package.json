@@ -9,7 +9,8 @@
     "emulators:fresh": "npm --prefix functions run build && cross-env NODE_OPTIONS= firebase emulators:start",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:rules": "cross-env NODE_OPTIONS= firebase emulators:exec --only firestore --project demo-attn \"node --test tests/rules/*.test.mjs\""
   },
   "dependencies": {
     "@portone/browser-sdk": "^0.1.10",
@@ -29,6 +30,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@firebase/rules-unit-testing": "5.0.2",
     "@tailwindcss/postcss": "^4",
     "@types/d3-hierarchy": "^3",
     "@types/node": "^20",

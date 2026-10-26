@@ -3,8 +3,9 @@ import {onCall, HttpsError} from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
-import { assertCanManageAcademy } from "./lib/academy-access";
+import { assertPermission } from "./lib/academy-access";
 import { ACADEMY_ATTN_ID_RE } from "./lib/attn-id";
+import { ensureAcademyRoleTemplates } from "./roles";
 
 /**
  * `createCustomToken`용 IAM 서명 주체.
@@ -135,6 +136,7 @@ export const createAcademyWithPortal = onCall(async (request) => {
     portalPassword,
   });
   await batch.commit();
+  await ensureAcademyRoleTemplates(db, academyId);
 
   return {academyId};
 });
@@ -194,7 +196,7 @@ export const changeAcademyPortalPassword = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  await assertCanManageAcademy(db, academyId, uid, auth.token);
+  await assertPermission(db, academyId, uid, auth.token, "settings.general");
 
   const secretRef = db.doc(`academies/${academyId}/secrets/login`);
   const secretSnap = await secretRef.get();
@@ -312,6 +314,12 @@ export {
   sendParentInvitation,
   updateParentInvite,
 } from "./parents";
+export {
+  assignStaffRole,
+  deleteAcademyRole,
+  listAcademyRoles,
+  saveAcademyRole,
+} from "./roles";
 export {
   activateTeacher,
   deactivateTeacher,

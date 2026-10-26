@@ -3,6 +3,7 @@ import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { attnLoginIndexPath, formatStudentAttnId } from "./attn-id";
 import { allocateTeacherLoginId } from "./teacher-login-id";
+import { DEFAULT_STAFF_ROLE_ID } from "./permissions";
 
 export type MemberKind = "teacher" | "parent";
 
@@ -85,6 +86,8 @@ export async function provisionMemberAccount(params: {
   };
   if (role === "teacher") {
     memberData.loginId = loginId;
+    memberData.roleId = DEFAULT_STAFF_ROLE_ID;
+    memberData.permissions = [];
   }
   if (role === "parent") {
     memberData.childrenCount = 0;
