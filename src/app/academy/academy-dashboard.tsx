@@ -4,7 +4,6 @@ import { AcademyParentPanel } from "@/components/academy/academy-parent-panel";
 import { AcademyParentSignupLink } from "@/components/academy/academy-parent-signup-link";
 import { AcademyAttendanceLogPanel } from "@/components/academy/academy-attendance-log-panel";
 import { AcademyStudentPanel } from "@/components/academy/academy-student-panel";
-import { AcademyTeacherPanel } from "@/components/academy/academy-teacher-panel";
 import {
   AcademyTreemap,
   AcademyTreemapFooter,
@@ -61,10 +60,11 @@ import { SlideSwitch } from "@/components/ui/slide-switch";
 
 const glassCard = "glass-card";
 
-type AcademySection = "home" | "teachers" | "parents" | "students" | "notifications";
+/** 선생님(멤버) 관리는 설정 › 멤버 초대/권한 관리(/academy/settings/members)로 옮김 */
+type AcademySection = "home" | "parents" | "students" | "notifications";
 
 function parseSection(raw: string | null): AcademySection {
-  if (raw === "teachers" || raw === "parents" || raw === "students" || raw === "notifications") {
+  if (raw === "parents" || raw === "students" || raw === "notifications") {
     return raw;
   }
   return "home";
@@ -180,27 +180,6 @@ type AcademySummaryCounts = {
   parents: number;
   students: number;
 };
-
-function IconPencil({ active }: { active?: boolean }) {
-  const stroke = active ? "#171717" : "#666";
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M4 20l4-1L19.5 7.5a2.121 2.121 0 00-3-3L5 16l-1 4z"
-        stroke={stroke}
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-        fill={active ? "rgba(0,0,0,0.06)" : "none"}
-      />
-      <path
-        d="M16.5 4.5l3 3"
-        stroke={stroke}
-        strokeWidth="1.6"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
 
 function IconGroup({ active }: { active?: boolean }) {
   const stroke = active ? "#171717" : "#666";
@@ -757,6 +736,15 @@ export function AcademyDashboard() {
                       },
                     ]
                   : []),
+                ...(canAccess("settings.members")
+                  ? [
+                      {
+                        label: "멤버 초대/권한 관리",
+                        onSelectAction: () =>
+                          router.push(`/academy/settings/members?id=${encodeURIComponent(academyId)}`),
+                      },
+                    ]
+                  : []),
               ]
         }
         hideBottomNav={kioskMode}
@@ -782,13 +770,6 @@ export function AcademyDashboard() {
             iconAction: (active: boolean) => <HomeTabIcon active={active} />,
             active: section === "home",
             onSelectAction: () => navigateSection("home"),
-          },
-          {
-            id: "teachers",
-            label: "선생님",
-            iconAction: (active: boolean) => <IconPencil active={active} />,
-            active: section === "teachers",
-            onSelectAction: () => navigateSection("teachers"),
           },
           {
             id: "parents",
@@ -902,7 +883,11 @@ export function AcademyDashboard() {
                 <button
                   key={c.key}
                   type="button"
-                  onClick={() => navigateSection(c.key)}
+                  onClick={() =>
+                    c.key === "teachers"
+                      ? router.push(`/academy/settings/members?id=${encodeURIComponent(academyId)}`)
+                      : navigateSection(c.key)
+                  }
                   className="glass-tile glass-tile-hover flex flex-col items-center justify-center px-2 py-4 transition"
                 >
                   <span className="text-[11px] font-medium text-neutral-500 dark:text-neutral-400">
@@ -990,12 +975,6 @@ export function AcademyDashboard() {
             ) : null}
           </section>
           </>
-        ) : null}
-
-        {section === "teachers" ? (
-          <section className="mt-6">
-            <AcademyTeacherPanel academyId={academyId} />
-          </section>
         ) : null}
 
         {section === "parents" ? (

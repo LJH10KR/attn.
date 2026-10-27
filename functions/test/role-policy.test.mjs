@@ -4,6 +4,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  memberPasswordResetViolation,
   roleAssignViolation,
   roleDeleteViolation,
   roleSaveViolation,
@@ -208,6 +209,48 @@ describe("staffAccountChangeViolation (비활성·삭제·임시 비밀번호·�
         null,
       );
     }
+  });
+});
+
+describe("memberPasswordResetViolation", () => {
+  const teacher = (over = {}) => ({
+    kind: "teacher",
+    status: "active",
+    hasLoginPassword: true,
+    staffId: "staff-2",
+    staffCurrentPermissions: ["operations.students"],
+    ...over,
+  });
+  const parent = (over = {}) => ({ kind: "parent", status: "active", hasLoginPassword: true, ...over });
+
+  it("사용 중인 계정만 — 승인 대기·첫 로그인 전·비활성은 거부(스스로 활성화 구멍 방지)", () => {
+    for (const status of ["pending_registration", "pending_setup", "inactive", "no_account", undefined]) {
+      assert.notEqual(memberPasswordResetViolation(owner, teacher({ status })), null, String(status));
+      assert.notEqual(memberPasswordResetViolation(owner, parent({ status })), null, String(status));
+    }
+    assert.equal(memberPasswordResetViolation(owner, teacher()), null);
+    assert.equal(memberPasswordResetViolation(owner, parent()), null);
+  });
+
+  it("로그인 ID 비밀번호가 없는(Google 전용) 계정은 거부", () => {
+    assert.notEqual(memberPasswordResetViolation(owner, teacher({ hasLoginPassword: false })), null);
+    assert.notEqual(memberPasswordResetViolation(owner, parent({ hasLoginPassword: false })), null);
+  });
+
+  it("직원은 본인·더 넓은 권한 직원의 비밀번호를 초기화할 수 없다", () => {
+    assert.notEqual(memberPasswordResetViolation(staff, teacher({ staffId: staff.uid })), null);
+    assert.notEqual(
+      memberPasswordResetViolation(
+        staff,
+        teacher({ staffCurrentPermissions: ROLE_TEMPLATES.superAdmin.permissions }),
+      ),
+      null,
+    );
+    assert.equal(memberPasswordResetViolation(staff, teacher()), null);
+  });
+
+  it("학부모 대상은 직원 권한 범위와 무관(권한 검사는 operations.parents)", () => {
+    assert.equal(memberPasswordResetViolation(staff, parent()), null);
   });
 });
 

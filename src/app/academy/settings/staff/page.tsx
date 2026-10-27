@@ -1,21 +1,21 @@
 "use client";
 
 import { collection, getDocs } from "firebase/firestore";
-import { httpsCallable } from "firebase/functions";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useMemo, useState } from "react";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
 import { StaffFormSheet } from "@/components/academy/staff-form-sheet";
-import type { StaffRoleOption } from "@/components/academy/staff-account-section";
 import { docToStaffRow, staffAccountLabel, type StaffRowVM } from "@/lib/academy/staff-row";
 import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
+import type { PermissionViewer } from "@/lib/academy/role-policy";
 import { useAcademyOptionList } from "@/lib/academy/use-academy-option-list";
+import { useAcademyRoles } from "@/lib/academy/use-academy-roles";
 import { usePermissions } from "@/lib/academy/use-permissions";
 import { academyStaffPath, STAFF_EMPLOYMENT_STATUS_LABELS } from "@/lib/firebase/attn-schema";
-import { getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { getFirebaseDb } from "@/lib/firebase/client-app";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { formatKrPhoneDisplay, phoneMatchesSearch } from "@/lib/phone/kr-phone";
@@ -43,7 +43,15 @@ function sortStaff(a: StaffRowVM, b: StaffRowVM): number {
   return a.displayName.localeCompare(b.displayName, "ko");
 }
 
-function StaffListInner({ academyId, canManageMembers }: { academyId: string; canManageMembers: boolean }) {
+function StaffListInner({
+  academyId,
+  canManageMembers,
+  viewer,
+}: {
+  academyId: string;
+  canManageMembers: boolean;
+  viewer: PermissionViewer | null;
+}) {
   const [rows, setRows] = useState<StaffRowVM[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [filter, setFilter] = useState<StaffFilter>("current");
@@ -51,27 +59,8 @@ function StaffListInner({ academyId, canManageMembers }: { academyId: string; ca
   const [sheet, setSheet] = useState<{ target: StaffRowVM | null } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const { items: jobTitles, save: saveJobTitles } = useAcademyOptionList(academyId, "jobTitles");
-  const [roles, setRoles] = useState<StaffRoleOption[] | null>(null);
-
-  // 초대·계정 발급에 쓸 권한 목록 — 멤버 초대/권한 관리 권한이 있을 때만(서버가 템플릿 보장)
-  useEffect(() => {
-    if (!canManageMembers) {
-      setRoles(null);
-      return;
-    }
-    let cancelled = false;
-    void httpsCallable(getFirebaseFunctions(), "listAcademyRoles")({ academyId })
-      .then((res) => {
-        const list = (res.data as { roles?: StaffRoleOption[] }).roles ?? [];
-        if (!cancelled) setRoles(list.map((r) => ({ id: r.id, name: r.name })));
-      })
-      .catch(() => {
-        if (!cancelled) setRoles(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [academyId, canManageMembers]);
+  // 초대·계정 발급·권한 바꾸기에 쓸 권한 목록 — 멤버 초대/권한 관리 권한이 있을 때만(서버가 템플릿 보장)
+  const { roles } = useAcademyRoles(academyId, canManageMembers);
 
   const loadStaff = useCallback(async () => {
     try {
@@ -239,6 +228,7 @@ function StaffListInner({ academyId, canManageMembers }: { academyId: string; ca
           onSaveJobTitlesAction={saveJobTitles}
           jobTitleUsage={jobTitleUsage}
           roles={roles}
+          viewer={viewer}
           onCloseAction={() => setSheet(null)}
           onListChangedAction={(message) => {
             setNotice(message);
@@ -260,7 +250,7 @@ function AcademyStaffInner() {
   const searchParams = useSearchParams();
   const { profile: authProfile } = useAuthProfile();
   const academyId = searchParams.get("id")?.trim() ?? "";
-  const { loading, can } = usePermissions(academyId || null);
+  const { loading, can, viewer } = usePermissions(academyId || null);
   const canManageMembers = can("settings.members");
   const backHref = `/academy?id=${encodeURIComponent(academyId)}`;
 
@@ -307,7 +297,7 @@ function AcademyStaffInner() {
         ]}
       />
       <main className="mx-auto max-w-lg px-4 pt-[26px]">
-        <StaffListInner academyId={academyId} canManageMembers={canManageMembers} />
+        <StaffListInner academyId={academyId} canManageMembers={canManageMembers} viewer={viewer} />
       </main>
       <DashboardBottomScrim />
     </div>

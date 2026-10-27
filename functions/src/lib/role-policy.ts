@@ -69,6 +69,37 @@ export function staffAccountChangeViolation(
   return null;
 }
 
+/**
+ * 활성 계정 비밀번호 초기화(새 임시 비밀번호 + 첫 로그인 상태로 되돌림).
+ * - 사용 중(active) 계정만 — 승인 대기·비활성 계정을 첫 로그인 상태로 바꾸면 첫 로그인으로 스스로 활성화되는 구멍
+ * - 로그인 ID 비밀번호가 있는 계정만(Google 전용 계정은 Google에서 복구)
+ * - 직원 계정이면 `staffAccountChangeViolation`(본인·더 넓은 권한 직원 불가)
+ */
+export function memberPasswordResetViolation(
+  actor: PolicyActor,
+  target:
+    | {
+        kind: "teacher";
+        status: unknown;
+        hasLoginPassword: boolean;
+        staffId: string;
+        staffCurrentPermissions: readonly AcademyPermission[];
+      }
+    | { kind: "parent"; status: unknown; hasLoginPassword: boolean },
+): string | null {
+  if (target.kind === "teacher") {
+    const violation = staffAccountChangeViolation(actor, target);
+    if (violation) return violation;
+  }
+  if (target.status !== "active") {
+    return "사용 중인 계정만 비밀번호를 초기화할 수 있습니다.";
+  }
+  if (!target.hasLoginPassword) {
+    return "로그인 ID 비밀번호가 없는 계정입니다(Google 로그인 계정).";
+  }
+  return null;
+}
+
 export function roleAssignViolation(
   actor: PolicyActor,
   target: {

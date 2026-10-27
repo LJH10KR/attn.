@@ -2,10 +2,11 @@ import * as crypto from "node:crypto";
 import * as admin from "firebase-admin";
 import { FieldValue, Timestamp, type DocumentReference } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
+import * as logger from "firebase-functions/logger";
 import { getAppOrigin } from "./auth-short-links";
 import { assertPermission, type AcademyActor } from "./lib/academy-access";
 import { assertMemberLoginIdAvailable } from "./lib/member-login-id";
-import { DEFAULT_STAFF_ROLE_ID } from "./lib/permissions";
+import { DEFAULT_STAFF_ROLE_ID, type AcademyPermission } from "./lib/permissions";
 import { roleAssignViolation } from "./lib/role-policy";
 import {
   loadRolePermissions,
@@ -50,15 +51,34 @@ function parseToken(raw: unknown): string {
   return token;
 }
 
-/** 지금 초대·계정 발급이 가능한 직원 문서 — 없으면 이름으로 새 직원(계정 없음)을 만든다 */
+/** 기존 직원(staffId) 또는 새 직원 이름(displayName) 형식 확인 — Firestore 조회 없음 */
+function assertInviteTargetInput(raw: { staffId?: unknown; displayName?: unknown }): void {
+  const staffId = typeof raw.staffId === "string" ? raw.staffId.trim() : "";
+  if (staffId) {
+    requireString(staffId, "직원 정보가 올바르지 않습니다.");
+    return;
+  }
+  const displayName = typeof raw.displayName === "string" ? raw.displayName.trim() : "";
+  if (!displayName || displayName.length > MAX_NAME_LENGTH) {
+    throw new HttpsError("invalid-argument", `이름을 1~${MAX_NAME_LENGTH}자로 입력해 주세요.`);
+  }
+}
+
+/** 지금 초대·계정 발급이 가능한 직원 문서 — 없으면 이름으로 새 직원(계정 없음)을 만든다(created) */
 async function resolveInviteTarget(
   db: admin.firestore.Firestore,
   academyId: string,
   raw: { staffId?: unknown; displayName?: unknown },
-): Promise<{ ref: DocumentReference; displayName: string; inviteTokenHash: string | null }> {
+): Promise<{
+  ref: DocumentReference;
+  displayName: string;
+  inviteTokenHash: string | null;
+  created: boolean;
+}> {
+  assertInviteTargetInput(raw);
   const staffId = typeof raw.staffId === "string" ? raw.staffId.trim() : "";
   if (staffId) {
-    const ref = db.doc(`academies/${academyId}/staff/${requireString(staffId, "직원 정보가 올바르지 않습니다.")}`);
+    const ref = db.doc(`academies/${academyId}/staff/${staffId}`);
     const snap = await ref.get();
     if (!snap.exists) {
       throw new HttpsError("not-found", "직원 정보를 찾을 수 없습니다.");
@@ -74,13 +94,11 @@ async function resolveInviteTarget(
       ref,
       displayName: typeof snap.get("displayName") === "string" ? snap.get("displayName") : "",
       inviteTokenHash: typeof hash === "string" && hash ? hash : null,
+      created: false,
     };
   }
 
-  const displayName = typeof raw.displayName === "string" ? raw.displayName.trim() : "";
-  if (!displayName || displayName.length > MAX_NAME_LENGTH) {
-    throw new HttpsError("invalid-argument", `이름을 1~${MAX_NAME_LENGTH}자로 입력해 주세요.`);
-  }
+  const displayName = (raw.displayName as string).trim();
   const ref = db.collection(`academies/${academyId}/staff`).doc();
   await ref.set({
     displayName,
@@ -98,8 +116,10 @@ async function resolveInviteTarget(
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   });
-  return { ref, displayName, inviteTokenHash: null };
+  return { ref, displayName, inviteTokenHash: null, created: true };
 }
+
+type GrantableRole = { roleId: string; permissions: AcademyPermission[] };
 
 /** 부여할 역할 — 존재해야 하고, 직원은 본인 권한을 넘는 역할을 줄 수 없음 */
 async function resolveGrantableRole(
@@ -107,7 +127,7 @@ async function resolveGrantableRole(
   academyId: string,
   actor: AcademyActor,
   rawRoleId: unknown,
-) {
+): Promise<GrantableRole> {
   const roleId = requireString(rawRoleId ?? DEFAULT_STAFF_ROLE_ID, "권한을 선택해 주세요.");
   const permissions = await loadRolePermissions(db, academyId, roleId);
   if (!permissions) {
@@ -212,7 +232,10 @@ export const cancelStaffInvite = onCall(async (request) => {
   return { ok: true as const };
 });
 
-/** 계정 직접 만들어 주기 — 최대 10명, 임시 비밀번호는 응답에서 한 번만 보여 줌 */
+/**
+ * 계정 직접 만들어 주기 — 최대 10명, 임시 비밀번호는 응답에서 한 번만 보여 줌.
+ * 일부만 실패하면 `accounts`(성공분)와 `failures`(index·이름·사유)를 함께 돌려주고, 전부 실패하면 첫 오류를 던진다.
+ */
 export const createStaffAccounts = onCall(async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
@@ -238,26 +261,66 @@ export const createStaffAccounts = onCall(async (request) => {
     "settings.members",
   );
 
-  const accounts: Array<ProvisionedStaffAccount & { staffId: string }> = [];
-  for (const raw of items as Array<Record<string, unknown>>) {
-    const role = await resolveGrantableRole(db, academyId, actor, raw?.roleId);
-    const target = await resolveInviteTarget(db, academyId, raw ?? {});
-    if (target.inviteTokenHash) {
-      await clearStaffInvite(db, target.ref, target.inviteTokenHash);
+  // 입력·부여 권한은 하나라도 틀리면 아무것도 만들지 않음
+  const rows = (items as unknown[]).map((raw) =>
+    raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {},
+  );
+  const roleCache = new Map<string, GrantableRole>();
+  const plans: Array<{ raw: Record<string, unknown>; role: GrantableRole }> = [];
+  for (const raw of rows) {
+    assertInviteTargetInput(raw);
+    const key = typeof raw.roleId === "string" ? raw.roleId : DEFAULT_STAFF_ROLE_ID;
+    let role = roleCache.get(key);
+    if (!role) {
+      role = await resolveGrantableRole(db, academyId, actor, raw.roleId);
+      roleCache.set(key, role);
     }
-    const account = await provisionStaffAccount({
-      db,
-      academyId,
-      hrRef: target.ref,
-      displayName: target.displayName,
-      roleId: role.roleId,
-      permissions: role.permissions,
-      mode: { kind: "temp" },
-      status: "pending_setup",
-    });
-    accounts.push({ ...account, staffId: account.authUid });
+    plans.push({ raw, role });
   }
-  return { ok: true as const, accounts };
+
+  // 한 명씩 만들고, 중간에 실패해도 이미 만든 계정(임시 비밀번호 포함)은 돌려준다 — 다시 볼 방법이 없으므로
+  const accounts: Array<ProvisionedStaffAccount & { staffId: string; index: number }> = [];
+  const failures: Array<{ index: number; displayName: string; message: string }> = [];
+  let firstError: unknown = null;
+  for (const [index, { raw, role }] of plans.entries()) {
+    let target: Awaited<ReturnType<typeof resolveInviteTarget>> | null = null;
+    try {
+      target = await resolveInviteTarget(db, academyId, raw);
+      if (target.inviteTokenHash) {
+        await clearStaffInvite(db, target.ref, target.inviteTokenHash);
+      }
+      const account = await provisionStaffAccount({
+        db,
+        academyId,
+        hrRef: target.ref,
+        displayName: target.displayName,
+        roleId: role.roleId,
+        permissions: role.permissions,
+        mode: { kind: "temp" },
+        status: "pending_setup",
+      });
+      accounts.push({ ...account, staffId: account.authUid, index });
+    } catch (e) {
+      firstError ??= e;
+      if (!(e instanceof HttpsError)) {
+        logger.error("createStaffAccounts: item failed", { academyId, index, e });
+      }
+      // 이번 요청에서 이름만으로 새로 만든 직원 문서는 되돌림(남기면 계정 없는 직원이 생김)
+      if (target?.created) {
+        await target.ref.delete().catch(() => undefined);
+      }
+      failures.push({
+        index,
+        displayName:
+          target?.displayName ?? (typeof raw.displayName === "string" ? raw.displayName.trim() : ""),
+        message: e instanceof HttpsError ? e.message : "계정을 만들지 못했습니다.",
+      });
+    }
+  }
+  if (accounts.length === 0) {
+    throw firstError;
+  }
+  return { ok: true as const, accounts, failures };
 });
 
 /** 초대 문서·직원 문서가 아직 유효한지 — 유효하면 학원·직원·역할 정보 */

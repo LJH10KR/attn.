@@ -110,8 +110,10 @@ export const listAcademyRoles = onCall(async (request) => {
     rolesCol(db, academyId).get(),
     staffCol(db, academyId).get(),
   ]);
+  // 계정이 있는 멤버만 센다(계정 없는 직원·초대 링크 대기는 기본 역할이 붙어 있을 뿐)
   const memberCount = new Map<string, number>();
   for (const d of staffSnap.docs) {
+    if (d.get("status") === "no_account") continue;
     const roleId = d.get("roleId");
     if (typeof roleId === "string") {
       memberCount.set(roleId, (memberCount.get(roleId) ?? 0) + 1);

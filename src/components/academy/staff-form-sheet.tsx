@@ -6,16 +6,15 @@ import { useEffect, useState } from "react";
 import { EditableOptionSelect } from "@/components/ui/editable-option-select";
 import { KrPhoneInput } from "@/components/ui/kr-phone-input";
 import { ModalPortal } from "@/components/ui/modal-portal";
-import {
-  StaffAccountSection,
-  type StaffRoleOption,
-} from "@/components/academy/staff-account-section";
+import { StaffAccountSection } from "@/components/academy/staff-account-section";
+import type { PermissionViewer } from "@/lib/academy/role-policy";
 import {
   STAFF_EMPLOYMENT_STATUS_LABELS,
   type AcademyOptionItem,
   type StaffEmploymentStatus,
 } from "@/lib/firebase/attn-schema";
 import type { StaffRowVM } from "@/lib/academy/staff-row";
+import type { AcademyRoleVM } from "@/lib/academy/use-academy-roles";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { formatKrPhoneDisplay, getKrPhoneValidationError } from "@/lib/phone/kr-phone";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
@@ -38,7 +37,8 @@ type StaffFormSheetProps = {
   onSaveJobTitlesAction: (items: { id?: string; label: string }[]) => Promise<AcademyOptionItem[]>;
   jobTitleUsage: Record<string, number>;
   /** null이면 멤버 초대/권한 관리 권한 없음 — 계정 영역은 상태만 표시 */
-  roles: StaffRoleOption[] | null;
+  roles: AcademyRoleVM[] | null;
+  viewer: PermissionViewer | null;
   onCloseAction: () => void;
   onSavedAction: (message: string) => void;
   /** 초대 링크 발급·취소처럼 시트를 열어 둔 채 목록만 새로고침 */
@@ -53,6 +53,7 @@ export function StaffFormSheet({
   onSaveJobTitlesAction,
   jobTitleUsage,
   roles,
+  viewer,
   onCloseAction,
   onSavedAction,
   onListChangedAction,
@@ -266,8 +267,9 @@ export function StaffFormSheet({
                 academyId={academyId}
                 target={target}
                 roles={roles}
+                viewer={viewer}
                 onChangedAction={onListChangedAction}
-                onAccountCreatedAction={onSavedAction}
+                onCloseSheetAction={onSavedAction}
               />
             ) : (
               <p className="text-xs text-neutral-500">

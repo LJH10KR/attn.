@@ -11,29 +11,51 @@ import {
 } from "./lib/member-credentials";
 import { assertPermission } from "./lib/academy-access";
 import {
+  hasLoginSecret,
   passwordSecretFields,
   tempPasswordSecretFields,
   verifyLoginSecret,
 } from "./lib/password-hash";
+import {
+  beginLoginAttempt,
+  lockedLoginMessage,
+  LOGIN_THROTTLE_RESET,
+  loginThrottleFields,
+  readLoginThrottle,
+} from "./lib/login-throttle";
 import { normalizePermissionList } from "./lib/permissions";
-import { staffAccountChangeViolation } from "./lib/role-policy";
+import { memberPasswordResetViolation, staffAccountChangeViolation } from "./lib/role-policy";
 
+/** 연속 실패 제한(`login-throttle.ts`)을 거쳐 비밀번호 확인 — 시도 횟수는 검증 전에 올리고 성공하면 초기화 */
 async function verifyMemberPassword(
   academyId: string,
   authUid: string,
   role: MemberKind,
   password: string,
 ): Promise<{ status: string; contactEmail?: string }> {
-  const secretSnap = await admin
-    .firestore()
-    .doc(`academies/${academyId}/${memberCollectionName(role)}/${authUid}/secrets/login`)
-    .get();
-  if (!secretSnap.exists) {
+  const db = admin.firestore();
+  const secretRef = db.doc(
+    `academies/${academyId}/${memberCollectionName(role)}/${authUid}/secrets/login`,
+  );
+  const attempt = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(secretRef);
+    if (!snap.exists) return null;
+    const decision = beginLoginAttempt(readLoginThrottle(snap.data()), Date.now());
+    if (decision.next) {
+      tx.update(secretRef, loginThrottleFields(decision.next));
+    }
+    return { secret: snap.data(), decision };
+  });
+  if (!attempt) {
     throw new HttpsError("failed-precondition", "로그인 정보가 설정되지 않았습니다.");
   }
-  if (!(await verifyLoginSecret(secretSnap.data(), password))) {
+  if (!attempt.decision.allowed) {
+    throw new HttpsError("resource-exhausted", lockedLoginMessage(attempt.decision.retryAfterMs));
+  }
+  if (!(await verifyLoginSecret(attempt.secret, password))) {
     throw new HttpsError("permission-denied", "로그인 ID 또는 비밀번호가 올바르지 않습니다.");
   }
+  await secretRef.update(loginThrottleFields(LOGIN_THROTTLE_RESET));
   const memberSnap = await admin
     .firestore()
     .doc(`academies/${academyId}/${memberCollectionName(role)}/${authUid}`)
@@ -351,6 +373,100 @@ export const regenerateMemberTempPassword = onCall(async (request) => {
     displayName: typeof displayName === "string" ? displayName : "",
     tempPassword,
     role,
+  };
+});
+
+/**
+ * 사용 중인 계정 비밀번호 초기화 — 비밀번호를 잊은 선생님·학부모 복구(로그인 ID 계정은 내부 이메일이라 재설정 메일 불가).
+ * 새 임시 비밀번호를 발급하고(본인 비밀번호 해시 삭제) 첫 로그인 전(pending_setup)으로 되돌린 뒤 기존 세션을 끊는다.
+ * 임시 비밀번호는 응답에서 한 번만 보여 준다. 연속 실패 잠금도 함께 푼다.
+ */
+export const resetMemberPassword = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+  }
+  const { uid, token } = request.auth;
+  const academyId =
+    typeof request.data?.academyId === "string" ? request.data.academyId.trim() : "";
+  const memberAuthUid =
+    typeof request.data?.memberAuthUid === "string" ? request.data.memberAuthUid.trim() : "";
+  const roleRaw = request.data?.role;
+  if (
+    !academyId ||
+    !memberAuthUid ||
+    memberAuthUid.includes("/") ||
+    (roleRaw !== "teacher" && roleRaw !== "parent")
+  ) {
+    throw new HttpsError("invalid-argument", "요청이 올바르지 않습니다.");
+  }
+  const role: MemberKind = roleRaw;
+
+  const db = admin.firestore();
+  const actor = await assertPermission(
+    db,
+    academyId,
+    uid,
+    token,
+    role === "teacher" ? "settings.members" : "operations.parents",
+  );
+
+  const memberRef = db.doc(`academies/${academyId}/${memberCollectionName(role)}/${memberAuthUid}`);
+  const secretRef = memberRef.collection("secrets").doc("login");
+  const [memberSnap, secretSnap] = await Promise.all([memberRef.get(), secretRef.get()]);
+  if (!memberSnap.exists) {
+    throw new HttpsError("not-found", "계정을 찾을 수 없습니다.");
+  }
+  const common = {
+    status: memberSnap.get("status"),
+    hasLoginPassword: hasLoginSecret(secretSnap.data()),
+  };
+  const staffTarget = {
+    staffId: memberAuthUid,
+    staffCurrentPermissions: normalizePermissionList(memberSnap.get("permissions")),
+  };
+  const violation = memberPasswordResetViolation(
+    actor,
+    role === "teacher" ? { kind: "teacher", ...common, ...staffTarget } : { kind: "parent", ...common },
+  );
+  if (violation) {
+    throw new HttpsError("failed-precondition", violation);
+  }
+
+  const tempPassword = randomTempPassword();
+  const batch = db.batch();
+  batch.set(
+    secretRef,
+    {
+      ...(await tempPasswordSecretFields(tempPassword)),
+      ...loginThrottleFields(LOGIN_THROTTLE_RESET),
+    },
+    { merge: true },
+  );
+  batch.update(memberRef, {
+    status: "pending_setup",
+    passwordResetAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  await batch.commit();
+
+  await admin.auth().updateUser(memberAuthUid, { password: tempPassword });
+  await admin.auth().setCustomUserClaims(memberAuthUid, {
+    role,
+    academyId,
+    membershipStatus: "pending_setup",
+  });
+  await admin.auth().revokeRefreshTokens(memberAuthUid);
+
+  const loginId = memberSnap.get("loginId");
+  const attnId = memberSnap.get("attnId");
+  const displayName = memberSnap.get("displayName");
+  return {
+    ok: true as const,
+    role,
+    loginId:
+      typeof loginId === "string" && loginId ? loginId : typeof attnId === "string" ? attnId : "",
+    displayName: typeof displayName === "string" ? displayName : "",
+    tempPassword,
   };
 });
 

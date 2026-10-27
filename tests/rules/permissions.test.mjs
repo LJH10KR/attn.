@@ -274,6 +274,20 @@ describe("권한 없는 직원·비활성·무관한 계정", () => {
     await assertFails(getDoc(doc(dbAs("staff-members"), "staffInvites", "hash-1")));
   });
 
+  it("로그인 비밀번호 해시·연속 실패 잠금(secrets/login)은 본인·원장도 읽거나 쓰지 못한다", async () => {
+    const path = academyPath("staff", "staff-teacher", "secrets", "login");
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), path), { loginFailures: 3 });
+    });
+    for (const uid of ["staff-teacher", OWNER, "staff-members"]) {
+      await assertFails(getDoc(doc(dbAs(uid), path)));
+      await assertFails(setDoc(doc(dbAs(uid), path), { loginFailures: 0 }));
+    }
+    const parentSecret = academyPath("parents", PARENT, "secrets", "login");
+    await assertFails(getDoc(doc(dbAs(PARENT), parentSecret)));
+    await assertFails(setDoc(doc(dbAs(PARENT), parentSecret), { loginLockedUntil: null }));
+  });
+
   it("학원과 무관한 계정은 거부", async () => {
     const db = dbAs("stranger");
     await assertFails(getDocs(collection(db, academyPath("students"))));

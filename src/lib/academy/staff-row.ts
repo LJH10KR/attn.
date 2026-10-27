@@ -1,4 +1,5 @@
 import { Timestamp } from "firebase/firestore";
+import { normalizePermissionList, type AcademyPermission } from "@/lib/academy/permissions";
 import {
   readStaffEmploymentStatus,
   type StaffAccountStatus,
@@ -19,6 +20,12 @@ export type StaffRowVM = {
   /** 초대 링크 대기 중이면 만료 시각 */
   inviteExpiresAtMillis: number | null;
   inviteRoleId: string | null;
+  /** 계정이 있을 때 — 로그인 ID(Google 가입이면 빈 문자열) */
+  loginId: string;
+  roleId: string | null;
+  /** 역할에서 서버가 복사한 권한 — 본인보다 넓은 권한 직원 판별용 */
+  permissions: AcademyPermission[];
+  authProvider: "password" | "google";
 };
 
 export function docToStaffRow(id: string, data: Record<string, unknown>): StaffRowVM {
@@ -35,6 +42,10 @@ export function docToStaffRow(id: string, data: Record<string, unknown>): StaffR
     inviteExpiresAtMillis:
       data.inviteExpiresAt instanceof Timestamp ? data.inviteExpiresAt.toMillis() : null,
     inviteRoleId: typeof data.inviteRoleId === "string" ? data.inviteRoleId : null,
+    loginId: typeof data.loginId === "string" ? data.loginId : "",
+    roleId: typeof data.roleId === "string" && data.roleId ? data.roleId : null,
+    permissions: normalizePermissionList(data.permissions),
+    authProvider: data.authProvider === "google" ? "google" : "password",
   };
 }
 

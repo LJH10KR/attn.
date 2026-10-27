@@ -10,6 +10,7 @@ import {
   type AcademyNavTab,
   type AcademyPermission,
 } from "@/lib/academy/permissions";
+import type { PermissionViewer } from "@/lib/academy/role-policy";
 import { COLLECTIONS } from "@/lib/firebase/attn-schema";
 import { getFirebaseAuth, getFirebaseDb } from "@/lib/firebase/client-app";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
@@ -26,6 +27,7 @@ type PermissionSnapshot = {
   academyId: string;
   uid: string | null;
   actor: AcademyActorKind | null;
+  roleId: string | null;
   permissions: readonly AcademyPermission[];
 };
 
@@ -38,6 +40,8 @@ export type AcademyPermissionState = {
   can: (required: AcademyPermission | readonly AcademyPermission[]) => boolean;
   /** 권한이 하나라도 있는 하단 탭(홈 제외) */
   visibleTabs: AcademyNavTab[];
+  /** 본인·더 넓은 권한 대상 버튼을 숨길 때(`role-policy.ts`) — 학원과 무관하면 null */
+  viewer: PermissionViewer | null;
 };
 
 export function usePermissions(academyId: string | null): AcademyPermissionState {
@@ -57,7 +61,7 @@ export function usePermissions(academyId: string | null): AcademyPermissionState
       unsubMember?.();
       unsubMember = null;
       if (!user) {
-        publish({ uid: null, actor: null, permissions: [] });
+        publish({ uid: null, actor: null, roleId: null, permissions: [] });
         return;
       }
       void (async () => {
@@ -65,7 +69,7 @@ export function usePermissions(academyId: string | null): AcademyPermissionState
           const db = getFirebaseDb();
           const academySnap = await getDoc(doc(db, COLLECTIONS.academies, academyId));
           if (academySnap.get("ownerUid") === user.uid) {
-            publish({ uid: user.uid, actor: "owner", permissions: ACADEMY_PERMISSIONS });
+            publish({ uid: user.uid, actor: "owner", roleId: null, permissions: ACADEMY_PERMISSIONS });
             return;
           }
           if (cancelled) return;
@@ -73,16 +77,18 @@ export function usePermissions(academyId: string | null): AcademyPermissionState
             doc(db, COLLECTIONS.academies, academyId, "staff", user.uid),
             (snap) => {
               const active = snap.exists() && snap.get("status") === "active";
+              const roleId = snap.get("roleId");
               publish({
                 uid: user.uid,
                 actor: active ? "staff" : null,
+                roleId: active && typeof roleId === "string" && roleId ? roleId : null,
                 permissions: active ? normalizePermissionList(snap.get("permissions")) : [],
               });
             },
-            () => publish({ uid: user.uid, actor: null, permissions: [] }),
+            () => publish({ uid: user.uid, actor: null, roleId: null, permissions: [] }),
           );
         } catch {
-          publish({ uid: user.uid, actor: null, permissions: [] });
+          publish({ uid: user.uid, actor: null, roleId: null, permissions: [] });
         }
       })();
     });
@@ -118,11 +124,20 @@ export function usePermissions(academyId: string | null): AcademyPermissionState
     [permissions],
   );
 
+  const actor = current?.actor ?? null;
+  const uid = current?.uid ?? null;
+  const roleId = current?.roleId ?? null;
+  const viewer = useMemo<PermissionViewer | null>(
+    () => (actor && uid ? { actor, uid, roleId, permissions } : null),
+    [actor, uid, roleId, permissions],
+  );
+
   return {
     loading: Boolean(academyId) && isFirebaseConfigured() && current === null,
-    actor: current?.actor ?? null,
+    actor,
     permissions,
     can,
     visibleTabs,
+    viewer,
   };
 }
