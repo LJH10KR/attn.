@@ -8,6 +8,7 @@ import {
   validateMemberLoginIdFormat,
 } from "./lib/member-login-id";
 import { parseOptionalKrPhone } from "./lib/kr-phone";
+import { hasLoginSecret, passwordSecretFields, verifyLoginSecret } from "./lib/password-hash";
 import type { DocumentReference } from "firebase-admin/firestore";
 import { isParentLoginEmail, normalizeParentLoginEmail } from "./lib/parent-login-id";
 import { syncUserAdminProfile } from "./lib/firestore-cleanup";
@@ -79,12 +80,7 @@ async function verifyMemberLoginPassword(
   if (!secretSnap.exists) {
     throw new HttpsError("failed-precondition", "로그인 정보가 설정되지 않았습니다.");
   }
-  const stored = secretSnap.get("tempPassword");
-  const current = secretSnap.get("password");
-  const ok =
-    (typeof stored === "string" && stored === password) ||
-    (typeof current === "string" && current === password);
-  if (!ok) {
+  if (!(await verifyLoginSecret(secretSnap.data(), password))) {
     throw new HttpsError("permission-denied", "현재 비밀번호가 올바르지 않습니다.");
   }
 }
@@ -94,13 +90,7 @@ async function parentHasStoredPassword(academyId: string, uid: string): Promise<
     .firestore()
     .doc(`academies/${academyId}/parents/${uid}/secrets/login`)
     .get();
-  if (!secretSnap.exists) return false;
-  const stored = secretSnap.get("tempPassword");
-  const current = secretSnap.get("password");
-  return (
-    (typeof stored === "string" && stored.length > 0) ||
-    (typeof current === "string" && current.length > 0)
-  );
+  return hasLoginSecret(secretSnap.data());
 }
 
 function assertDisplayName(raw: unknown): string {
@@ -576,14 +566,7 @@ export const updateTeacherPassword = onCall(async (request) => {
   await admin
     .firestore()
     .doc(`academies/${academyId}/staff/${memberDocId}/secrets/login`)
-    .set(
-      {
-        password: newPassword,
-        tempPassword: FieldValue.delete(),
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
+    .set(await passwordSecretFields(newPassword), { merge: true });
 
   return { ok: true };
 });
@@ -634,14 +617,10 @@ export const updateParentPassword = onCall(async (request) => {
   }
 
   await admin.auth().updateUser(uid, { password: newPassword });
-  await admin.firestore().doc(`academies/${academyId}/parents/${uid}/secrets/login`).set(
-    {
-      password: newPassword,
-      tempPassword: FieldValue.delete(),
-      updatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true },
-  );
+  await admin
+    .firestore()
+    .doc(`academies/${academyId}/parents/${uid}/secrets/login`)
+    .set(await passwordSecretFields(newPassword), { merge: true });
 
   const loginId =
     typeof memberSnap.get("loginId") === "string" ? memberSnap.get("loginId") : "";

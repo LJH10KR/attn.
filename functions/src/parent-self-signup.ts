@@ -8,6 +8,7 @@ import {
   formatParentAttnId,
 } from "./lib/attn-id";
 import { assertKrPhoneRequired } from "./lib/kr-phone";
+import { passwordSecretFields } from "./lib/password-hash";
 import {
   assertContactEmail,
   issueEmailVerificationOtpForUid,
@@ -330,11 +331,11 @@ export const registerParentSelfSignup = onCall(async (request) => {
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   });
-  batch.set(db.doc(`academies/${academyId}/parents/${authUid}/secrets/login`), {
-    authProvider: "password",
-    password,
-    updatedAt: FieldValue.serverTimestamp(),
-  });
+  batch.set(
+    db.doc(`academies/${academyId}/parents/${authUid}/secrets/login`),
+    { authProvider: "password", ...(await passwordSecretFields(password)) },
+    { merge: true },
+  );
   batch.set(db.doc(attnLoginIndexPath(normalizedLoginId)), {
     attnId,
     loginId: normalizedLoginId,

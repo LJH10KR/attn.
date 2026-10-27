@@ -3,6 +3,7 @@ import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { attnLoginIndexPath, formatStudentAttnId } from "./attn-id";
 import { allocateTeacherLoginId } from "./teacher-login-id";
+import { tempPasswordSecretFields } from "./password-hash";
 import { DEFAULT_STAFF_ROLE_ID } from "./permissions";
 
 export type MemberKind = "teacher" | "parent";
@@ -102,10 +103,11 @@ export async function provisionMemberAccount(params: {
 
   const batch = db.batch();
   batch.set(memberRef, memberData);
-  batch.set(db.doc(`academies/${academyId}/${col}/${authUid}/secrets/login`), {
-    tempPassword,
-    updatedAt: FieldValue.serverTimestamp(),
-  });
+  batch.set(
+    db.doc(`academies/${academyId}/${col}/${authUid}/secrets/login`),
+    await tempPasswordSecretFields(tempPassword),
+    { merge: true },
+  );
   batch.set(db.doc(attnLoginIndexPath(loginId)), {
     loginId,
     attnId,

@@ -5,6 +5,7 @@ import * as logger from "firebase-functions/logger";
 import { academySeqMetaPath, attnLoginIndexPath, formatTeacherAttnId } from "./attn-id";
 import { randomTempPassword } from "./member-credentials";
 import { assertMemberLoginIdAvailable } from "./member-login-id";
+import { passwordSecretFields, tempPasswordSecretFields } from "./password-hash";
 import { normalizePermissionList, type AcademyPermission } from "./permissions";
 import { allocateTeacherLoginId } from "./teacher-login-id";
 
@@ -147,12 +148,16 @@ export async function provisionStaffAccount(params: {
         : {}),
       updatedAt: FieldValue.serverTimestamp(),
     });
-    batch.set(memberRef.collection("secrets").doc("login"), {
-      ...(mode.kind === "temp" ? { tempPassword } : {}),
-      ...(mode.kind === "password" ? { password: mode.password } : {}),
-      authProvider: mode.kind === "google" ? "google" : "password",
-      updatedAt: FieldValue.serverTimestamp(),
-    });
+    batch.set(
+      memberRef.collection("secrets").doc("login"),
+      {
+        ...(mode.kind === "temp" ? await tempPasswordSecretFields(tempPassword!) : {}),
+        ...(mode.kind === "password" ? await passwordSecretFields(mode.password) : {}),
+        authProvider: mode.kind === "google" ? "google" : "password",
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
     if (loginId) {
       batch.set(db.doc(attnLoginIndexPath(loginId)), {
         loginId,

@@ -10,6 +10,11 @@ import {
   type MemberKind,
 } from "./lib/member-credentials";
 import { assertPermission } from "./lib/academy-access";
+import {
+  passwordSecretFields,
+  tempPasswordSecretFields,
+  verifyLoginSecret,
+} from "./lib/password-hash";
 import { normalizePermissionList } from "./lib/permissions";
 import { staffAccountChangeViolation } from "./lib/role-policy";
 
@@ -26,12 +31,7 @@ async function verifyMemberPassword(
   if (!secretSnap.exists) {
     throw new HttpsError("failed-precondition", "로그인 정보가 설정되지 않았습니다.");
   }
-  const stored = secretSnap.get("tempPassword");
-  const current = secretSnap.get("password");
-  const ok =
-    (typeof stored === "string" && stored === password) ||
-    (typeof current === "string" && current === password);
-  if (!ok) {
+  if (!(await verifyLoginSecret(secretSnap.data(), password))) {
     throw new HttpsError("permission-denied", "로그인 ID 또는 비밀번호가 올바르지 않습니다.");
   }
   const memberSnap = await admin
@@ -263,6 +263,10 @@ export const completeMemberFirstLogin = onCall(async (request) => {
   if (!memberSnap.exists) {
     throw new HttpsError("not-found", "멤버 정보를 찾을 수 없습니다.");
   }
+  // 학원이 직접 만들어 준 계정의 첫 로그인만 — 승인 대기(초대 링크 가입)·비활성 계정이 스스로 활성화하지 못하게
+  if (memberSnap.get("status") !== "pending_setup") {
+    throw new HttpsError("failed-precondition", "첫 로그인 비밀번호 설정이 필요한 계정이 아닙니다.");
+  }
 
   await admin.auth().updateUser(uid, { password: newPassword });
   await memberRef.update({
@@ -270,14 +274,10 @@ export const completeMemberFirstLogin = onCall(async (request) => {
     activatedAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   });
-  await admin.firestore().doc(`academies/${academyId}/${col}/${uid}/secrets/login`).set(
-    {
-      password: newPassword,
-      tempPassword: FieldValue.delete(),
-      updatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true },
-  );
+  await memberRef
+    .collection("secrets")
+    .doc("login")
+    .set(await passwordSecretFields(newPassword), { merge: true });
 
   await admin.auth().setCustomUserClaims(uid, {
     role,
@@ -328,23 +328,20 @@ export const regenerateMemberTempPassword = onCall(async (request) => {
       throw new HttpsError("permission-denied", violation);
     }
   }
-  const status = memberSnap.get("status");
-  if (status === "active") {
+  // 첫 로그인 전 계정만 — 다른 상태에서 임시 비밀번호로 바꾸면 첫 로그인 흐름과 어긋남(화면도 이 상태에서만 버튼 표시)
+  if (memberSnap.get("status") !== "pending_setup") {
     throw new HttpsError(
       "failed-precondition",
-      "활성 계정은 임시 비밀번호 재발급 대신 비밀번호 초기화 기능을 사용해 주세요.",
+      "첫 로그인 전 계정만 임시 비밀번호를 다시 발급할 수 있습니다.",
     );
   }
 
   const tempPassword = randomTempPassword();
   await admin.auth().updateUser(memberAuthUid, { password: tempPassword });
-  await memberRef.collection("secrets").doc("login").set(
-    {
-      tempPassword,
-      updatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true },
-  );
+  await memberRef
+    .collection("secrets")
+    .doc("login")
+    .set(await tempPasswordSecretFields(tempPassword), { merge: true });
 
   const attnId = memberSnap.get("attnId");
   const displayName = memberSnap.get("displayName");
