@@ -3,10 +3,10 @@ import { FieldValue, type DocumentReference } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { academySeqMetaPath, attnLoginIndexPath, formatTeacherAttnId } from "./attn-id";
-import { randomTempPassword } from "./member-credentials";
+import { randomAuthPassword, randomTempPassword } from "./member-credentials";
 import { assertMemberLoginIdAvailable } from "./member-login-id";
 import { passwordSecretFields, tempPasswordSecretFields } from "./password-hash";
-import { normalizePermissionList, type AcademyPermission } from "./permissions";
+import { DEFAULT_STAFF_ROLE_ID, normalizePermissionList, type AcademyPermission } from "./permissions";
 import { allocateTeacherLoginId } from "./teacher-login-id";
 
 /**
@@ -100,7 +100,7 @@ export async function provisionStaffAccount(params: {
     try {
       const user = await admin.auth().createUser({
         email: internalEmailForAttnId(attnId),
-        password: mode.kind === "temp" ? tempPassword : mode.password,
+        password: randomAuthPassword(),
         displayName,
         emailVerified: false,
         disabled: false,
@@ -188,4 +188,44 @@ export async function provisionStaffAccount(params: {
   }
 
   return { authUid, attnId, loginId, displayName, ...(tempPassword ? { tempPassword } : {}) };
+}
+
+/**
+ * 계정만 떼어 내고 인사 기록은 남김(사용 중·비활성 계정 삭제) — 계정 문서(`staff/{authUid}`)의 인사 정보를
+ * 새 ID의 계정 없는 직원 문서(status no_account, 기본 역할·권한 없음)로 옮기고 계정 문서는 지운다.
+ * 예전 uid 경로에 문서를 남기지 않아, 삭제된 계정의 아직 유효한 토큰이 멤버로 취급되지 않는다.
+ * Auth 사용자·로그인 인덱스·secrets 정리는 호출 측에서. 새 직원 문서 ID를 돌려준다.
+ */
+export async function detachStaffAccount(
+  db: admin.firestore.Firestore,
+  academyId: string,
+  accountSnap: admin.firestore.DocumentSnapshot,
+): Promise<string> {
+  const hr: Record<string, unknown> = {};
+  for (const k of HR_FIELDS) {
+    const v = accountSnap.get(k);
+    if (v !== undefined) hr[k] = v;
+  }
+  const hrRef = db.collection(`academies/${academyId}/staff`).doc();
+  const batch = db.batch();
+  batch.set(hrRef, {
+    displayName: "",
+    phone: null,
+    jobTitleId: null,
+    hireDate: null,
+    employmentStatus: "employed",
+    memo: "",
+    createdAt: FieldValue.serverTimestamp(),
+    ...hr,
+    academyId,
+    status: "no_account",
+    authUid: null,
+    isGuest: false,
+    roleId: DEFAULT_STAFF_ROLE_ID,
+    permissions: [],
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  batch.delete(accountSnap.ref);
+  await batch.commit();
+  return hrRef.id;
 }

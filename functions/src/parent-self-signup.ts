@@ -8,6 +8,7 @@ import {
   formatParentAttnId,
 } from "./lib/attn-id";
 import { assertKrPhoneRequired } from "./lib/kr-phone";
+import { randomAuthPassword } from "./lib/member-credentials";
 import { passwordSecretFields } from "./lib/password-hash";
 import {
   assertContactEmail,
@@ -296,7 +297,7 @@ export const registerParentSelfSignup = onCall(async (request) => {
   try {
     userRecord = await admin.auth().createUser({
       email,
-      password,
+      password: randomAuthPassword(),
       displayName,
       emailVerified: false,
       disabled: false,

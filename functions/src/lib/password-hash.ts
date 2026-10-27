@@ -85,6 +85,17 @@ export async function verifyPassword(plain: string, stored: unknown): Promise<bo
   return crypto.timingSafeEqual(actual, expected);
 }
 
+let dummyRecord: Promise<PasswordHashRecord> | null = null;
+
+/**
+ * 없는 로그인 ID에도 실제 검증과 같은 비용의 scrypt를 한 번 돌림 — 응답 시간으로 ID 존재 여부를 알 수 없게.
+ * 결과는 항상 버린다.
+ */
+export async function simulatePasswordCheck(plain: string): Promise<void> {
+  dummyRecord ??= hashPassword(crypto.randomBytes(16).toString("base64"));
+  await verifyPassword(plain || "x", await dummyRecord);
+}
+
 /** secrets/login 문서 데이터 — 본인 비밀번호 또는 임시 비밀번호 중 하나와 맞으면 true */
 export async function verifyLoginSecret(
   secret: FirebaseFirestore.DocumentData | undefined,

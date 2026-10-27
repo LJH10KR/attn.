@@ -169,6 +169,7 @@ export {
   signInTeacher,
   signInTeacherGoogle,
   signInParent,
+  reauthenticateMember,
   completeMemberFirstLogin,
   regenerateMemberTempPassword,
   resetMemberPassword,

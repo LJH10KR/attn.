@@ -3,6 +3,7 @@ import { FieldValue, Timestamp, type QueryDocumentSnapshot } from "firebase-admi
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { reconcileUserActivationMirror } from "./user-activation-mirror";
+import { detachStaffAccount } from "./lib/staff-account";
 import { assertPermission, type AcademyActor } from "./lib/academy-access";
 import { normalizePermissionList } from "./lib/permissions";
 import { staffAccountChangeViolation } from "./lib/role-policy";
@@ -15,6 +16,7 @@ import {
 
 /**
  * 직원 계정 — 활성 상태 조회, 담당 학생 목록, 승인(활성)·비활성·삭제.
+ * 계정 삭제는 사용 중·비활성이면 인사 기록을 계정 없는 직원으로 남기고, 첫 로그인 전·승인 대기·게스트는 전체 삭제.
  * 계정 만들기는 `staff-invites.ts`(초대 링크·직접 만들어 주기), 인사 정보는 `staff.ts`.
  */
 
@@ -259,13 +261,17 @@ export const deleteTeacherInvite = onCall(async (request) => {
 
   const authUid = (snap.get("authUid") as string | undefined) || teacherId;
   const data = snap.data() ?? {};
+  // 써 오던 계정(사용 중·비활성)은 계정만 지우고 인사 기록 유지 — 초대 취소·가입 거절(첫 로그인 전·승인 대기)과 게스트는 전체 삭제
+  const keepStaffRecord = (st === "active" || st === "inactive") && snap.get("isGuest") !== true;
 
   await stripTeacherFromStudents(db, academyId, authUid);
   await deleteMemberLoginSecrets(db, academyId, "teacher", teacherId);
   await deleteAttnLoginIndexForMember(db, data, authUid);
-  await ref.delete();
+  const keptStaffId = keepStaffRecord ? await detachStaffAccount(db, academyId, snap) : null;
+  if (!keepStaffRecord) {
+    await ref.delete();
+  }
 
-  // 등록 대기(초대 링크 가입 거절)·임시 비밀번호 발급 상태 포함, 계정이 있으면 Auth 사용자도 삭제
   try {
     await admin.auth().deleteUser(authUid);
   } catch (e) {
@@ -273,5 +279,5 @@ export const deleteTeacherInvite = onCall(async (request) => {
   }
   await purgeUserFirestoreData(db, authUid);
 
-  return { ok: true };
+  return { ok: true as const, keptStaffId };
 });

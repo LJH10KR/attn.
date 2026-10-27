@@ -186,11 +186,16 @@ export function StaffAccountSection({
     if (data) onChangedAction(`${name} 님의 계정을 비활성화했습니다.`);
   };
 
-  const removeAccount = async (kind: "reject" | "delete") => {
-    const question =
-      kind === "reject"
-        ? `${name} 님의 가입 신청을 거절할까요? 만들어진 계정이 삭제됩니다.`
-        : `${name} 님의 계정을 삭제할까요? 직원 정보도 함께 삭제되며 되돌릴 수 없습니다.`;
+  /**
+   * reject: 가입 거절 / cancel: 첫 로그인 전 계정 취소 — 직원 정보까지 전체 삭제
+   * delete: 써 오던(비활성) 계정 — 서버가 로그인 계정만 지우고 인사 기록은 "계정 없음" 직원으로 남김
+   */
+  const removeAccount = async (kind: "reject" | "cancel" | "delete") => {
+    const question = {
+      reject: `${name} 님의 가입 신청을 거절할까요? 만들어진 계정이 삭제됩니다.`,
+      cancel: `${name} 님의 계정을 삭제할까요? 아직 첫 로그인 전이라 직원 정보도 함께 삭제되며 되돌릴 수 없습니다.`,
+      delete: `${name} 님의 로그인 계정을 삭제할까요? 인사 기록은 직원 관리에 「계정 없음」으로 남고, 나중에 다시 초대할 수 있습니다.`,
+    }[kind];
     if (!window.confirm(question)) return;
     const data = await call(
       "deleteTeacherInvite",
@@ -199,7 +204,11 @@ export function StaffAccountSection({
     );
     if (data) {
       onCloseSheetAction(
-        kind === "reject" ? `${name} 님의 가입 신청을 거절했습니다.` : `${name} 님의 계정을 삭제했습니다.`,
+        {
+          reject: `${name} 님의 가입 신청을 거절했습니다.`,
+          cancel: `${name} 님의 계정과 직원 정보를 삭제했습니다.`,
+          delete: `${name} 님의 로그인 계정을 삭제했습니다. 인사 기록은 직원 관리에 남아 있습니다.`,
+        }[kind],
       );
     }
   };
@@ -404,7 +413,7 @@ export function StaffAccountSection({
                 >
                   임시 비밀번호 다시 만들기
                 </button>
-                <button type="button" className={dangerBtn} disabled={busy} onClick={() => void removeAccount("delete")}>
+                <button type="button" className={dangerBtn} disabled={busy} onClick={() => void removeAccount("cancel")}>
                   계정 삭제
                 </button>
               </>

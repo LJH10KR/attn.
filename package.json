@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:functions": "npm --prefix functions run build && cross-env NODE_OPTIONS= firebase emulators:exec --only auth,firestore,functions --project demo-attn \"node tests/functions/staff-callables.smoke.mjs && node tests/functions/staff-invites.smoke.mjs && node tests/functions/member-passwords.smoke.mjs && node tests/functions/member-recovery.smoke.mjs\"",
+    "test:functions": "npm --prefix functions run build && cross-env NODE_OPTIONS= firebase emulators:exec --only auth,firestore,functions --project demo-attn \"node tests/functions/staff-callables.smoke.mjs && node tests/functions/staff-invites.smoke.mjs && node tests/functions/member-passwords.smoke.mjs && node tests/functions/member-recovery.smoke.mjs && node tests/functions/member-auth-hardening.smoke.mjs\"",
     "test:rules":"cross-env NODE_OPTIONS= firebase emulators:exec --only firestore --project demo-attn \"node --test tests/rules/*.test.mjs\""
   },
   "dependencies": {

@@ -8,7 +8,9 @@ import {
   validateMemberLoginIdFormat,
 } from "./lib/member-login-id";
 import { parseOptionalKrPhone } from "./lib/kr-phone";
-import { hasLoginSecret, passwordSecretFields, verifyLoginSecret } from "./lib/password-hash";
+import { verifyLoginPasswordThrottled } from "./lib/login-throttle";
+import { randomAuthPassword } from "./lib/member-credentials";
+import { hasLoginSecret, passwordSecretFields } from "./lib/password-hash";
 import type { DocumentReference } from "firebase-admin/firestore";
 import { isParentLoginEmail, normalizeParentLoginEmail } from "./lib/parent-login-id";
 import { syncUserAdminProfile } from "./lib/firestore-cleanup";
@@ -72,17 +74,15 @@ async function verifyMemberLoginPassword(
   role: "teacher" | "parent",
   password: string,
 ): Promise<void> {
+  // 로그인과 같은 연속 실패 잠금 — 열린 세션으로 현재 비밀번호를 대입해 알아내지 못하게
   const col = role === "teacher" ? "staff" : "parents";
-  const secretSnap = await admin
-    .firestore()
-    .doc(`academies/${academyId}/${col}/${uid}/secrets/login`)
-    .get();
-  if (!secretSnap.exists) {
-    throw new HttpsError("failed-precondition", "로그인 정보가 설정되지 않았습니다.");
-  }
-  if (!(await verifyLoginSecret(secretSnap.data(), password))) {
-    throw new HttpsError("permission-denied", "현재 비밀번호가 올바르지 않습니다.");
-  }
+  const db = admin.firestore();
+  await verifyLoginPasswordThrottled(
+    db,
+    db.doc(`academies/${academyId}/${col}/${uid}/secrets/login`),
+    password,
+    "현재 비밀번호가 올바르지 않습니다.",
+  );
 }
 
 async function parentHasStoredPassword(academyId: string, uid: string): Promise<boolean> {
@@ -562,7 +562,7 @@ export const updateTeacherPassword = onCall(async (request) => {
 
   await verifyMemberLoginPassword(academyId, uid, "teacher", currentPassword);
 
-  await admin.auth().updateUser(uid, { password: newPassword });
+  await admin.auth().updateUser(uid, { password: randomAuthPassword() });
   await admin
     .firestore()
     .doc(`academies/${academyId}/staff/${memberDocId}/secrets/login`)
@@ -616,7 +616,7 @@ export const updateParentPassword = onCall(async (request) => {
     await verifyMemberLoginPassword(academyId, uid, "parent", currentPassword);
   }
 
-  await admin.auth().updateUser(uid, { password: newPassword });
+  await admin.auth().updateUser(uid, { password: randomAuthPassword() });
   await admin
     .firestore()
     .doc(`academies/${academyId}/parents/${uid}/secrets/login`)

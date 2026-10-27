@@ -6,6 +6,7 @@ import { normalizeMemberLoginId } from "./lib/member-login-id";
 import { normalizeParentLoginId } from "./lib/parent-login-id";
 import {
   memberCollectionName,
+  randomAuthPassword,
   randomTempPassword,
   type MemberKind,
 } from "./lib/member-credentials";
@@ -13,49 +14,35 @@ import { assertPermission } from "./lib/academy-access";
 import {
   hasLoginSecret,
   passwordSecretFields,
+  simulatePasswordCheck,
   tempPasswordSecretFields,
-  verifyLoginSecret,
 } from "./lib/password-hash";
 import {
-  beginLoginAttempt,
-  lockedLoginMessage,
   LOGIN_THROTTLE_RESET,
   loginThrottleFields,
-  readLoginThrottle,
+  verifyLoginPasswordThrottled,
 } from "./lib/login-throttle";
 import { normalizePermissionList } from "./lib/permissions";
 import { memberPasswordResetViolation, staffAccountChangeViolation } from "./lib/role-policy";
 
-/** 연속 실패 제한(`login-throttle.ts`)을 거쳐 비밀번호 확인 — 시도 횟수는 검증 전에 올리고 성공하면 초기화 */
+/** 로그인 실패 응답 — 없는 ID·다른 역할의 ID·비밀번호 없음·틀린 비밀번호 모두 같은 코드·문구(계정 존재 여부를 알 수 없게) */
+const LOGIN_FAILED_MSG = "로그인 ID 또는 비밀번호가 올바르지 않습니다.";
+
+/** 연속 실패 제한(`login-throttle.ts`)을 거쳐 비밀번호 확인 후 멤버 상태 */
 async function verifyMemberPassword(
   academyId: string,
   authUid: string,
   role: MemberKind,
   password: string,
+  wrongMessage = LOGIN_FAILED_MSG,
 ): Promise<{ status: string; contactEmail?: string }> {
   const db = admin.firestore();
-  const secretRef = db.doc(
-    `academies/${academyId}/${memberCollectionName(role)}/${authUid}/secrets/login`,
+  await verifyLoginPasswordThrottled(
+    db,
+    db.doc(`academies/${academyId}/${memberCollectionName(role)}/${authUid}/secrets/login`),
+    password,
+    wrongMessage,
   );
-  const attempt = await db.runTransaction(async (tx) => {
-    const snap = await tx.get(secretRef);
-    if (!snap.exists) return null;
-    const decision = beginLoginAttempt(readLoginThrottle(snap.data()), Date.now());
-    if (decision.next) {
-      tx.update(secretRef, loginThrottleFields(decision.next));
-    }
-    return { secret: snap.data(), decision };
-  });
-  if (!attempt) {
-    throw new HttpsError("failed-precondition", "로그인 정보가 설정되지 않았습니다.");
-  }
-  if (!attempt.decision.allowed) {
-    throw new HttpsError("resource-exhausted", lockedLoginMessage(attempt.decision.retryAfterMs));
-  }
-  if (!(await verifyLoginSecret(attempt.secret, password))) {
-    throw new HttpsError("permission-denied", "로그인 ID 또는 비밀번호가 올바르지 않습니다.");
-  }
-  await secretRef.update(loginThrottleFields(LOGIN_THROTTLE_RESET));
   const memberSnap = await admin
     .firestore()
     .doc(`academies/${academyId}/${memberCollectionName(role)}/${authUid}`)
@@ -126,23 +113,17 @@ async function signInMember(loginKey: string, password: string, role: MemberKind
       : role === "teacher"
         ? await resolveTeacherLoginIndex(loginKey)
         : await admin.firestore().doc(attnLoginIndexPath(loginKey.trim())).get();
-  if (!indexSnap?.exists) {
-    throw new HttpsError(
-      "not-found",
-      role === "teacher" || role === "parent"
-        ? "로그인 ID 또는 비밀번호가 올바르지 않습니다."
-        : "로그인 번호 또는 비밀번호가 올바르지 않습니다.",
-    );
-  }
-  const academyId = indexSnap.get("academyId");
-  const authUid = indexSnap.get("authUid");
-  const indexRole = indexSnap.get("role");
+  const academyId = indexSnap?.get("academyId");
+  const authUid = indexSnap?.get("authUid");
   if (
+    !indexSnap?.exists ||
     typeof academyId !== "string" ||
     typeof authUid !== "string" ||
-    indexRole !== role
+    indexSnap.get("role") !== role
   ) {
-    throw new HttpsError("failed-precondition", "계정 정보가 올바르지 않습니다.");
+    // 실제 계정과 같은 비용의 검증을 거친 뒤 같은 응답
+    await simulatePasswordCheck(password);
+    throw new HttpsError("permission-denied", LOGIN_FAILED_MSG);
   }
   if (role === "parent" && indexSnap.get("authProvider") === "google") {
     throw new HttpsError(
@@ -191,6 +172,40 @@ export const signInTeacher = onCall(async (request) => {
     throw new HttpsError("invalid-argument", "로그인 ID와 비밀번호를 입력해 주세요.");
   }
   return signInMember(loginKey, password, "teacher");
+});
+
+/**
+ * 로그인 중인 선생님·학부모 본인 재확인 — Google 계정 연결처럼 "최근 로그인"이 필요한 작업 전.
+ * Auth 비밀번호는 무작위 값이라 클라이언트 `reauthenticateWithCredential`을 쓸 수 없으므로
+ * 서버가 로그인 ID 비밀번호를 확인(로그인과 같은 연속 실패 잠금)하고 새 커스텀 토큰을 준다 — 그 토큰으로 다시 로그인하면 최근 로그인이 됨.
+ */
+export const reauthenticateMember = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+  }
+  const { uid, token } = request.auth;
+  const role = token.role === "parent" ? "parent" : token.role === "teacher" ? "teacher" : null;
+  const academyId = typeof token.academyId === "string" ? token.academyId : "";
+  if (!role || !academyId) {
+    throw new HttpsError("failed-precondition", "선생님 또는 학부모 계정만 처리할 수 있습니다.");
+  }
+  const password = typeof request.data?.password === "string" ? request.data.password : "";
+  if (!password) {
+    throw new HttpsError("invalid-argument", "비밀번호를 입력해 주세요.");
+  }
+  const { status } = await verifyMemberPassword(
+    academyId,
+    uid,
+    role,
+    password,
+    "비밀번호가 올바르지 않습니다.",
+  );
+  const customToken = await admin.auth().createCustomToken(uid, {
+    role,
+    academyId,
+    membershipStatus: status,
+  });
+  return { ok: true as const, customToken };
 });
 
 /** 선생님 Google 로그인 — 설정에서 Google 연동(googleLinked)된 계정만 */
@@ -290,7 +305,7 @@ export const completeMemberFirstLogin = onCall(async (request) => {
     throw new HttpsError("failed-precondition", "첫 로그인 비밀번호 설정이 필요한 계정이 아닙니다.");
   }
 
-  await admin.auth().updateUser(uid, { password: newPassword });
+  await admin.auth().updateUser(uid, { password: randomAuthPassword() });
   await memberRef.update({
     status: "active",
     activatedAt: FieldValue.serverTimestamp(),
@@ -359,7 +374,7 @@ export const regenerateMemberTempPassword = onCall(async (request) => {
   }
 
   const tempPassword = randomTempPassword();
-  await admin.auth().updateUser(memberAuthUid, { password: tempPassword });
+  await admin.auth().updateUser(memberAuthUid, { password: randomAuthPassword() });
   await memberRef
     .collection("secrets")
     .doc("login")
@@ -449,7 +464,7 @@ export const resetMemberPassword = onCall(async (request) => {
   });
   await batch.commit();
 
-  await admin.auth().updateUser(memberAuthUid, { password: tempPassword });
+  await admin.auth().updateUser(memberAuthUid, { password: randomAuthPassword() });
   await admin.auth().setCustomUserClaims(memberAuthUid, {
     role,
     academyId,
