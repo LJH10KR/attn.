@@ -265,7 +265,6 @@ export const createSeedBatch = onCall(async (request) => {
   }
 
   // 2) Firestore 시드(쓰기 수가 많지 않으므로 배치 단위 커밋)
-  const portalPassword = randomPassword();
   const writes: Array<{
     ref: DocumentReference;
     data: Record<string, unknown>;
@@ -280,12 +279,6 @@ export const createSeedBatch = onCall(async (request) => {
       createdAt: FieldValue.serverTimestamp(),
       status: "active",
     },
-  });
-
-  // secrets/login (필요할 때만 사용되므로 랜덤 값)
-  writes.push({
-    ref: db.doc(`academies/${academyId}/secrets/login`),
-    data: { portalPassword },
   });
 
   // owner profile

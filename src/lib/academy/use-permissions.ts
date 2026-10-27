@@ -18,10 +18,9 @@ import { isFirebaseConfigured } from "@/lib/firebase/config";
  * 학원 화면에서 현재 사용자가 무엇을 할 수 있는지 — 탭·페이지·버튼 노출 제어용.
  * 실제 차단은 보안 규칙과 서버 `assertPermission`이 하므로 여기서는 보여 줄지만 정한다.
  * - owner: 학원 문서 ownerUid — 모든 권한
- * - portal: 학원 포털 공용 로그인 — 폐지 전까지 모든 권한
- * - staff: 활성 직원 — 멤버 문서 `permissions`(역할이 바뀌면 실시간 반영)
+ * - staff: 활성 직원 — 직원 문서 `permissions`(역할이 바뀌면 실시간 반영)
  */
-export type AcademyActorKind = "owner" | "portal" | "staff";
+export type AcademyActorKind = "owner" | "staff";
 
 type PermissionSnapshot = {
   academyId: string;
@@ -63,11 +62,6 @@ export function usePermissions(academyId: string | null): AcademyPermissionState
       }
       void (async () => {
         try {
-          const { claims } = await user.getIdTokenResult();
-          if (claims.role === "academy" && claims.academyId === academyId) {
-            publish({ uid: user.uid, actor: "portal", permissions: ACADEMY_PERMISSIONS });
-            return;
-          }
           const db = getFirebaseDb();
           const academySnap = await getDoc(doc(db, COLLECTIONS.academies, academyId));
           if (academySnap.get("ownerUid") === user.uid) {

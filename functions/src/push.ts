@@ -19,7 +19,7 @@ function studentAssignedToTeacher(data: Record<string, unknown>, teacherUid: str
 }
 
 type AttendanceSender = {
-  role: "teacher" | "owner" | "academy";
+  role: "teacher" | "owner";
   actorUid: string;
   source: "teacher_dashboard" | "academy_dashboard";
   canBypassCooldown: boolean;
@@ -29,22 +29,12 @@ async function resolveAttendanceSender(params: {
   db: FirebaseFirestore.Firestore;
   academyId: string;
   callerUid: string;
-  token: admin.auth.DecodedIdToken;
   studentData: Record<string, unknown>;
 }): Promise<AttendanceSender> {
-  const { db, academyId, callerUid, token, studentData } = params;
-  const actor = await resolveAcademyActor(db, academyId, callerUid, token);
+  const { db, academyId, callerUid, studentData } = params;
+  const actor = await resolveAcademyActor(db, academyId, callerUid);
   if (!actor) {
     throw new HttpsError("permission-denied", "출석/결석 알림을 보낼 권한이 없습니다.");
-  }
-
-  if (actor.kind === "portal") {
-    return {
-      role: "academy",
-      actorUid: callerUid,
-      source: "academy_dashboard",
-      canBypassCooldown: false,
-    };
   }
 
   if (actor.kind === "owner") {
@@ -156,7 +146,6 @@ export const sendStudentAttendanceNotification = onCall(async (request) => {
     throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
   }
   const callerUid = request.auth.uid;
-  const token = request.auth.token;
   const academyId =
     typeof request.data?.academyId === "string" ? request.data.academyId.trim() : "";
   const studentId =
@@ -178,7 +167,6 @@ export const sendStudentAttendanceNotification = onCall(async (request) => {
     db,
     academyId,
     callerUid,
-    token,
     studentData,
   });
 
@@ -241,7 +229,7 @@ export const listAttendanceNotifications = onCall(async (request) => {
     mode = "academy_all";
   } else {
     // 원장·포털·알림 기록 권한 직원은 학원 전체, 그 외 활성 직원은 본인 전송 기록만
-    const actor = await resolveAcademyActor(db, academyId, uid, token);
+    const actor = await resolveAcademyActor(db, academyId, uid);
     if (!actor) {
       throw new HttpsError("permission-denied", "알림 전송 기록을 조회할 권한이 없습니다.");
     }

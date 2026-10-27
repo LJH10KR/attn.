@@ -1,8 +1,8 @@
 /**
  * firestore.rules 세부 권한 테스트 — `npm run test:rules` (Firestore 에뮬레이터에서 실행)
  *
- * 원장(ownerUid)·포털 세션은 모든 권한, 직원은 멤버 문서 `permissions`만큼,
- * 비활성 직원·무관한 계정은 거부되는지 확인한다.
+ * 원장(ownerUid)은 모든 권한, 직원은 직원 문서 `permissions`만큼,
+ * 비활성 직원·무관한 계정·폐지된 포털 토큰은 거부되는지 확인한다.
  */
 import { after, before, beforeEach, describe, it } from "node:test";
 import { readFileSync } from "node:fs";
@@ -82,7 +82,7 @@ beforeEach(async () => {
   });
 });
 
-describe("원장·포털", () => {
+describe("원장·폐지된 포털 세션", () => {
   it("원장은 학생·결제·역할을 읽는다", async () => {
     const db = dbAs(OWNER);
     await assertSucceeds(getDocs(collection(db, academyPath("students"))));
@@ -90,15 +90,11 @@ describe("원장·포털", () => {
     await assertSucceeds(getDocs(collection(db, academyPath("roles"))));
   });
 
-  it("포털 세션은 폐지 전까지 모든 권한", async () => {
+  it("예전 학원 포털 토큰(role=academy)은 더 이상 아무 권한이 없다", async () => {
     const db = dbAs(`academy_${ACADEMY}`, { role: "academy", academyId: ACADEMY });
-    await assertSucceeds(getDocs(collection(db, academyPath("students"))));
-    await assertSucceeds(updateDoc(doc(db, academyPath("students", STUDENT)), { name: "변경" }));
-  });
-
-  it("다른 학원 포털 세션은 거부", async () => {
-    const db = dbAs("academy_other", { role: "academy", academyId: "o9_a9" });
+    await assertFails(getDoc(doc(db, academyPath())));
     await assertFails(getDocs(collection(db, academyPath("students"))));
+    await assertFails(updateDoc(doc(db, academyPath("students", STUDENT)), { name: "변경" }));
   });
 });
 
@@ -268,6 +264,14 @@ describe("권한 없는 직원·비활성·무관한 계정", () => {
     const db = dbAs("staff-inactive");
     await assertFails(getDocs(collection(db, academyPath("students"))));
     await assertFails(getDocs(collection(db, academyPath("roles"))));
+  });
+
+  it("직원 초대 문서(staffInvites)는 누구도 클라이언트로 읽지 못한다", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "staffInvites", "hash-1"), { academyId: ACADEMY });
+    });
+    await assertFails(getDoc(doc(dbAs(OWNER), "staffInvites", "hash-1")));
+    await assertFails(getDoc(doc(dbAs("staff-members"), "staffInvites", "hash-1")));
   });
 
   it("학원과 무관한 계정은 거부", async () => {

@@ -9,12 +9,11 @@ import {
 /**
  * 학원 작업 주체.
  * - owner: 학원 문서 ownerUid — 고정 소유자, 모든 권한
- * - portal: 학원 포털 공용 로그인(custom token role=academy) — 폐지 전까지 모든 권한
- * - staff: 활성 직원 — 멤버 문서 `permissions`(역할에서 서버가 복사)만큼
+ * - staff: 활성 직원 — 직원 문서 `permissions`(역할에서 서버가 복사)만큼
+ * (학원 포털 공용 로그인은 폐지 — 원장·직원 모두 각자 계정)
  */
 export type AcademyActor =
   | { kind: "owner"; uid: string; permissions: readonly AcademyPermission[] }
-  | { kind: "portal"; uid: string; permissions: readonly AcademyPermission[] }
   | {
       kind: "staff";
       uid: string;
@@ -36,7 +35,6 @@ export async function resolveAcademyActor(
   db: admin.firestore.Firestore,
   academyId: string,
   uid: string,
-  token: admin.auth.DecodedIdToken,
 ): Promise<AcademyActor | null> {
   const academySnap = await db.doc(`academies/${academyId}`).get();
   if (!academySnap.exists) {
@@ -45,9 +43,6 @@ export async function resolveAcademyActor(
   const ownerUid = academySnap.get("ownerUid");
   if (typeof ownerUid === "string" && ownerUid === uid) {
     return { kind: "owner", uid, permissions: ACADEMY_PERMISSIONS };
-  }
-  if (token.role === "academy" && token.academyId === academyId) {
-    return { kind: "portal", uid, permissions: ACADEMY_PERMISSIONS };
   }
   const staffSnap = await db.doc(`academies/${academyId}/staff/${uid}`).get();
   if (staffSnap.exists && staffSnap.get("status") === "active") {
@@ -64,7 +59,8 @@ export async function resolveAcademyActor(
 
 /**
  * 세부 권한 검사 — `required`가 배열이면 그중 하나만 있어도 통과.
- * 통과하면 작업 주체를 돌려주므로 호출 측에서 기록자(owner/academy/teacher) 판별에 쓸 수 있다.
+ * 통과하면 작업 주체를 돌려주므로 호출 측에서 기록자(owner/teacher) 판별에 쓸 수 있다.
+ * `token`은 지금은 쓰지 않음(포털 클레임 판별 제거) — 서비스 관리자 클레임 등에 대비해 호출 형태 유지.
  */
 export async function assertPermission(
   db: admin.firestore.Firestore,
@@ -73,7 +69,7 @@ export async function assertPermission(
   token: admin.auth.DecodedIdToken,
   required: AcademyPermission | readonly AcademyPermission[],
 ): Promise<AcademyActor> {
-  const actor = await resolveAcademyActor(db, academyId, uid, token);
+  const actor = await resolveAcademyActor(db, academyId, uid);
   if (!actor || !actorHasPermission(actor, required)) {
     throw new HttpsError("permission-denied", "이 작업을 할 권한이 없습니다.");
   }

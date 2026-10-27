@@ -1,23 +1,21 @@
 "use client";
 
 import { collection, getDocs } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
-import {
-  StaffFormSheet,
-  docToStaffRow,
-  staffAccountLabel,
-  type StaffRowVM,
-} from "@/components/academy/staff-form-sheet";
+import { StaffFormSheet } from "@/components/academy/staff-form-sheet";
+import type { StaffRoleOption } from "@/components/academy/staff-account-section";
+import { docToStaffRow, staffAccountLabel, type StaffRowVM } from "@/lib/academy/staff-row";
 import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { useAcademyOptionList } from "@/lib/academy/use-academy-option-list";
 import { usePermissions } from "@/lib/academy/use-permissions";
 import { academyStaffPath, STAFF_EMPLOYMENT_STATUS_LABELS } from "@/lib/firebase/attn-schema";
-import { getFirebaseDb } from "@/lib/firebase/client-app";
+import { getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { formatKrPhoneDisplay, phoneMatchesSearch } from "@/lib/phone/kr-phone";
@@ -45,7 +43,7 @@ function sortStaff(a: StaffRowVM, b: StaffRowVM): number {
   return a.displayName.localeCompare(b.displayName, "ko");
 }
 
-function StaffListInner({ academyId }: { academyId: string }) {
+function StaffListInner({ academyId, canManageMembers }: { academyId: string; canManageMembers: boolean }) {
   const [rows, setRows] = useState<StaffRowVM[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [filter, setFilter] = useState<StaffFilter>("current");
@@ -53,6 +51,27 @@ function StaffListInner({ academyId }: { academyId: string }) {
   const [sheet, setSheet] = useState<{ target: StaffRowVM | null } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const { items: jobTitles, save: saveJobTitles } = useAcademyOptionList(academyId, "jobTitles");
+  const [roles, setRoles] = useState<StaffRoleOption[] | null>(null);
+
+  // 초대·계정 발급에 쓸 권한 목록 — 멤버 초대/권한 관리 권한이 있을 때만(서버가 템플릿 보장)
+  useEffect(() => {
+    if (!canManageMembers) {
+      setRoles(null);
+      return;
+    }
+    let cancelled = false;
+    void httpsCallable(getFirebaseFunctions(), "listAcademyRoles")({ academyId })
+      .then((res) => {
+        const list = (res.data as { roles?: StaffRoleOption[] }).roles ?? [];
+        if (!cancelled) setRoles(list.map((r) => ({ id: r.id, name: r.name })));
+      })
+      .catch(() => {
+        if (!cancelled) setRoles(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [academyId, canManageMembers]);
 
   const loadStaff = useCallback(async () => {
     try {
@@ -203,7 +222,7 @@ function StaffListInner({ academyId }: { academyId: string }) {
                         {STAFF_EMPLOYMENT_STATUS_LABELS[r.employmentStatus]}
                       </span>
                     ) : null}
-                    <span className="text-[10px] text-neutral-500">{staffAccountLabel(r.accountStatus)}</span>
+                    <span className="text-[10px] text-neutral-500">{staffAccountLabel(r)}</span>
                   </span>
                 </button>
               </li>
@@ -215,11 +234,16 @@ function StaffListInner({ academyId }: { academyId: string }) {
       {sheet ? (
         <StaffFormSheet
           academyId={academyId}
-          target={sheet.target}
+          target={sheet.target ? rows.find((r) => r.id === sheet.target?.id) ?? sheet.target : null}
           jobTitles={jobTitles}
           onSaveJobTitlesAction={saveJobTitles}
           jobTitleUsage={jobTitleUsage}
+          roles={roles}
           onCloseAction={() => setSheet(null)}
+          onListChangedAction={(message) => {
+            setNotice(message);
+            refresh();
+          }}
           onSavedAction={(message) => {
             setSheet(null);
             setNotice(message);
@@ -237,6 +261,7 @@ function AcademyStaffInner() {
   const { profile: authProfile } = useAuthProfile();
   const academyId = searchParams.get("id")?.trim() ?? "";
   const { loading, can } = usePermissions(academyId || null);
+  const canManageMembers = can("settings.members");
   const backHref = `/academy?id=${encodeURIComponent(academyId)}`;
 
   if (academyId && loading) {
@@ -282,7 +307,7 @@ function AcademyStaffInner() {
         ]}
       />
       <main className="mx-auto max-w-lg px-4 pt-[26px]">
-        <StaffListInner academyId={academyId} />
+        <StaffListInner academyId={academyId} canManageMembers={canManageMembers} />
       </main>
       <DashboardBottomScrim />
     </div>

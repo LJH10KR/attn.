@@ -21,13 +21,8 @@ function isNonEmptyString(value: unknown): value is string {
 async function hasAcademyPermission(
   academyId: string,
   uid: string,
-  claimRole: unknown,
-  claimAcademyId: unknown,
   permission: AcademyPermission,
 ): Promise<boolean> {
-  if (claimRole === "academy" && claimAcademyId === academyId) {
-    return true;
-  }
   const academySnap = await adminDb.doc(`${COLLECTIONS.academies}/${academyId}`).get();
   if (!academySnap.exists) return false;
   if (academySnap.get("ownerUid") === uid) return true;
@@ -70,13 +65,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "인증 토큰이 유효하지 않습니다." }, { status: 401 });
   }
 
-  const allowed = await hasAcademyPermission(
-    academyId,
-    decoded.uid,
-    decoded.role,
-    decoded.academyId,
-    "billing.refunds",
-  );
+  const allowed = await hasAcademyPermission(academyId, decoded.uid, "billing.refunds");
   if (!allowed) {
     return NextResponse.json({ error: "이 학원을 관리할 권한이 없습니다." }, { status: 403 });
   }

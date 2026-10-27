@@ -192,7 +192,10 @@ export const PARENT_INVITE_TTL_MS = TEACHER_INVITE_TTL_MS;
 /** 학부모 등록 단계 — 선생님과 동일 상태 값 */
 export type ParentRegistrationStatus = TeacherRegistrationStatus;
 
-/** 직원 계정 상태 — 계정 없이 인사 정보만 등록한 직원은 "no_account" */
+/**
+ * 직원 계정 상태 — 계정 없이 인사 정보만 등록한 직원은 "no_account",
+ * 초대 링크로 가입하면 "pending_registration"(원장 승인 대기), 학원이 직접 만들어 주면 "pending_setup"(첫 로그인 전)
+ */
 export type StaffAccountStatus = TeacherRegistrationStatus | "no_account";
 
 /** 재직 상태 — 퇴사로 바꾸면 활성 계정도 서버가 비활성화(`staff.ts`) */
@@ -234,6 +237,9 @@ export type AcademyStaff = {
   memo?: string;
   /** 인사 정보 없이 계정만 있는 게스트 — 직원 목록에서 숨김 */
   isGuest?: boolean;
+  /** 초대 링크 대기 중(계정 없음일 때) — 링크 원문은 서버도 보관하지 않음(`staffInvites/{sha256}`) */
+  inviteRoleId?: string;
+  inviteExpiresAt?: Timestamp;
   academyId: string;
   status: StaffAccountStatus;
   authProvider?: "password" | "google";

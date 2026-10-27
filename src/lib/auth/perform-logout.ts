@@ -3,7 +3,7 @@ import { getFirebaseAuth } from "@/lib/firebase/client-app";
 import { tearDownParentWebPushForLogout } from "@/lib/firebase/web-push";
 import { clearAppIconBadge } from "@/lib/ios/app-badge";
 
-export type LogoutRole = "parent" | "teacher" | "owner" | "academy" | "generic";
+export type LogoutRole = "parent" | "teacher" | "owner" | "generic";
 
 export type PerformLogoutOptions = {
   role?: LogoutRole;

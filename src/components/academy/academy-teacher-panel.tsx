@@ -1,24 +1,19 @@
 "use client";
 
 import { FirebaseError } from "firebase/app";
-import { collection, getDocs, query, Timestamp } from "firebase/firestore";
+import { collection, getDocs, query } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { TeacherAssignedStudentsBlock } from "@/components/academy/academy-teacher-assigned-students";
-import {
-  TEACHER_INVITE_TTL_MS,
-  type TeacherRegistrationStatus,
-} from "@/lib/firebase/attn-schema";
+import type { TeacherRegistrationStatus } from "@/lib/firebase/attn-schema";
 import { compareAttnIdAsc } from "@/lib/attn-id-sort";
 import { getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
-import {
-  AcademyMemberCredentialActions,
-  AcademyMemberProvisionModal,
-} from "@/components/academy/academy-member-provision";
+import { AcademyMemberCredentialActions } from "@/components/academy/academy-member-provision";
 
 const glassCard = "glass-card";
 
@@ -35,7 +30,6 @@ export type TeacherRowVM = {
   subject?: string | null;
   phone?: string | null;
   authUid?: string | null;
-  invitationExpiresAt?: Timestamp;
 };
 
 function callableErr(err: unknown): string {
@@ -49,71 +43,10 @@ function StatusDot({ status }: { status: TeacherRegistrationStatus }) {
   if (status === "active") {
     return <span className="h-3 w-3 shrink-0 rounded-full bg-emerald-500 ring-2 ring-emerald-600/30" />;
   }
-  if (status === "invitation_needed") {
-    return (
-      <span
-        className="h-3 w-3 shrink-0 rounded-full border-2 border-neutral-500 bg-transparent"
-        aria-hidden
-      />
-    );
-  }
-  if (status === "invitation_sent") {
-    return (
-      <span
-        className="h-3 w-3 shrink-0 rounded-full border-2 border-dashed border-sky-500 bg-sky-500/15"
-        aria-hidden
-      />
-    );
-  }
   if (status === "pending_registration" || status === "pending_setup") {
     return <span className="h-3 w-3 shrink-0 rounded-full bg-amber-400 ring-2 ring-amber-500/40" />;
   }
   return <span className="h-3 w-3 shrink-0 rounded-full bg-red-500 ring-2 ring-red-600/25" />;
-}
-
-function readFirestoreTimestamp(v: unknown): Timestamp | undefined {
-  if (
-    v !== null &&
-    v !== undefined &&
-    typeof v === "object" &&
-    "toMillis" in v &&
-    typeof (v as Timestamp).toMillis === "function"
-  ) {
-    return v as Timestamp;
-  }
-  return undefined;
-}
-
-function formatInviteRemaining(ms: number): string {
-  const totalSec = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  return `${h}시간 ${String(m).padStart(2, "0")}분 ${String(s).padStart(2, "0")}초`;
-}
-
-function InvitationCountdown({ expiresAt }: { expiresAt: Timestamp }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, []);
-  const ms = expiresAt.toMillis() - now;
-  if (ms <= 0) {
-    return (
-      <span className="text-[11px] font-medium leading-snug text-red-600">
-        초청 유효기간(24시간) 만료 · 초청 재발송이 필요합니다
-      </span>
-    );
-  }
-  return (
-    <span className="text-[11px] leading-snug text-sky-900">
-      <span className="text-neutral-500">남은 시간</span>{" "}
-      <span className="font-semibold tabular-nums text-sky-800">
-        {formatInviteRemaining(ms)}
-      </span>
-    </span>
-  );
 }
 
 function SearchIcon() {
@@ -292,74 +225,6 @@ function TeacherRowActions({
         </div>
       );
       break;
-    case "invitation_needed":
-      panel = (
-        <div className="flex flex-wrap gap-2" role="group" aria-label="선생님 작업">
-          <button
-            type="button"
-            disabled={busyKey !== null}
-            className={actionBtnClass}
-            onClick={() =>
-              void run("inv", "초청", async () => {
-                const h = httpsCallable(fn, "sendTeacherInvitation");
-                const res = await h({ academyId, teacherId: row.id });
-                const data = res.data as { debugLinks?: { resetLink: string; verifyLink: string } };
-                if (data?.debugLinks && typeof window !== "undefined") {
-                  console.info("[emulator] 초청 링크", data.debugLinks);
-                }
-              })
-            }
-          >
-            {busyKey === k("inv") ? "…" : "초청"}
-          </button>
-          <button type="button" disabled className={actionBtnClass}>
-            수정
-          </button>
-          <button
-            type="button"
-            disabled={busyKey !== null}
-            className={actionBtnClass}
-            onClick={() => setDeleteConfirmOpen(true)}
-          >
-            {busyKey === k("del") ? "…" : "삭제"}
-          </button>
-        </div>
-      );
-      break;
-    case "invitation_sent":
-      panel = (
-        <div className="flex flex-wrap gap-2" role="group" aria-label="선생님 작업">
-          <button
-            type="button"
-            disabled={busyKey !== null}
-            className={actionBtnClass}
-            onClick={() =>
-              void run("resend", "초청 메일 재발송", async () => {
-                const h = httpsCallable(fn, "sendTeacherInvitation");
-                const res = await h({ academyId, teacherId: row.id });
-                const data = res.data as { debugLinks?: { resetLink: string; verifyLink: string } };
-                if (data?.debugLinks && typeof window !== "undefined") {
-                  console.info("[emulator] 초청 링크", data.debugLinks);
-                }
-              })
-            }
-          >
-            {busyKey === k("resend") ? "…" : "초청 재발송"}
-          </button>
-          <button type="button" disabled className={actionBtnClass}>
-            수정
-          </button>
-          <button
-            type="button"
-            disabled={busyKey !== null}
-            className={actionBtnClass}
-            onClick={() => setDeleteConfirmOpen(true)}
-          >
-            {busyKey === k("del") ? "…" : "삭제"}
-          </button>
-        </div>
-      );
-      break;
     case "pending_registration":
       panel = (
         <div className="flex flex-wrap gap-2" role="group" aria-label="선생님 작업">
@@ -368,19 +233,21 @@ function TeacherRowActions({
             disabled={busyKey !== null}
             className={actionBtnClass}
             onClick={() =>
-              void run("act", "활성", async () => {
+              void run("act", "가입 승인", async () => {
                 const h = httpsCallable(fn, "activateTeacher");
                 await h({ academyId, teacherAuthUid: row.id });
               })
             }
           >
-            {busyKey === k("act") ? "…" : "등록(활성)"}
+            {busyKey === k("act") ? "…" : "가입 승인"}
           </button>
-          <button type="button" disabled className={actionBtnClass}>
-            수정
-          </button>
-          <button type="button" disabled className={actionBtnClass}>
-            삭제
+          <button
+            type="button"
+            disabled={busyKey !== null}
+            className={actionBtnClass}
+            onClick={() => setDeleteConfirmOpen(true)}
+          >
+            {busyKey === k("del") ? "…" : "가입 거절"}
           </button>
         </div>
       );
@@ -437,12 +304,7 @@ function TeacherRowActions({
 }
 
 function docToRow(id: string, data: Record<string, unknown>): TeacherRowVM {
-  const status = (data.status as TeacherRegistrationStatus) || "invitation_needed";
-  const invitedAt = readFirestoreTimestamp(data.invitedAt);
-  let invitationExpiresAt = readFirestoreTimestamp(data.invitationExpiresAt);
-  if (!invitationExpiresAt && invitedAt && status === "invitation_sent") {
-    invitationExpiresAt = Timestamp.fromMillis(invitedAt.toMillis() + TEACHER_INVITE_TTL_MS);
-  }
+  const status = (data.status as TeacherRegistrationStatus) || "pending_setup";
   return {
     id,
     attnId: typeof data.attnId === "string" ? data.attnId : "",
@@ -453,20 +315,16 @@ function docToRow(id: string, data: Record<string, unknown>): TeacherRowVM {
     subject: (data.subject as string | null) ?? null,
     phone: (data.phone as string | null) ?? null,
     authUid: typeof data.authUid === "string" ? data.authUid : null,
-    invitationExpiresAt,
   };
 }
 
 export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
   const [queryText, setQueryText] = useState("");
-  const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [expandedTeacherId, setExpandedTeacherId] = useState<string | null>(null);
   const [rows, setRows] = useState<TeacherRowVM[]>([]);
   const [listError, setListError] = useState<string | null>(null);
-  const [provisionOpen, setProvisionOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [bulkBusy, setBulkBusy] = useState(false);
 
   const loadTeachersList = useCallback(async () => {
     try {
@@ -491,10 +349,6 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
     [academyId],
   );
 
-  useEffect(() => {
-    setSelected((prev) => new Set([...prev].filter((id) => rows.some((r) => r.id === id))));
-  }, [rows]);
-
   const filtered = useMemo(() => {
     const q = queryText.trim().toLowerCase();
     if (!q) {
@@ -507,10 +361,6 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
     );
   }, [rows, queryText]);
 
-  const inviteSelectedCount = useMemo(() => {
-    return rows.filter((t) => selected.has(t.id) && t.status === "invitation_needed").length;
-  }, [rows, selected]);
-
   useEffect(() => {
     if (
       expandedTeacherId &&
@@ -519,45 +369,6 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
       setExpandedTeacherId(null);
     }
   }, [filtered, expandedTeacherId]);
-
-  const toggle = (id: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
-
-  const onBulkInvite = useCallback(async () => {
-    if (inviteSelectedCount === 0) {
-      return;
-    }
-    setNotice(null);
-    setBulkBusy(true);
-    const fn = getFirebaseFunctions();
-    const send = httpsCallable(fn, "sendTeacherInvitation");
-    const ids = rows.filter((t) => selected.has(t.id) && t.status === "invitation_needed").map((t) => t.id);
-    try {
-      for (const teacherId of ids) {
-        const res = await send({ academyId, teacherId });
-        const data = res.data as { debugLinks?: { resetLink: string; verifyLink: string } };
-        if (data?.debugLinks && typeof window !== "undefined") {
-          console.info("[emulator] 초청 링크", teacherId, data.debugLinks);
-        }
-      }
-      setSelected(new Set());
-      setNotice(`${ids.length}명에게 초청 메일을 발송했습니다.`);
-      refreshTeachersList();
-    } catch (e) {
-      setNotice(callableErr(e));
-    } finally {
-      setBulkBusy(false);
-    }
-  }, [academyId, inviteSelectedCount, rows, selected, refreshTeachersList]);
 
   return (
     <div className="space-y-4">
@@ -576,13 +387,12 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
         <h2 className="text-sm font-semibold text-foreground">선생님 관리</h2>
         <div className="flex shrink-0 items-center gap-2">
           <AcademyPanelRefreshButton busy={listBusy} onRefreshAction={refreshTeachersList} />
-          <button
-            type="button"
-            onClick={() => setProvisionOpen(true)}
+          <Link
+            href={`/academy/settings/staff?id=${encodeURIComponent(academyId)}`}
             className="rounded-[8px] bg-[#222] dark:bg-neutral-100 px-3 py-2 text-[11px] font-medium text-white dark:text-neutral-950 shadow-sm hover:bg-[#333] dark:hover:bg-white"
           >
-            + 선생님 등록
-          </button>
+            + 직원 관리에서 초대
+          </Link>
         </div>
       </div>
 
@@ -609,14 +419,7 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
           <span className="h-2 w-2 rounded-full bg-emerald-500" /> 활성
         </span>
         <span className="inline-flex items-center gap-1">
-          <span className="h-2 w-2 rounded-full border border-neutral-500 bg-transparent" /> 초청필요
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="h-2 w-2 rounded-full border border-dashed border-sky-500 bg-sky-500/20" />{" "}
-          초청발송(24h)
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="h-2 w-2 rounded-full bg-amber-400" /> 등록대기
+          <span className="h-2 w-2 rounded-full bg-amber-400" /> 승인 대기·첫 로그인 전
         </span>
         <span className="inline-flex items-center gap-1">
           <span className="h-2 w-2 rounded-full bg-red-500" /> 비활성
@@ -630,7 +433,6 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
           </p>
         ) : (
           filtered.map((t) => {
-            const isOn = selected.has(t.id);
             const expanded = expandedTeacherId === t.id;
             return (
               <div
@@ -638,19 +440,6 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
                 className={`overflow-hidden ${glassCard} ${expanded ? "ring-1 ring-[#222]/10" : ""}`}
               >
                 <div className="flex items-stretch gap-1 p-2 sm:gap-2 sm:p-3.5">
-                  <label
-                    className="flex min-h-10 min-w-12 shrink-0 cursor-pointer flex-col items-center justify-center rounded-2xl border border-transparent px-1 hover:bg-white/30 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-[#4a90e2]/40"
-                    onClick={(e) => e.stopPropagation()}
-                    onPointerDown={(e) => e.stopPropagation()}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isOn}
-                      onChange={() => toggle(t.id)}
-                      aria-label={`${t.name} 선택`}
-                      className="h-5 w-5 cursor-pointer rounded-md border-2 border-neutral-400 text-foreground accent-[#222]"
-                    />
-                  </label>
                   <button
                     type="button"
                     className="flex min-w-0 flex-1 items-center gap-3 rounded-2xl px-2 py-2 text-left transition hover:bg-white/35 active:bg-white/45 sm:px-3"
@@ -666,11 +455,6 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
                       <span className="mt-0.5 block truncate text-xs text-neutral-500">
                         {t.email}
                       </span>
-                      {t.status === "invitation_sent" && t.invitationExpiresAt ? (
-                        <span className="mt-1 block">
-                          <InvitationCountdown expiresAt={t.invitationExpiresAt} />
-                        </span>
-                      ) : null}
                     </span>
                     <StatusDot status={t.status} />
                   </button>
@@ -712,27 +496,7 @@ export function AcademyTeacherPanel({ academyId }: { academyId: string }) {
           })
         )}
 
-        {inviteSelectedCount > 0 ? (
-          <div className="pointer-events-none fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom))] left-1/2 z-[21] w-[min(calc(100%-2rem),20rem)] -translate-x-1/2 px-4">
-            <button
-              type="button"
-              disabled={bulkBusy}
-              onClick={() => void onBulkInvite()}
-              className="pointer-events-auto w-full rounded-full bg-[#222] dark:bg-neutral-100 py-3.5 text-center text-sm font-semibold text-white dark:text-neutral-950 shadow-[0_12px_32px_-8px_rgba(0,0,0,0.45)] hover:bg-[#333] dark:hover:bg-white disabled:opacity-60"
-            >
-              {bulkBusy ? "발송 중…" : `초청 메일 발송 (${inviteSelectedCount})`}
-            </button>
-          </div>
-        ) : null}
       </div>
-
-      <AcademyMemberProvisionModal
-        academyId={academyId}
-        kind="teacher"
-        open={provisionOpen}
-        onCloseAction={() => setProvisionOpen(false)}
-        onDoneAction={refreshTeachersList}
-      />
 
     </div>
   );

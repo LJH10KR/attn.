@@ -7,57 +7,18 @@ import { EditableOptionSelect } from "@/components/ui/editable-option-select";
 import { KrPhoneInput } from "@/components/ui/kr-phone-input";
 import { ModalPortal } from "@/components/ui/modal-portal";
 import {
+  StaffAccountSection,
+  type StaffRoleOption,
+} from "@/components/academy/staff-account-section";
+import {
   STAFF_EMPLOYMENT_STATUS_LABELS,
-  readStaffEmploymentStatus,
   type AcademyOptionItem,
-  type StaffAccountStatus,
   type StaffEmploymentStatus,
 } from "@/lib/firebase/attn-schema";
+import type { StaffRowVM } from "@/lib/academy/staff-row";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { formatKrPhoneDisplay, getKrPhoneValidationError } from "@/lib/phone/kr-phone";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
-
-export type StaffRowVM = {
-  id: string;
-  displayName: string;
-  phone: string;
-  jobTitleId: string | null;
-  hireDate: string | null;
-  employmentStatus: StaffEmploymentStatus;
-  memo: string;
-  accountStatus: StaffAccountStatus;
-  isGuest: boolean;
-};
-
-export function docToStaffRow(id: string, data: Record<string, unknown>): StaffRowVM {
-  return {
-    id,
-    displayName: typeof data.displayName === "string" ? data.displayName : "",
-    phone: typeof data.phone === "string" ? data.phone : "",
-    jobTitleId: typeof data.jobTitleId === "string" ? data.jobTitleId : null,
-    hireDate: typeof data.hireDate === "string" ? data.hireDate : null,
-    employmentStatus: readStaffEmploymentStatus(data.employmentStatus),
-    memo: typeof data.memo === "string" ? data.memo : "",
-    accountStatus: (data.status as StaffAccountStatus) || "invitation_needed",
-    isGuest: data.isGuest === true,
-  };
-}
-
-/** 계정 상태 배지 문구 — 초청·가입 진행 단계는 "초대 중"으로 묶음 */
-export function staffAccountLabel(status: StaffAccountStatus): string {
-  switch (status) {
-    case "no_account":
-      return "계정 없음";
-    case "active":
-      return "계정 사용 중";
-    case "inactive":
-      return "계정 비활성";
-    case "pending_registration":
-      return "등록 대기";
-    default:
-      return "초대 중";
-  }
-}
 
 const EMPLOYMENT_ORDER: StaffEmploymentStatus[] = ["employed", "on_leave", "resigned"];
 const MEMO_MAX = 200;
@@ -76,8 +37,12 @@ type StaffFormSheetProps = {
   jobTitles: AcademyOptionItem[];
   onSaveJobTitlesAction: (items: { id?: string; label: string }[]) => Promise<AcademyOptionItem[]>;
   jobTitleUsage: Record<string, number>;
+  /** null이면 멤버 초대/권한 관리 권한 없음 — 계정 영역은 상태만 표시 */
+  roles: StaffRoleOption[] | null;
   onCloseAction: () => void;
   onSavedAction: (message: string) => void;
+  /** 초대 링크 발급·취소처럼 시트를 열어 둔 채 목록만 새로고침 */
+  onListChangedAction: (message: string) => void;
 };
 
 /** 직원 추가·수정 전체 화면 시트 — 계정 초대·권한은 멤버 관리에서 */
@@ -87,8 +52,10 @@ export function StaffFormSheet({
   jobTitles,
   onSaveJobTitlesAction,
   jobTitleUsage,
+  roles,
   onCloseAction,
   onSavedAction,
+  onListChangedAction,
 }: StaffFormSheetProps) {
   useBodyScrollLock(true);
   const [displayName, setDisplayName] = useState(target?.displayName ?? "");
@@ -295,13 +262,18 @@ export function StaffFormSheet({
             </div>
 
             {target ? (
-              <div className="rounded-2xl border border-neutral-200/80 bg-white/40 px-4 py-3 text-xs text-neutral-600">
-                <p>
-                  계정: <span className="font-medium text-foreground">{staffAccountLabel(target.accountStatus)}</span>
-                </p>
-                <p className="mt-1 text-neutral-500">계정 초대와 권한은 멤버 관리에서 설정합니다.</p>
-              </div>
-            ) : null}
+              <StaffAccountSection
+                academyId={academyId}
+                target={target}
+                roles={roles}
+                onChangedAction={onListChangedAction}
+                onAccountCreatedAction={onSavedAction}
+              />
+            ) : (
+              <p className="text-xs text-neutral-500">
+                저장한 뒤 직원을 다시 열면 초대 링크를 보내거나 계정을 직접 만들 수 있습니다.
+              </p>
+            )}
 
             {error ? (
               <p className="text-sm text-red-700" role="alert">

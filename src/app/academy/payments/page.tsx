@@ -1,6 +1,5 @@
 "use client";
 
-import { onAuthStateChanged } from "firebase/auth";
 import {
   collection,
   onSnapshot,
@@ -21,9 +20,8 @@ import {
   type AcademyPaymentStatus,
 } from "@/lib/firebase/attn-schema";
 import { getFirebaseAuth, getFirebaseDb } from "@/lib/firebase/client-app";
-import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
-import { fetchIsOwner } from "@/lib/firebase/owner-profile";
+import { usePermissions } from "@/lib/academy/use-permissions";
 
 const glassCard = "glass-card";
 
@@ -92,8 +90,10 @@ function AcademyPaymentsInner() {
   const searchParams = useSearchParams();
   const { profile: authProfile } = useAuthProfile();
   const academyId = searchParams.get("id")?.trim() ?? "";
+  const { loading: permissionLoading, can } = usePermissions(academyId || null);
+  const allowed = can("billing.payments");
+  const canRefund = can("billing.refunds");
 
-  const [gate, setGate] = useState<"loading" | "auth" | "forbidden" | "ok">("loading");
   const [year, setYear] = useState(() => nowKST().year);
   const [month, setMonth] = useState(() => nowKST().month);
   const [rows, setRows] = useState<PaymentRow[]>([]);
@@ -103,39 +103,7 @@ function AcademyPaymentsInner() {
   const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isFirebaseConfigured()) {
-      setGate("auth");
-      return;
-    }
-    const auth = getFirebaseAuth();
-    return onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        setGate("auth");
-        return;
-      }
-      if (!academyId) {
-        setGate("forbidden");
-        return;
-      }
-      try {
-        const token = await user.getIdTokenResult();
-        const role = token.claims.role;
-        const claimAcademy = token.claims.academyId;
-        const isPortal = role === "academy" && claimAcademy === academyId;
-        const ownerOk = role !== "academy" && (await fetchIsOwner(user.uid));
-        if (!isPortal && !ownerOk) {
-          setGate("forbidden");
-          return;
-        }
-        setGate("ok");
-      } catch {
-        setGate("forbidden");
-      }
-    });
-  }, [academyId]);
-
-  useEffect(() => {
-    if (gate !== "ok" || !academyId) return;
+    if (!allowed || !academyId) return;
     setLoadingRows(true);
     setLoadError(null);
     const db = getFirebaseDb();
@@ -159,7 +127,7 @@ function AcademyPaymentsInner() {
       },
     );
     return () => unsub();
-  }, [gate, academyId, year, month]);
+  }, [allowed, academyId, year, month]);
 
   const goMonth = useCallback(
     (delta: -1 | 1) => {
@@ -211,7 +179,7 @@ function AcademyPaymentsInner() {
     [academyId, cancellingId],
   );
 
-  if (gate === "loading") {
+  if (academyId && permissionLoading) {
     return (
       <div className="min-h-[100dvh] bg-background flex items-center justify-center">
         <p className="text-sm text-neutral-500">불러오는 중…</p>
@@ -219,12 +187,7 @@ function AcademyPaymentsInner() {
     );
   }
 
-  if (gate === "auth") {
-    router.replace("/login");
-    return null;
-  }
-
-  if (gate === "forbidden" || !academyId) {
+  if (!academyId || !allowed) {
     return (
       <div className="min-h-[100dvh] bg-background px-4 py-16 flex flex-col items-center justify-center">
         <p className="text-sm text-neutral-600 text-center">결제 내역에 접근할 수 없습니다.</p>
@@ -337,7 +300,7 @@ function AcademyPaymentsInner() {
                     취소일시 {fmtDateTime(r.cancelledAt)}
                   </p>
                 ) : null}
-                {r.status === "PAID" ? (
+                {r.status === "PAID" && canRefund ? (
                   <button
                     type="button"
                     onClick={() => void onCancel(r.paymentId)}

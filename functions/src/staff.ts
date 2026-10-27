@@ -7,6 +7,7 @@ import { DEFAULT_STAFF_ROLE_ID, normalizePermissionList } from "./lib/permission
 import { staffAccountChangeViolation } from "./lib/role-policy";
 import { academyOptionsRef, readOptionItems } from "./academy-options";
 import { deactivateStaffAccount } from "./teachers";
+import { clearStaffInvite } from "./staff-invites";
 
 /**
  * 설정 › 직원 관리 — `academies/{academyId}/staff/{staffId}`의 인사 정보.
@@ -154,6 +155,10 @@ export const saveStaffMember = onCall(async (request) => {
   if (deactivateAccount) {
     await deactivateStaffAccount(db, academyId, staffId);
   }
+  const inviteTokenHash = snap.get("inviteTokenHash");
+  if (becomesResigned && typeof inviteTokenHash === "string" && inviteTokenHash) {
+    await clearStaffInvite(db, ref, inviteTokenHash);
+  }
   return { ok: true as const, staffId, accountDeactivated: deactivateAccount };
 });
 
@@ -178,6 +183,10 @@ export const deleteStaffMember = onCall(async (request) => {
       "failed-precondition",
       "계정이 있는 직원은 삭제할 수 없습니다. 퇴사 처리한 뒤 멤버 관리에서 계정을 정리해 주세요.",
     );
+  }
+  const inviteTokenHash = snap.get("inviteTokenHash");
+  if (typeof inviteTokenHash === "string" && inviteTokenHash) {
+    await db.doc(`staffInvites/${inviteTokenHash}`).delete();
   }
   await ref.delete();
   return { ok: true as const };

@@ -12,7 +12,6 @@ import {
 import { ROLE_TEMPLATES } from "../lib/lib/permissions.js";
 
 const owner = { kind: "owner" };
-const portal = { kind: "portal" };
 /** settings.members + 원생 관리만 가진 직원, 본인 역할은 "custom-members" */
 const staff = {
   kind: "staff",
@@ -22,8 +21,8 @@ const staff = {
 };
 
 describe("roleSaveViolation", () => {
-  it("원장·포털은 어떤 권한이든 만들고 고친다", () => {
-    for (const actor of [owner, portal]) {
+  it("원장은 어떤 권한이든 만들고 고친다", () => {
+    for (const actor of [owner]) {
       assert.equal(
         roleSaveViolation(actor, {
           roleId: "superAdmin",
@@ -192,7 +191,7 @@ describe("staffAccountChangeViolation (비활성·삭제·임시 비밀번호·�
     );
   });
 
-  it("범위 안의 직원 계정은 바꿀 수 있고, 원장·포털은 제한 없다", () => {
+  it("범위 안의 직원 계정은 바꿀 수 있고, 원장은 제한 없다", () => {
     assert.equal(
       staffAccountChangeViolation(staff, {
         staffId: "staff-2",
@@ -200,7 +199,7 @@ describe("staffAccountChangeViolation (비활성·삭제·임시 비밀번호·�
       }),
       null,
     );
-    for (const actor of [owner, portal]) {
+    for (const actor of [owner]) {
       assert.equal(
         staffAccountChangeViolation(actor, {
           staffId: "staff-2",

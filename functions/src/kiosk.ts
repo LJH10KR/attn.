@@ -30,9 +30,8 @@ async function assertAcademyKioskSession(
   db: admin.firestore.Firestore,
   academyId: string,
   uid: string,
-  token: admin.auth.DecodedIdToken,
 ): Promise<void> {
-  const actor = await resolveAcademyActor(db, academyId, uid, token);
+  const actor = await resolveAcademyActor(db, academyId, uid);
   if (!actor || !actorHasPermission(actor, "lessons.attendance")) {
     throw new HttpsError("permission-denied", "출석 키오스크를 사용할 권한이 없습니다.");
   }
@@ -160,7 +159,7 @@ export const verifyKioskExitPin = onCall(async (request) => {
   }
   const pin = assertFourDigitPin(request.data?.pin, "키오스크 종료 PIN");
   const db = admin.firestore();
-  await assertAcademyKioskSession(db, academyId, request.auth.uid, request.auth.token);
+  await assertAcademyKioskSession(db, academyId, request.auth.uid);
 
   const ref = kioskSettingsRef(db, academyId);
   const snap = await ref.get();
@@ -229,7 +228,7 @@ export const submitKioskCheckIn = onCall(async (request) => {
     throw new HttpsError("invalid-argument", "요청이 올바르지 않습니다.");
   }
   const db = admin.firestore();
-  await assertAcademyKioskSession(db, academyId, request.auth.uid, request.auth.token);
+  await assertAcademyKioskSession(db, academyId, request.auth.uid);
 
   const studentRef = db.doc(`academies/${academyId}/students/${studentId}`);
   const studentSnap = await studentRef.get();

@@ -1,6 +1,5 @@
 "use client";
 
-import { onAuthStateChanged } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -10,12 +9,10 @@ import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import type { AcademyKioskSettingsPublic } from "@/lib/firebase/attn-schema";
-import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
-import { isFirebaseConfigured } from "@/lib/firebase/config";
+import { getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
-import { fetchIsOwner } from "@/lib/firebase/owner-profile";
+import { usePermissions } from "@/lib/academy/use-permissions";
 import { FirebaseError } from "firebase/app";
-import { AcademyPortalPasswordSettingsCard } from "@/components/account/password-settings-cards";
 import { SlideSwitch } from "@/components/ui/slide-switch";
 import { SettingsAccordionItem } from "@/components/ui/settings-accordion-item";
 import { OwnerTuitionSettingsCard } from "@/components/owner/owner-tuition-settings-card";
@@ -32,7 +29,8 @@ function AcademySettingsInner() {
   const searchParams = useSearchParams();
   const { profile: authProfile } = useAuthProfile();
   const academyId = searchParams.get("id")?.trim() ?? "";
-  const [gate, setGate] = useState<"loading" | "auth" | "forbidden" | "ok">("loading");
+  const { loading: permissionLoading, can } = usePermissions(academyId || null);
+  const allowed = can("settings.general");
   const [settings, setSettings] = useState<AcademyKioskSettingsPublic | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -57,37 +55,8 @@ function AcademySettingsInner() {
   }, [academyId]);
 
   useEffect(() => {
-    if (!isFirebaseConfigured()) {
-      setGate("auth");
-      return;
-    }
-    const auth = getFirebaseAuth();
-    return onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        setGate("auth");
-        return;
-      }
-      if (!academyId) {
-        setGate("forbidden");
-        return;
-      }
-      try {
-        const token = await user.getIdTokenResult();
-        const role = token.claims.role;
-        const claimAcademy = token.claims.academyId;
-        const isPortal = role === "academy" && claimAcademy === academyId;
-        const ownerOk = role !== "academy" && (await fetchIsOwner(user.uid));
-        if (!isPortal && !ownerOk) {
-          setGate("forbidden");
-          return;
-        }
-        setGate("ok");
-        await loadSettings();
-      } catch {
-        setGate("forbidden");
-      }
-    });
-  }, [academyId, loadSettings]);
+    if (allowed) void loadSettings();
+  }, [allowed, loadSettings]);
 
   const updateSettings = useCallback(
     async (
@@ -122,7 +91,7 @@ function AcademySettingsInner() {
     [academyId],
   );
 
-  if (gate === "loading") {
+  if (academyId && permissionLoading) {
     return (
       <div className="min-h-[100dvh] bg-background flex items-center justify-center">
         <p className="text-sm text-neutral-500">불러오는 중…</p>
@@ -130,12 +99,7 @@ function AcademySettingsInner() {
     );
   }
 
-  if (gate === "auth") {
-    router.replace("/login");
-    return null;
-  }
-
-  if (gate === "forbidden" || !academyId) {
+  if (!academyId || !allowed) {
     return (
       <div className="min-h-[100dvh] bg-background px-4 py-16 flex flex-col items-center justify-center">
         <p className="text-sm text-neutral-600 text-center">학원 설정에 접근할 수 없습니다.</p>
@@ -179,8 +143,6 @@ function AcademySettingsInner() {
         {toast ? (
           <p className="text-sm text-center text-neutral-600 dark:text-neutral-400">{toast}</p>
         ) : null}
-
-        <AcademyPortalPasswordSettingsCard academyId={academyId} disabled={busy} defaultCollapsed />
 
         <SettingsAccordionItem title="키오스크 종료 PIN">
           <p className="text-xs text-neutral-500 dark:text-neutral-400">

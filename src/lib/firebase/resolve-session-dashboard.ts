@@ -191,9 +191,6 @@ async function resolveKnownSessionDashboardPath(user: User): Promise<string | nu
 
   const decisionPromise = (async (): Promise<string | null> => {
     const { claims } = await user.getIdTokenResult();
-    if (claims.role === "academy") {
-      return "/academy";
-    }
     if (claims.membershipStatus === "pending_email_verification") {
       return claims.role === "parent" ? "/login/parent" : null;
     }

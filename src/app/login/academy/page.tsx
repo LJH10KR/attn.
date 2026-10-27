@@ -1,19 +1,6 @@
-import type { Metadata } from "next";
-import { Suspense } from "react";
-import { LoginForm } from "../login-form";
-import { LoginSessionAutoRedirect } from "../login-session-auto-redirect";
-import { LoginSuspenseFallback } from "../login-suspense-fallback";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = {
-  title: "학원 로그인 — attn.",
-  description: "attn. 학원 포털 로그인",
-};
-
+/** 학원 포털 공용 로그인 폐지 — 예전 주소로 들어오면 로그인 선택 화면으로 */
 export default function AcademyLoginPage() {
-  return (
-    <Suspense fallback={<LoginSuspenseFallback />}>
-      <LoginSessionAutoRedirect />
-      <LoginForm fixedRole="academy" />
-    </Suspense>
-  );
+  redirect("/login");
 }

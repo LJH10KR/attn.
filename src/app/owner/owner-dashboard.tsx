@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { FirebaseError } from "firebase/app";
 import { httpsCallable } from "firebase/functions";
@@ -95,8 +95,6 @@ export function OwnerDashboard() {
   const [editTarget, setEditTarget] = useState<AcademyRow | null>(null);
   const [formName, setFormName] = useState("");
   const [formStatus, setFormStatus] = useState<"active" | "archived">("active");
-  const [editPortalPassword, setEditPortalPassword] = useState("");
-  const [editPortalPassword2, setEditPortalPassword2] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<AcademyRow | null>(null);
   const [registrationOpen, setRegistrationOpen] = useState(false);
   const [registrationVariant, setRegistrationVariant] = useState<"first" | "add">("add");
@@ -280,8 +278,6 @@ export function OwnerDashboard() {
     setEditTarget(row);
     setFormName(row.name);
     setFormStatus(row.status === "archived" ? "archived" : "active");
-    setEditPortalPassword("");
-    setEditPortalPassword2("");
     setModal("edit");
   }, []);
 
@@ -306,18 +302,7 @@ export function OwnerDashboard() {
       setFormError("학원 이름을 입력해 주세요.");
       return;
     }
-    const wantsPwChange =
-      editPortalPassword.length > 0 || editPortalPassword2.length > 0;
-    if (wantsPwChange) {
-      if (editPortalPassword.length < 6) {
-        setFormError("새 포털 비밀번호는 6자 이상이어야 합니다.");
-        return;
-      }
-      if (editPortalPassword !== editPortalPassword2) {
-        setFormError("새 포털 비밀번호가 서로 일치하지 않습니다.");
-        return;
-      }
-    }
+
     setBusy(true);
     setFormError(null);
     try {
@@ -327,16 +312,7 @@ export function OwnerDashboard() {
         status: formStatus,
         updatedAt: serverTimestamp(),
       });
-      if (wantsPwChange) {
-        const pwFn = httpsCallable(
-          getFirebaseFunctions(),
-          "updateAcademyPortalPassword",
-        );
-        await pwFn({
-          academyId: editTarget.id,
-          portalPassword: editPortalPassword,
-        });
-      }
+
       refreshAcademies();
       closeModal();
     } catch (err) {
@@ -350,8 +326,6 @@ export function OwnerDashboard() {
     }
   }, [
     closeModal,
-    editPortalPassword,
-    editPortalPassword2,
     editTarget,
     formName,
     formStatus,
@@ -507,7 +481,7 @@ export function OwnerDashboard() {
                       {a.name}
                     </p>
                     <p className="mt-1 font-mono text-[10px] text-neutral-400">
-                      로그인 번호 · {a.attnId ?? a.id}
+                      학원 번호 · {a.attnId ?? a.id}
                     </p>
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
                       <span
@@ -589,7 +563,7 @@ export function OwnerDashboard() {
               {editTarget ? (
                 <div>
                   <p className="mb-1 text-xs font-medium text-neutral-600">
-                    학원 로그인 번호
+                    학원 번호
                   </p>
                   <p className="rounded-2xl border border-neutral-200/80 bg-white/40 px-4 py-3 font-mono text-sm text-foreground">
                     {editTarget.attnId ?? editTarget.id}
@@ -615,27 +589,6 @@ export function OwnerDashboard() {
                   maxLength={80}
                 />
               </div>
-              <>
-                <p className="text-xs font-medium text-neutral-600">
-                  포털 비밀번호 변경 (선택)
-                </p>
-                <input
-                  type="password"
-                  value={editPortalPassword}
-                  onChange={(e) => setEditPortalPassword(e.target.value)}
-                  className={inputClass}
-                  placeholder="변경 시에만 입력 (6자 이상)"
-                  autoComplete="new-password"
-                />
-                <input
-                  type="password"
-                  value={editPortalPassword2}
-                  onChange={(e) => setEditPortalPassword2(e.target.value)}
-                  className={inputClass}
-                  placeholder="새 비밀번호 확인"
-                  autoComplete="new-password"
-                />
-              </>
               <div>
                 <label
                   className="mb-1 block text-xs font-medium text-neutral-600"

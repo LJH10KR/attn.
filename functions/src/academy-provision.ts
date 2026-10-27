@@ -7,23 +7,14 @@ import {
   formatAcademyAttnId,
   formatOwnerAttnId,
   formatParentAttnId,
-  formatTeacherAttnId,
 } from "./lib/attn-id";
 import { assertPermission } from "./lib/academy-access";
 import { ensureAcademyRoleTemplates } from "./roles";
 import {
   provisionMemberAccount,
   provisionTemplateStudentsForParent,
-  type ProvisionedMember,
 } from "./lib/member-credentials";
 import { pickTemplateDisplayNameUnique } from "./lib/korean-template-names";
-
-type IssuedCredential = {
-  attnId: string;
-  displayName: string;
-  tempPassword: string;
-  role: "academy" | "teacher" | "parent";
-};
 
 async function ensureOwnerAttnSeq(
   db: admin.firestore.Firestore,
@@ -82,7 +73,7 @@ function clampCount(raw: unknown, max: number, label: string): number {
   return Math.floor(n);
 }
 
-/** 오너 — 학원 1개 생성 (이름·비밀번호만) */
+/** 오너 — 학원 1개 생성(이름만). 원장·직원은 각자 계정으로 로그인(학원 공용 로그인 없음) */
 export const createAcademyEasy = onCall(async (request) => {
   const uid = request.auth?.uid;
   if (!uid) {
@@ -90,13 +81,8 @@ export const createAcademyEasy = onCall(async (request) => {
   }
 
   const name = typeof request.data?.name === "string" ? request.data.name.trim() : "";
-  const portalPassword =
-    typeof request.data?.portalPassword === "string" ? request.data.portalPassword : "";
   if (!name || name.length > 80) {
     throw new HttpsError("invalid-argument", "학원 이름을 1~80자로 입력해 주세요.");
-  }
-  if (portalPassword.length < 6) {
-    throw new HttpsError("invalid-argument", "학원 비밀번호는 6자 이상이어야 합니다.");
   }
 
   const db = admin.firestore();
@@ -117,7 +103,6 @@ export const createAcademyEasy = onCall(async (request) => {
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   });
-  await db.doc(`academies/${academyId}/secrets/login`).set({ portalPassword });
   await db.doc(academySeqMetaPath(academyId)).set({
     nextTeacherSeq: 1,
     nextParentSeq: 1,
@@ -128,86 +113,8 @@ export const createAcademyEasy = onCall(async (request) => {
     academyId,
     attnId: academyId,
     name,
-    portalPassword,
   };
 });
-
-async function runProvisionTemplateTeachers(request: {
-  auth?: { uid?: string; token?: Record<string, unknown> };
-  data?: Record<string, unknown>;
-}) {
-  if (!request.auth?.uid) {
-    throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
-  }
-  const { uid, token } = request.auth;
-  const academyId =
-    typeof request.data?.academyId === "string" ? request.data.academyId.trim() : "";
-  const count = clampCount(request.data?.count, 50, "선생님 수");
-  if (!academyId) {
-    throw new HttpsError("invalid-argument", "학원 ID가 필요합니다.");
-  }
-
-  const db = admin.firestore();
-  await assertPermission(db, academyId, uid, token as admin.auth.DecodedIdToken, "settings.members");
-
-  if (count === 0) {
-    return { teachers: [] as Array<{
-      attnId: string;
-      displayName: string;
-      tempPassword: string;
-      authUid: string;
-    }> };
-  }
-
-  const issued: IssuedCredential[] = [];
-
-  await db.runTransaction(async (tx) => {
-    const seqRef = db.doc(academySeqMetaPath(academyId));
-    const seqSnap = await tx.get(seqRef);
-    let nextTeacherSeq = (seqSnap.get("nextTeacherSeq") as number) || 1;
-
-    for (let i = 0; i < count; i++) {
-      const teacherSeq = nextTeacherSeq;
-      nextTeacherSeq += 1;
-      const attnId = formatTeacherAttnId(academyId, teacherSeq);
-      issued.push({
-        attnId,
-        displayName: attnId,
-        tempPassword: "",
-        role: "teacher",
-      });
-    }
-
-    tx.set(seqRef, { nextTeacherSeq }, { merge: true });
-  });
-
-  const members: ProvisionedMember[] = [];
-  for (const row of issued) {
-    const m = await provisionMemberAccount({
-      db,
-      academyId,
-      attnId: row.attnId,
-      role: "teacher",
-      displayName: row.attnId,
-    });
-    members.push(m);
-  }
-
-  return {
-    teachers: members.map((m) => ({
-      attnId: m.attnId,
-      loginId: m.loginId,
-      displayName: m.displayName,
-      tempPassword: m.tempPassword,
-      authUid: m.authUid,
-    })),
-  };
-}
-
-/** 오너/학원 — 템플릿 선생님 N명 */
-export const provisionTemplateTeachers = onCall(async (request) =>
-  runProvisionTemplateTeachers(request),
-);
 
 /** 오너/학원 — 템플릿 학부모 N명 + 부모당 자녀 2명 */
 async function runProvisionTemplateParents(request: {
@@ -290,11 +197,7 @@ export const provisionTemplateParents = onCall(async (request) =>
   runProvisionTemplateParents(request),
 );
 
-/** 학원 — 선생님/학부모 추가 발급 (대시보드) */
-export const provisionTeachersBatch = onCall(async (request) =>
-  runProvisionTemplateTeachers(request),
-);
-
+/** 학원 — 학부모 추가 발급 (대시보드) */
 export const provisionParentsBatch = onCall(async (request) =>
   runProvisionTemplateParents(request),
 );

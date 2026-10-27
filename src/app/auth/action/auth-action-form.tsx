@@ -15,12 +15,12 @@ import { getFirebaseAuth } from "@/lib/firebase/client-app";
 
 /**
  * Firebase 액션 링크의 continueUrl에서 초청 완료 페이지 경로(+쿼리) 복원.
- * 선생님·학부모 모두 Functions에서 동일한 방식으로 continueUrl을 넣으므로 둘 다 허용합니다.
+ * 선생님 이메일 초청은 폐지(초대 링크로 대체) — 학부모 이메일 초청만 남음.
  */
 function inviteCompleteHref(searchParams: URLSearchParams): string {
   const enc = searchParams.get("continueUrl");
   if (!enc) {
-    return "/teacher/complete";
+    return "/parent/complete";
   }
   try {
     const decoded = decodeURIComponent(enc);
@@ -28,13 +28,13 @@ function inviteCompleteHref(searchParams: URLSearchParams): string {
       typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1:3000";
     const u = new URL(decoded, base);
     const path = u.pathname.replace(/\/$/, "") || "/";
-    if (path.endsWith("/teacher/complete") || path.endsWith("/parent/complete")) {
+    if (path.endsWith("/parent/complete")) {
       return `${path}${u.search}`;
     }
   } catch {
     /* ignore */
   }
-  return "/teacher/complete";
+  return "/parent/complete";
 }
 
 function messageFromFirebase(err: unknown): string {

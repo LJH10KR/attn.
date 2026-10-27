@@ -274,11 +274,9 @@ export function AcademyDashboard() {
   const [academyId, setAcademyId] = useState<string | null>(null);
   const [academyName, setAcademyName] = useState<string | null>(null);
   const [showBack, setShowBack] = useState(false);
-  /** 학원 ID·비밀번호 포털 로그인(커스텀 토큰) 세션 ? 오너 대시보드에서 연 경로와 구분 */
-  const [isAcademyPortalSession, setIsAcademyPortalSession] = useState(false);
   const { logout: onDashboardLogout, logoutBusy, logoutModal } = useRoleLogout({
-    redirectTo: isAcademyPortalSession ? "/login/academy" : "/login",
-    role: isAcademyPortalSession ? "academy" : "generic",
+    redirectTo: "/login",
+    role: "generic",
     extraBadgeUserIds: academyId ? [`academy:${academyId}`] : [],
   });
   const [summaryCounts, setSummaryCounts] =
@@ -505,38 +503,8 @@ export function AcademyDashboard() {
       return;
     }
 
-    let token;
-    try {
-      token = await user.getIdTokenResult(true);
-    } catch {
-      setGate("forbidden");
-      return;
-    }
-
-    const claims = token.claims as { role?: string; academyId?: string };
-    const isPortal = claims.role === "academy";
-    const portalAcademyId =
-      typeof claims.academyId === "string" ? claims.academyId : "";
-
-    if (isPortal && portalAcademyId) {
-      setAcademyId(portalAcademyId);
-      setShowBack(false);
-      setIsAcademyPortalSession(true);
-      try {
-        const snap = await getDoc(
-          doc(getFirebaseDb(), COLLECTIONS.academies, portalAcademyId),
-        );
-        const data = snap.data() as Academy | undefined;
-        setAcademyName(typeof data?.name === "string" ? data.name : null);
-      } catch {
-        setAcademyName(null);
-      }
-      setGate("ready");
-      return;
-    }
-
-    if (fromOwner && queryAcademyId) {
-      setIsAcademyPortalSession(false);
+    // 학원 포털 공용 로그인 폐지 — 지금은 원장만(권한 위임 직원의 진입은 5탭 전환 때)
+    if (queryAcademyId) {
       try {
         const snap = await getDoc(
           doc(getFirebaseDb(), COLLECTIONS.academies, queryAcademyId),
@@ -552,7 +520,7 @@ export function AcademyDashboard() {
         }
         setAcademyId(queryAcademyId);
         setAcademyName(typeof data?.name === "string" ? data.name : null);
-        setShowBack(true);
+        setShowBack(fromOwner);
         setGate("ready");
       } catch {
         setGate("forbidden");
@@ -560,10 +528,8 @@ export function AcademyDashboard() {
       return;
     }
 
-    setIsAcademyPortalSession(false);
     router.replace("/owner");
   }, [configured, fromOwner, queryAcademyId, router]);
-
   const onBackToOwner = useCallback(() => {
     // 오너 대시보드에서 진입한 경우엔 히스토리 복귀가 가장 저부하.
     if (typeof window !== "undefined" && window.history.length > 1) {

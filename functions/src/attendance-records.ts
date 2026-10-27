@@ -138,10 +138,10 @@ export async function upsertTodayAttendanceRecord(
   });
 }
 
-/** 학원 화면의 작업 주체 → 기록자 역할(포털 세션은 academy, 권한을 위임받은 직원은 teacher) */
+/** 학원 화면의 작업 주체 → 기록자 역할(권한을 위임받은 직원은 teacher) */
 export function academySenderForActor(actor: AcademyActor): AttendanceSender {
   return {
-    role: actor.kind === "portal" ? "academy" : actor.kind === "staff" ? "teacher" : "owner",
+    role: actor.kind === "staff" ? "teacher" : "owner",
     actorUid: actor.uid,
     source: "academy_dashboard",
     canBypassCooldown: false,
