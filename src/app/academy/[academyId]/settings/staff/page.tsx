@@ -1,23 +1,17 @@
 "use client";
 
 import { collection, getDocs } from "firebase/firestore";
-import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
+import { useAcademyShell } from "@/components/academy/academy-shell";
 import { StaffFormSheet } from "@/components/academy/staff-form-sheet";
 import { docToStaffRow, staffAccountLabel, type StaffRowVM } from "@/lib/academy/staff-row";
-import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
-import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
-import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import type { PermissionViewer } from "@/lib/academy/role-policy";
 import { useAcademyOptionList } from "@/lib/academy/use-academy-option-list";
 import { useAcademyRoles } from "@/lib/academy/use-academy-roles";
-import { usePermissions } from "@/lib/academy/use-permissions";
 import { academyStaffPath, STAFF_EMPLOYMENT_STATUS_LABELS } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
-import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { formatKrPhoneDisplay, phoneMatchesSearch } from "@/lib/phone/kr-phone";
 
 const glassCard = "glass-card";
@@ -245,75 +239,14 @@ function StaffListInner({
   );
 }
 
-function AcademyStaffInner() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const { profile: authProfile } = useAuthProfile();
-  const academyId = searchParams.get("id")?.trim() ?? "";
-  const { loading, can, viewer } = usePermissions(academyId || null);
-  const canManageMembers = can("settings.members");
-  const backHref = `/academy?id=${encodeURIComponent(academyId)}`;
-
-  if (academyId && loading) {
-    return (
-      <div className="min-h-[100dvh] bg-background flex items-center justify-center">
-        <p className="text-sm text-neutral-500">불러오는 중…</p>
-      </div>
-    );
-  }
-
-  if (!academyId || !can("settings.staff")) {
-    return (
-      <div className="min-h-[100dvh] bg-background px-4 py-16 flex flex-col items-center justify-center">
-        <p className="text-sm text-neutral-600 text-center">직원 관리에 접근할 권한이 없습니다.</p>
-        <Link href="/academy" className="mt-4 text-sm underline">
-          대시보드로
-        </Link>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-[100dvh] bg-background pb-28">
-      <DashboardRoleHeader
-        title="직원 관리"
-        affiliationLabel="설정"
-        profile={authProfile}
-        showBack
-        onBackAction={() => router.back()}
-        backAriaLabel="학원 대시보드로"
-        onHomeAction={() => router.push("/")}
-        onLogoutAction={() => router.push(backHref)}
-        logoutLabel="닫기"
-        bottomTabs={[
-          {
-            id: "home",
-            label: "요약",
-            showLabel: false,
-            iconAction: (active: boolean) => <HomeTabIcon active={active} />,
-            active: true,
-            onSelectAction: () => router.push(backHref),
-          },
-        ]}
-      />
-      <main className="mx-auto max-w-lg px-4 pt-[26px]">
-        <StaffListInner academyId={academyId} canManageMembers={canManageMembers} viewer={viewer} />
-      </main>
-      <DashboardBottomScrim />
-    </div>
-  );
-}
-
+/** 설정 › 직원 관리 — 권한(`settings.staff`) 확인은 학원 공통 레이아웃이 한다 */
 export default function AcademyStaffPage() {
+  const { academyId, permissions } = useAcademyShell();
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-[100dvh] bg-background flex items-center justify-center">
-          <p className="text-sm text-neutral-500">불러오는 중…</p>
-        </div>
-      }
-    >
-      <AcademyStaffInner />
-    </Suspense>
+    <StaffListInner
+      academyId={academyId}
+      canManageMembers={permissions.can("settings.members")}
+      viewer={permissions.viewer}
+    />
   );
 }

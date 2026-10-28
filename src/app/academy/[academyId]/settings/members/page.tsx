@@ -1,26 +1,21 @@
 "use client";
 
 import { collection, getDocs } from "firebase/firestore";
-import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useCallback, useMemo, useState } from "react";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
+import { useAcademyShell } from "@/components/academy/academy-shell";
 import { MemberInviteSheet } from "@/components/academy/member-invite-sheet";
 import { MemberSheet } from "@/components/academy/member-sheet";
 import { RoleFormSheet } from "@/components/academy/role-form-sheet";
-import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
-import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
-import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { ACADEMY_PERMISSION_GROUPS } from "@/lib/academy/permissions";
 import { canChangeStaffAccount, type PermissionViewer } from "@/lib/academy/role-policy";
 import { docToStaffRow, type StaffRowVM } from "@/lib/academy/staff-row";
 import { useAcademyOptionList } from "@/lib/academy/use-academy-option-list";
 import { useAcademyRoles, type AcademyRoleVM } from "@/lib/academy/use-academy-roles";
-import { usePermissions } from "@/lib/academy/use-permissions";
 import { academyStaffPath, type StaffAccountStatus } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
-import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 
 const glassCard = "glass-card";
 
@@ -413,80 +408,21 @@ function MembersInner({
   );
 }
 
-function AcademyMembersInner() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const { profile: authProfile } = useAuthProfile();
-  const academyId = searchParams.get("id")?.trim() ?? "";
-  const initialTab: PageTab = searchParams.get("tab") === "roles" ? "roles" : "members";
-  const { loading, can, viewer } = usePermissions(academyId || null);
-  const backHref = `/academy?id=${encodeURIComponent(academyId)}`;
-
-  if (academyId && loading) {
-    return (
-      <div className="min-h-[100dvh] bg-background flex items-center justify-center">
-        <p className="text-sm text-neutral-500">불러오는 중…</p>
-      </div>
-    );
-  }
-
-  if (!academyId || !viewer || !can("settings.members")) {
-    return (
-      <div className="min-h-[100dvh] bg-background px-4 py-16 flex flex-col items-center justify-center">
-        <p className="text-sm text-neutral-600 text-center">멤버 초대/권한 관리에 접근할 권한이 없습니다.</p>
-        <Link href="/academy" className="mt-4 text-sm underline">
-          대시보드로
-        </Link>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-[100dvh] bg-background pb-28">
-      <DashboardRoleHeader
-        title="멤버 초대/권한 관리"
-        affiliationLabel="설정"
-        profile={authProfile}
-        showBack
-        onBackAction={() => router.back()}
-        backAriaLabel="학원 대시보드로"
-        onHomeAction={() => router.push("/")}
-        onLogoutAction={() => router.push(backHref)}
-        logoutLabel="닫기"
-        bottomTabs={[
-          {
-            id: "home",
-            label: "요약",
-            showLabel: false,
-            iconAction: (active: boolean) => <HomeTabIcon active={active} />,
-            active: true,
-            onSelectAction: () => router.push(backHref),
-          },
-        ]}
-      />
-      <main className="mx-auto max-w-lg px-4 pt-[26px]">
-        <MembersInner
-          academyId={academyId}
-          viewer={viewer}
-          canEditStaff={can("settings.staff")}
-          initialTab={initialTab}
-        />
-      </main>
-      <DashboardBottomScrim />
-    </div>
-  );
-}
-
+/** 설정 › 멤버 초대/권한 관리 — 권한(`settings.members`) 확인은 학원 공통 레이아웃이 한다 */
 export default function AcademyMembersPage() {
+  const searchParams = useSearchParams();
+  const { academyId, permissions } = useAcademyShell();
+  const initialTab: PageTab = searchParams.get("tab") === "roles" ? "roles" : "members";
+
+  // 레이아웃이 학원 멤버만 통과시키므로 viewer는 항상 있다
+  if (!permissions.viewer) return null;
+
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-[100dvh] bg-background flex items-center justify-center">
-          <p className="text-sm text-neutral-500">불러오는 중…</p>
-        </div>
-      }
-    >
-      <AcademyMembersInner />
-    </Suspense>
+    <MembersInner
+      academyId={academyId}
+      viewer={permissions.viewer}
+      canEditStaff={permissions.can("settings.staff")}
+      initialTab={initialTab}
+    />
   );
 }

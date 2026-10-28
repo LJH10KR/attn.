@@ -44,8 +44,25 @@ export async function loadKioskStudentRows(academyId: string): Promise<KioskStud
   return rows;
 }
 
+const KIOSK_MODE_KEY_PREFIX = "attn_kiosk_mode_";
+
 export function kioskModeStorageKey(academyId: string): string {
-  return `attn_kiosk_mode_${academyId}`;
+  return `${KIOSK_MODE_KEY_PREFIX}${academyId}`;
+}
+
+/** 이 탭에서 키오스크가 켜진 학원 — 없으면 null(다른 학원 주소로 빠져나가는 것을 막을 때 사용) */
+export function activeKioskAcademyId(): string | null {
+  try {
+    for (let i = 0; i < sessionStorage.length; i += 1) {
+      const key = sessionStorage.key(i);
+      if (key?.startsWith(KIOSK_MODE_KEY_PREFIX) && sessionStorage.getItem(key) === "1") {
+        return key.slice(KIOSK_MODE_KEY_PREFIX.length) || null;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
 export function isKioskModeActive(academyId: string): boolean {

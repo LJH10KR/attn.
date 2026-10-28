@@ -1,17 +1,11 @@
 "use client";
 
 import { httpsCallable } from "firebase/functions";
-import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useAcademyShell } from "@/components/academy/academy-shell";
 import { PinPadModal } from "@/components/academy/pin-pad-modal";
-import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
-import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
-import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import type { AcademyKioskSettingsPublic } from "@/lib/firebase/attn-schema";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
-import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
-import { usePermissions } from "@/lib/academy/use-permissions";
 import { FirebaseError } from "firebase/app";
 import { SlideSwitch } from "@/components/ui/slide-switch";
 import { SettingsAccordionItem } from "@/components/ui/settings-accordion-item";
@@ -24,13 +18,9 @@ function callableMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
-function AcademySettingsInner() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const { profile: authProfile } = useAuthProfile();
-  const academyId = searchParams.get("id")?.trim() ?? "";
-  const { loading: permissionLoading, can } = usePermissions(academyId || null);
-  const allowed = can("settings.general");
+/** 설정 › 전체설정 — 권한(`settings.general`) 확인과 키오스크 중 잠금은 학원 공통 레이아웃이 한다 */
+export default function AcademyGeneralSettingsPage() {
+  const { academyId } = useAcademyShell();
   const [settings, setSettings] = useState<AcademyKioskSettingsPublic | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -42,7 +32,6 @@ function AcademySettingsInner() {
   const pendingNewPinRef = useRef<string | null>(null);
 
   const loadSettings = useCallback(async () => {
-    if (!academyId) return;
     setLoadError(null);
     try {
       const fn = httpsCallable(getFirebaseFunctions(), "getAcademyKioskSettings");
@@ -55,15 +44,14 @@ function AcademySettingsInner() {
   }, [academyId]);
 
   useEffect(() => {
-    if (allowed) void loadSettings();
-  }, [allowed, loadSettings]);
+    void loadSettings();
+  }, [loadSettings]);
 
   const updateSettings = useCallback(
     async (
       payload: Record<string, unknown>,
       opts?: { errorTarget?: "toast" | "pinModal" },
     ) => {
-      if (!academyId) return;
       setBusy(true);
       if (opts?.errorTarget !== "pinModal") {
         setToast(null);
@@ -91,52 +79,9 @@ function AcademySettingsInner() {
     [academyId],
   );
 
-  if (academyId && permissionLoading) {
-    return (
-      <div className="min-h-[100dvh] bg-background flex items-center justify-center">
-        <p className="text-sm text-neutral-500">불러오는 중…</p>
-      </div>
-    );
-  }
-
-  if (!academyId || !allowed) {
-    return (
-      <div className="min-h-[100dvh] bg-background px-4 py-16 flex flex-col items-center justify-center">
-        <p className="text-sm text-neutral-600 text-center">학원 설정에 접근할 수 없습니다.</p>
-        <Link href="/academy" className="mt-4 text-sm underline">
-          대시보드로
-        </Link>
-      </div>
-    );
-  }
-
-  const backHref = `/academy?id=${encodeURIComponent(academyId)}`;
-
   return (
-    <div className="min-h-[100dvh] bg-background pb-28">
-      <DashboardRoleHeader
-        title="학원 설정"
-        affiliationLabel="출석 키오스크"
-        profile={authProfile}
-        showBack
-        onBackAction={() => router.back()}
-        backAriaLabel="학원 대시보드로"
-        onHomeAction={() => router.push("/")}
-        onLogoutAction={() => router.push(backHref)}
-        logoutLabel="닫기"
-        bottomTabs={[
-          {
-            id: "home",
-            label: "요약",
-            showLabel: false,
-            iconAction: (active: boolean) => <HomeTabIcon active={active} />,
-            active: true,
-            onSelectAction: () => router.push(backHref),
-          },
-        ]}
-      />
-
-      <main className="mx-auto max-w-lg px-4 pt-[26px] space-y-4">
+    <>
+      <div className="space-y-4">
         {loadError ? (
           <p className="text-sm text-red-600 dark:text-red-400">{loadError}</p>
         ) : null}
@@ -219,7 +164,7 @@ function AcademySettingsInner() {
           disabled={busy}
           defaultCollapsed
         />
-      </main>
+      </div>
 
       <PinPadModal
         open={Boolean(exitPinModal)}
@@ -277,22 +222,6 @@ function AcademySettingsInner() {
           })();
         }}
       />
-
-      <DashboardBottomScrim />
-    </div>
-  );
-}
-
-export default function AcademySettingsPage() {
-  return (
-    <Suspense
-      fallback={
-        <div className="min-h-[100dvh] bg-background flex items-center justify-center">
-          <p className="text-sm text-neutral-500">불러오는 중…</p>
-        </div>
-      }
-    >
-      <AcademySettingsInner />
-    </Suspense>
+    </>
   );
 }

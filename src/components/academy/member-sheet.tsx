@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect } from "react";
 import { StaffAccountSection } from "@/components/academy/staff-account-section";
 import { ModalPortal } from "@/components/ui/modal-portal";
+import { academyMenuPath } from "@/lib/academy/academy-routes";
 import type { PermissionViewer } from "@/lib/academy/role-policy";
 import type { StaffRowVM } from "@/lib/academy/staff-row";
 import type { AcademyRoleVM } from "@/lib/academy/use-academy-roles";
@@ -90,7 +91,7 @@ export function MemberSheet({
                 </dl>
                 {canEditStaff ? (
                   <Link
-                    href={`/academy/settings/staff?id=${encodeURIComponent(academyId)}`}
+                    href={academyMenuPath(academyId, "settings.staff")}
                     className="mt-2 inline-block text-[11px] text-[#4a90e2] underline"
                   >
                     인사 정보는 직원 관리에서 고칠 수 있어요

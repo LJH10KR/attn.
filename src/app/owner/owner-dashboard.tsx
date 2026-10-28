@@ -36,6 +36,7 @@ import { setLastDashboardRoleHint } from "@/lib/auth/last-dashboard-role";
 import { useBootOverlay } from "@/components/boot/boot-overlay";
 import { AcademyRegistrationOverlay } from "@/components/owner/academy-registration-overlay";
 import { attnIdSortKey, compareAttnIdAsc } from "@/lib/attn-id-sort";
+import { academyPath } from "@/lib/academy/academy-routes";
 import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
 
 type AcademyRow = Academy & { id: string };
@@ -499,7 +500,7 @@ export function OwnerDashboard() {
                 </div>
                 <div className="mt-4 flex flex-col gap-2">
                   <Link
-                    href={`/academy?id=${encodeURIComponent(a.id)}&from=owner`}
+                    href={`${academyPath(a.id)}?from=owner`}
                     className="w-full rounded-[8px] bg-[#222] dark:bg-neutral-100 py-2.5 text-center text-xs font-medium text-white dark:text-neutral-950 shadow-sm hover:bg-[#333] dark:hover:bg-white"
                   >
                     학원 대시보드
