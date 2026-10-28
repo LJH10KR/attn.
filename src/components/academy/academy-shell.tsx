@@ -92,8 +92,8 @@ export function AcademyShell({ children }: { children: ReactNode }) {
 
   const permissions = usePermissions(academyId);
   const { actor, can, visibleTabs } = permissions;
-  /** 메뉴 권한이 하나도 없는 직원(기본 "선생님") — 1-F 전까지 선생님 화면 사용 */
-  const staffWithoutMenus = actor === "staff" && permissions.permissions.size === 0;
+  /** 볼 수 있는 메뉴가 하나도 없는 직원(기본 "선생님") — 1-F 전까지 선생님 화면 사용 */
+  const staffWithoutMenus = actor === "staff" && visibleTabs.length === 0;
   const kiosk = useAcademyKiosk(academyId, actor !== null && can(["lessons.attendance", "settings.general"]));
 
   const {

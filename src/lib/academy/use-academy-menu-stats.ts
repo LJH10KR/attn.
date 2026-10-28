@@ -8,6 +8,7 @@ import {
   where,
 } from "firebase/firestore";
 import { useEffect, useState } from "react";
+import { academyMenu } from "@/lib/academy/academy-routes";
 import type { AcademyNavTab, AcademyPermission } from "@/lib/academy/permissions";
 import { kstMonthBounds, nowKST } from "@/lib/academy/kst-month";
 import { docToStaffRow } from "@/lib/academy/staff-row";
@@ -78,12 +79,13 @@ async function loadStaffStats(
 export function useAcademyMenuStats(
   academyId: string,
   tab: AcademyNavTab,
-  can: (p: AcademyPermission) => boolean,
+  can: (required: AcademyPermission | readonly AcademyPermission[]) => boolean,
 ): { stats: AcademyMenuStats } {
   const [state, setState] = useState<{ key: string; stats: AcademyMenuStats } | null>(null);
 
+  // 메뉴를 볼 수 있는 권한(access)과 같은 기준 — 결제 취소 권한만 있어도 결제 내역 건수를 읽는다
   const permitted = (Object.keys(LOADERS) as AcademyPermission[]).filter(
-    (p) => p.startsWith(`${tab}.`) && can(p),
+    (p) => p.startsWith(`${tab}.`) && can(academyMenu(p)?.access ?? p),
   );
   const staffMenu = tab === "settings" && can("settings.staff");
   const membersMenu = tab === "settings" && can("settings.members");

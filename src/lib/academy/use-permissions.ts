@@ -3,8 +3,8 @@
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { visibleAcademyTabs } from "@/lib/academy/academy-routes";
 import {
-  ACADEMY_PERMISSION_GROUPS,
   ACADEMY_PERMISSIONS,
   normalizePermissionList,
   type AcademyNavTab,
@@ -38,7 +38,7 @@ export type AcademyPermissionState = {
   permissions: ReadonlySet<AcademyPermission>;
   /** 배열이면 그중 하나만 있어도 참 */
   can: (required: AcademyPermission | readonly AcademyPermission[]) => boolean;
-  /** 권한이 하나라도 있는 하단 탭(홈 제외) */
+  /** 볼 수 있는 상세 메뉴가 하나라도 있는 하단 탭(홈 제외, `academy-routes.ts`의 메뉴별 access 기준) */
   visibleTabs: AcademyNavTab[];
   /** 본인·더 넓은 권한 대상 버튼을 숨길 때(`role-policy.ts`) — 학원과 무관하면 null */
   viewer: PermissionViewer | null;
@@ -116,13 +116,7 @@ export function usePermissions(academyId: string | null): AcademyPermissionState
     [permissions],
   );
 
-  const visibleTabs = useMemo(
-    () =>
-      ACADEMY_PERMISSION_GROUPS.filter((g) => g.permissions.some((p) => permissions.has(p.key))).map(
-        (g) => g.tab,
-      ),
-    [permissions],
-  );
+  const visibleTabs = useMemo(() => visibleAcademyTabs(can), [can]);
 
   const actor = current?.actor ?? null;
   const uid = current?.uid ?? null;

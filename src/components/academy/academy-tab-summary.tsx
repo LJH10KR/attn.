@@ -10,7 +10,7 @@ import { useAcademyMenuStats } from "@/lib/academy/use-academy-menu-stats";
 export function AcademyTabSummary({ tab }: { tab: AcademyNavTab }) {
   const { academyId, permissions, href } = useAcademyShell();
   const { stats } = useAcademyMenuStats(academyId, tab, permissions.can);
-  const menus = academyTabMenus(tab).menus.filter((m) => permissions.can(m.permission));
+  const menus = academyTabMenus(tab).menus.filter((m) => permissions.can(m.access));
 
   return (
     <AcademySummaryCard

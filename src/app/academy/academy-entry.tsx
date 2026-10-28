@@ -5,7 +5,7 @@ import { collection, doc, getDoc, getDocs, query, where } from "firebase/firesto
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { academyPath } from "@/lib/academy/academy-routes";
+import { academyPath, visibleAcademyTabs } from "@/lib/academy/academy-routes";
 import { activeKioskAcademyId } from "@/lib/academy/kiosk-student-rows";
 import { readLastAcademy } from "@/lib/academy/last-academy";
 import { normalizePermissionList } from "@/lib/academy/permissions";
@@ -19,7 +19,7 @@ import { fetchIsOwner } from "@/lib/firebase/owner-profile";
  * `/academy`로만 들어왔을 때 갈 곳.
  * - 키오스크 중: 키오스크 학원 홈
  * - 원장: 마지막으로 보던 학원(지금도 소유한 경우) → 오너 대시보드와 같은 순서의 첫 학원 → 학원이 없으면 /owner
- * - 직원: 로그인 정보의 소속 학원(메뉴 권한이 없으면 1-F 전까지 /teacher)
+ * - 직원: 로그인 정보의 소속 학원(볼 수 있는 메뉴가 없으면 1-F 전까지 /teacher)
  */
 async function resolveAcademyEntry(user: User): Promise<string | null> {
   const kioskAcademyId = activeKioskAcademyId();
@@ -43,8 +43,10 @@ async function resolveAcademyEntry(user: User): Promise<string | null> {
     const staff = await getDoc(doc(db, COLLECTIONS.academies, claims.academyId, "staff", user.uid)).catch(
       () => null,
     );
-    const hasMenus =
-      staff?.get("status") === "active" && normalizePermissionList(staff.get("permissions")).length > 0;
+    const granted = new Set(
+      staff?.get("status") === "active" ? normalizePermissionList(staff.get("permissions")) : [],
+    );
+    const hasMenus = visibleAcademyTabs((required) => required.some((p) => granted.has(p))).length > 0;
     return hasMenus ? academyPath(claims.academyId) : "/teacher";
   }
 

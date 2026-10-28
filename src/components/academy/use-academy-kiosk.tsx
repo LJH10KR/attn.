@@ -114,9 +114,10 @@ export function useAcademyKiosk(academyId: string, settingsEnabled: boolean): Ac
   );
 
   const requestOn = useCallback(() => {
+    setToast(null);
     void (async () => {
-      // 화면에 들어오자마자 누르면 설정을 아직 못 받았을 수 있음 — 받아 보고 판단
-      const current = settings ?? (await loadSettings());
+      // 레이아웃은 화면을 옮겨도 유지되므로(전체설정에서 PIN 설정·잠금 해제 후 돌아옴) 누를 때마다 새로 받는다
+      const current = await loadSettings();
       if (!current?.exitPinConfigured) {
         setToast("전체설정에서 키오스크 종료 PIN을 먼저 설정해 주세요.");
         return;
@@ -127,7 +128,7 @@ export function useAcademyKiosk(academyId: string, settingsEnabled: boolean): Ac
       }
       setEnableConfirmOpen(true);
     })();
-  }, [settings, loadSettings]);
+  }, [loadSettings]);
 
   const confirmOn = useCallback(() => {
     setEnableConfirmOpen(false);
@@ -137,8 +138,8 @@ export function useAcademyKiosk(academyId: string, settingsEnabled: boolean): Ac
 
   const requestOff = useCallback(() => {
     void (async () => {
-      // 설정을 받기 전에 누르면 PIN 없이 꺼지지 않도록 받아 보고 판단
-      const current = settings ?? (await loadSettings());
+      // 누를 때마다 새로 받아 판단 — 받지 못하면(null) PIN 없이 꺼지지 않도록 PIN 창
+      const current = await loadSettings();
       if (current && !current.exitPinConfigured) {
         persist(false);
         return;
@@ -146,7 +147,7 @@ export function useAcademyKiosk(academyId: string, settingsEnabled: boolean): Ac
       setExitPinError(null);
       setExitPinOpen(true);
     })();
-  }, [persist, settings, loadSettings]);
+  }, [persist, loadSettings]);
 
   const verifyExitPinAndOff = useCallback(
     async (pin: string) => {

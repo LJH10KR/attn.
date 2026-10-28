@@ -33,12 +33,22 @@ const NOT_READY_PERMISSIONS: readonly AcademyPermission[] = [
   "lessons.notices",
 ];
 
+/**
+ * 메뉴 키 말고도 그 화면을 볼 수 있는 권한 — 보안 규칙의 읽기 조건과 맞춘다.
+ * 결제 취소(환불)는 결제 내역 화면의 버튼이라, 그 권한만 있어도 결제 내역에 들어간다(payments 읽기 규칙).
+ */
+const MENU_EXTRA_ACCESS: Partial<Record<AcademyPermission, readonly AcademyPermission[]>> = {
+  "billing.payments": ["billing.refunds"],
+};
+
 export type AcademyMenu = {
   permission: AcademyPermission;
   label: string;
   /** 학원 경로 아래 상대 경로 — `academyPath(id, sub)` */
   sub: string;
   ready: boolean;
+  /** 이 중 하나라도 있으면 볼 수 있음 — 기본은 메뉴 키 하나 */
+  access: readonly AcademyPermission[];
 };
 
 export type AcademyTabMenus = {
@@ -62,8 +72,17 @@ export const ACADEMY_TAB_MENUS: AcademyTabMenus[] = ACADEMY_PERMISSION_GROUPS.ma
       label: p.label,
       sub: permissionSubPath(p.key),
       ready: !NOT_READY_PERMISSIONS.includes(p.key),
+      access: [p.key, ...(MENU_EXTRA_ACCESS[p.key] ?? [])],
     })),
 }));
+
+/** 목록 중 하나라도 가졌는지 — `usePermissions().can`과 같은 모양 */
+type HasAnyPermission = (required: readonly AcademyPermission[]) => boolean;
+
+/** 볼 수 있는 상세 메뉴가 하나라도 있는 하단 탭(홈 제외) — 0개면 메뉴 권한 없는 직원 */
+export function visibleAcademyTabs(hasAny: HasAnyPermission): AcademyNavTab[] {
+  return ACADEMY_TAB_MENUS.filter((t) => t.menus.some((m) => hasAny(m.access))).map((t) => t.tab);
+}
 
 export function academyTabMenus(tab: AcademyNavTab): AcademyTabMenus {
   return ACADEMY_TAB_MENUS.find((t) => t.tab === tab)!;
@@ -115,7 +134,7 @@ export function resolveAcademyRoute(pathname: string): AcademyRouteInfo | null {
       academyId,
       tab: tabMenus.tab,
       title: tabMenus.title,
-      required: tabMenus.menus.map((m) => m.permission),
+      required: Array.from(new Set(tabMenus.menus.flatMap((m) => m.access))),
       backSub: null,
     };
   }
@@ -126,7 +145,7 @@ export function resolveAcademyRoute(pathname: string): AcademyRouteInfo | null {
     academyId,
     tab: tabMenus.tab,
     title: menu.label,
-    required: [menu.permission],
+    required: menu.access,
     backSub: tabMenus.tab,
   };
 }
