@@ -146,6 +146,23 @@ const HOME_STATS_PERMISSIONS: AcademyPermission[] = [
   "settings.members",
 ];
 
+/** 집계 문서가 없을 때 직접 세는 컬렉션별 읽기 권한 — 규칙과 같은 목록(권한 없는 컬렉션은 세지 않음) */
+const STAFF_READ_PERMISSIONS: AcademyPermission[] = [
+  "settings.staff",
+  "settings.members",
+  "operations.students",
+  "operations.classes",
+];
+const PARENTS_READ_PERMISSIONS: AcademyPermission[] = ["operations.parents", "operations.students"];
+const STUDENTS_READ_PERMISSIONS: AcademyPermission[] = [
+  "operations.students",
+  "operations.parents",
+  "lessons.attendance",
+  "billing.invoices",
+  "billing.collections",
+  "billing.payments",
+];
+
 type AcademySummaryCounts = {
   teachers: number;
   parents: number;
@@ -163,7 +180,8 @@ export function AcademyHome() {
   const { can } = permissions;
   const canLoadStats = can(HOME_STATS_PERMISSIONS);
   const summaryRows = SUMMARY_STAT_ROWS.filter((c) => can(c.permission));
-  const canKiosk = can(["lessons.attendance", "settings.general"]);
+  // 키오스크 체크인·종료 PIN 확인은 서버가 출결 권한만 허용(종료 PIN 설정은 전체설정에서)
+  const canKiosk = can("lessons.attendance");
 
   const [summaryCounts, setSummaryCounts] =
     useState<AcademySummaryCounts | null>(null);
@@ -188,44 +206,42 @@ export function AcademyHome() {
 
   const loadDashboardStatsFallback = useCallback(async () => {
     const db = getFirebaseDb();
-    const sub = (name: "staff" | "parents" | "students") =>
-      collection(db, COLLECTIONS.academies, academyId, name);
+    const readable = {
+      staff: can(STAFF_READ_PERMISSIONS),
+      parents: can(PARENTS_READ_PERMISSIONS),
+      students: can(STUDENTS_READ_PERMISSIONS),
+    };
+    // 읽을 권한이 없는 컬렉션은 0으로 — 일부 권한만 가진 직원에게 오류 문구를 띄우지 않음
+    const count = (name: keyof typeof readable, status?: string) => {
+      if (!readable[name]) return Promise.resolve(0);
+      const col = collection(db, COLLECTIONS.academies, academyId, name);
+      return getCountFromServer(status ? query(col, where("status", "==", status)) : col).then(
+        (s) => s.data().count,
+      );
+    };
     try {
-      const [teachersSnap, parentsSnap, studentsSnap, stu, tp, tiNeed, tiSent, pp, piNeed, piSent] =
+      const [teachers, parents, students, tp, tiNeed, tiSent, pp, piNeed, piSent] =
         await Promise.all([
-          getCountFromServer(sub("staff")),
-          getCountFromServer(sub("parents")),
-          getCountFromServer(sub("students")),
-          getCountFromServer(sub("students")),
-          getCountFromServer(
-            query(sub("staff"), where("status", "==", "pending_registration")),
-          ),
-          getCountFromServer(
-            query(sub("staff"), where("status", "==", "invitation_needed")),
-          ),
-          getCountFromServer(query(sub("staff"), where("status", "==", "invitation_sent"))),
-          getCountFromServer(
-            query(sub("parents"), where("status", "==", "pending_registration")),
-          ),
-          getCountFromServer(
-            query(sub("parents"), where("status", "==", "invitation_needed")),
-          ),
-          getCountFromServer(query(sub("parents"), where("status", "==", "invitation_sent"))),
+          count("staff"),
+          count("parents"),
+          count("students"),
+          count("staff", "pending_registration"),
+          count("staff", "invitation_needed"),
+          count("staff", "invitation_sent"),
+          count("parents", "pending_registration"),
+          count("parents", "invitation_needed"),
+          count("parents", "invitation_sent"),
         ]);
       const heatmap: AcademyHeatmapCounts = {
-        students: stu.data().count,
-        teachersPending: tp.data().count,
-        teachersInviteNeeded: tiNeed.data().count,
-        teachersInviteSent: tiSent.data().count,
-        parentsPending: pp.data().count,
-        parentsInviteNeeded: piNeed.data().count,
-        parentsInviteSent: piSent.data().count,
+        students,
+        teachersPending: tp,
+        teachersInviteNeeded: tiNeed,
+        teachersInviteSent: tiSent,
+        parentsPending: pp,
+        parentsInviteNeeded: piNeed,
+        parentsInviteSent: piSent,
       };
-      setSummaryCounts({
-        teachers: teachersSnap.data().count,
-        parents: parentsSnap.data().count,
-        students: studentsSnap.data().count,
-      });
+      setSummaryCounts({ teachers, parents, students });
       setSummaryCountsError(null);
       setHeatmapItems(buildAcademyHeatmapItems(heatmap));
       setHeatmapError(null);
@@ -245,7 +261,7 @@ export function AcademyHome() {
         }),
       );
     }
-  }, [academyId]);
+  }, [academyId, can]);
 
   const loadDashboardStats = useCallback(async () => {
     const db = getFirebaseDb();

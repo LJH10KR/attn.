@@ -30,6 +30,7 @@ import {
 } from "@/lib/firebase/attn-schema";
 import { getFirebaseAuth, getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
+import { useAcademyShell } from "@/components/academy/academy-shell";
 import { SessionLogModal } from "@/components/academy/session-log-modal";
 import { AbsenceRecordModal } from "@/components/academy/absence-record-modal";
 import { AttendanceHistoryModal } from "@/components/academy/attendance-history-modal";
@@ -52,6 +53,33 @@ const inputClass =
 
 const miniBtnClass =
   "rounded-[8px] border border-neutral-300/70 bg-white/55 px-2 py-1 text-[10px] font-medium text-foreground hover:bg-white/90 disabled:opacity-45";
+
+/**
+ * 학생 행 버튼 노출 — 보안 규칙·서버가 허용하는 권한일 때만(원장 기준으로 만든 패널을 위임 직원에 맞춤).
+ * 2단계 원생 관리 개편 전까지의 최소 조치라 버튼 구성은 그대로 두고 노출 조건만 정한다.
+ */
+function useStudentActionAccess() {
+  const { can, viewer } = useAcademyShell().permissions;
+  return {
+    /** 출석 알림 — 출결 권한이 없으면 전담 학생만(`sendStudentAttendanceNotification`) */
+    present: (s: StudentRowVM) =>
+      can("lessons.attendance") || (viewer !== null && s.assignedTeacherUids.includes(viewer.uid)),
+    /** 결석 기록(`recordStudentAbsences`) */
+    absence: can("lessons.attendance"),
+    /** 잔여 회차 차감 — 학생 문서 회차 필드 수정 규칙 */
+    sessionComplete: can(["operations.students", "lessons.attendance", "billing.invoices"]),
+    /** 충전·원비 — 원생 관리 또는 수납 필드 수정 규칙 */
+    tuition: can(["operations.students", "billing.invoices"]),
+    /** 출결 기록 읽기(attendanceRecords) */
+    attendance: can(["lessons.attendance", "billing.invoices"]),
+    /** 청구서 읽기(tuitionInvoices) */
+    invoice: can(["billing.invoices", "billing.collections"]),
+    /** 이름·연락처 수정, 삭제 */
+    manage: can("operations.students"),
+    /** 직원 목록 읽기(담당 선생님 이름) — staff 읽기 규칙과 같은 목록 */
+    readStaff: can(["settings.staff", "settings.members", "operations.students", "operations.classes"]),
+  };
+}
 
 export type StudentRowVM = {
   id: string;
@@ -1521,14 +1549,19 @@ export function AcademyParentStudentList({
   const [attendanceTarget, setAttendanceTarget] = useState<StudentRowVM | null>(null);
   const [invoiceTarget, setInvoiceTarget] = useState<StudentRowVM | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const access = useStudentActionAccess();
+  const { readStaff } = access;
 
   const loadParentChildren = useCallback(async () => {
     try {
       const db = getFirebaseDb();
+      // 학부모 관리 권한만 있으면 직원 목록은 못 읽음 — 담당 선생님 이름 없이 자녀만
       const [teachersSnap, studentsSnap] = await Promise.all([
-        cachedRead(`staff:${academyId}`, () =>
-          getDocs(collection(db, "academies", academyId, "staff")),
-        ),
+        readStaff
+          ? cachedRead(`staff:${academyId}`, () =>
+              getDocs(collection(db, "academies", academyId, "staff")),
+            )
+          : Promise.resolve(null),
         getDocs(
           query(
             collection(db, "academies", academyId, "students"),
@@ -1537,7 +1570,7 @@ export function AcademyParentStudentList({
         ),
       ]);
       const m: Record<string, string> = {};
-      for (const d of teachersSnap.docs) {
+      for (const d of teachersSnap?.docs ?? []) {
         const data = d.data() as { displayName?: string };
         m[d.id] = typeof data.displayName === "string" && data.displayName ? data.displayName : d.id;
       }
@@ -1552,7 +1585,7 @@ export function AcademyParentStudentList({
       setListError(err instanceof Error ? err.message : "목록을 불러오지 못했습니다.");
       setRows([]);
     }
-  }, [academyId, parentUserId]);
+  }, [academyId, parentUserId, readStaff]);
 
   const { refresh: refreshParentChildren } = useAcademyListPoll(loadParentChildren, [
     academyId,
@@ -1776,32 +1809,48 @@ export function AcademyParentStudentList({
                   ) : null}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  <button type="button" className={miniBtnClass} disabled={notifyBusyKey !== null} onClick={() => void sendAttendanceNotify(s.id, "present")}>
-                    {notifyBusyKey === `${s.id}-present` ? "전송 중…" : "출석"}
-                  </button>
-                  <button type="button" className={miniBtnClass} disabled={notifyBusyKey !== null} onClick={() => setAbsenceTarget(s)}>
-                    결석
-                  </button>
+                  {access.present(s) ? (
+                    <button type="button" className={miniBtnClass} disabled={notifyBusyKey !== null} onClick={() => void sendAttendanceNotify(s.id, "present")}>
+                      {notifyBusyKey === `${s.id}-present` ? "전송 중…" : "출석"}
+                    </button>
+                  ) : null}
+                  {access.absence ? (
+                    <button type="button" className={miniBtnClass} disabled={notifyBusyKey !== null} onClick={() => setAbsenceTarget(s)}>
+                      결석
+                    </button>
+                  ) : null}
                   {s.weeklySessionCount != null ? (
                     <>
-                      <button type="button" className={`${miniBtnClass} border-violet-300/70 bg-violet-50/70 text-violet-800 hover:bg-violet-100`} disabled={sessionCompleteBusy || chargeBusy} onClick={() => setSessionConfirmTarget(s)}>수업 완료</button>
-                      <button type="button" className="rounded-[8px] border border-violet-400/60 bg-violet-700 px-2 py-1 text-[10px] font-medium text-white hover:bg-violet-800 disabled:opacity-45" disabled={sessionCompleteBusy || chargeBusy} onClick={() => setChargeTarget(s)}>충전</button>
+                      {access.sessionComplete ? (
+                        <button type="button" className={`${miniBtnClass} border-violet-300/70 bg-violet-50/70 text-violet-800 hover:bg-violet-100`} disabled={sessionCompleteBusy || chargeBusy} onClick={() => setSessionConfirmTarget(s)}>수업 완료</button>
+                      ) : null}
+                      {access.tuition ? (
+                        <button type="button" className="rounded-[8px] border border-violet-400/60 bg-violet-700 px-2 py-1 text-[10px] font-medium text-white hover:bg-violet-800 disabled:opacity-45" disabled={sessionCompleteBusy || chargeBusy} onClick={() => setChargeTarget(s)}>충전</button>
+                      ) : null}
                     </>
                   ) : null}
                 </div>
               </div>
               {expandedId === s.id ? (
                 <div className="flex flex-wrap gap-1 border-t border-white/40 px-3 py-2">
-                  <button type="button" className={miniBtnClass} onClick={() => setAttendanceTarget(s)}>출결</button>
-                  {s.tuitionDueDayOfMonth && s.tuitionAmount != null ? (
+                  {access.attendance ? (
+                    <button type="button" className={miniBtnClass} onClick={() => setAttendanceTarget(s)}>출결</button>
+                  ) : null}
+                  {access.invoice && s.tuitionDueDayOfMonth && s.tuitionAmount != null ? (
                     <button type="button" className={miniBtnClass} onClick={() => setInvoiceTarget(s)}>청구</button>
                   ) : null}
                   {s.weeklySessionCount != null ? (
                     <button type="button" className={miniBtnClass} onClick={() => setLogModalTarget(s)}>기록</button>
                   ) : null}
-                  <button type="button" className={miniBtnClass} onClick={() => setTuitionModalTarget(s)}>원비</button>
-                  <button type="button" className={miniBtnClass} onClick={() => { openEdit(s); setExpandedId(null); }}>수정</button>
-                  <button type="button" className={`${miniBtnClass} border-red-200/80 text-red-600 hover:bg-red-50`} onClick={() => { setDeleteTarget(s); setExpandedId(null); }}>삭제</button>
+                  {access.tuition ? (
+                    <button type="button" className={miniBtnClass} onClick={() => setTuitionModalTarget(s)}>원비</button>
+                  ) : null}
+                  {access.manage ? (
+                    <>
+                      <button type="button" className={miniBtnClass} onClick={() => { openEdit(s); setExpandedId(null); }}>수정</button>
+                      <button type="button" className={`${miniBtnClass} border-red-200/80 text-red-600 hover:bg-red-50`} onClick={() => { setDeleteTarget(s); setExpandedId(null); }}>삭제</button>
+                    </>
+                  ) : null}
                 </div>
               ) : null}
               <button
@@ -1950,6 +1999,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
   const [invoiceTarget, setInvoiceTarget] = useState<StudentRowVM | null>(null);
   const [notifyBusyKey, setNotifyBusyKey] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const access = useStudentActionAccess();
 
   const loadStudentPanelData = useCallback(async () => {
     try {
@@ -2368,30 +2418,42 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                     </span>
                   </button>
                   <div className="mt-2 flex flex-wrap gap-1.5">
-                    <button type="button" className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 disabled:opacity-40" disabled={notifyBusyKey !== null} onClick={() => void sendAttendanceNotify(s.id, "present")}>
-                      {notifyBusyKey === `${s.id}-present` ? "전송 중…" : "출석"}
-                    </button>
-                    <button type="button" className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 disabled:opacity-40" disabled={notifyBusyKey !== null} onClick={() => setAbsenceTarget(s)}>
-                      결석
-                    </button>
+                    {access.present(s) ? (
+                      <button type="button" className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 disabled:opacity-40" disabled={notifyBusyKey !== null} onClick={() => void sendAttendanceNotify(s.id, "present")}>
+                        {notifyBusyKey === `${s.id}-present` ? "전송 중…" : "출석"}
+                      </button>
+                    ) : null}
+                    {access.absence ? (
+                      <button type="button" className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90 disabled:opacity-40" disabled={notifyBusyKey !== null} onClick={() => setAbsenceTarget(s)}>
+                        결석
+                      </button>
+                    ) : null}
                     {s.weeklySessionCount != null ? (
                       <>
-                        <button type="button" className="rounded-[8px] border border-violet-300/70 bg-violet-50/70 px-3 py-2 text-[11px] font-medium text-violet-800 shadow-sm hover:bg-violet-100" disabled={sessionCompleteBusy || chargeBusy} onClick={() => setSessionConfirmTarget(s)}>수업 완료</button>
-                        <button type="button" className="rounded-[8px] border border-violet-400/60 bg-violet-700 px-3 py-2 text-[11px] font-medium text-white shadow-sm hover:bg-violet-800" disabled={sessionCompleteBusy || chargeBusy} onClick={() => setChargeTarget(s)}>충전</button>
+                        {access.sessionComplete ? (
+                          <button type="button" className="rounded-[8px] border border-violet-300/70 bg-violet-50/70 px-3 py-2 text-[11px] font-medium text-violet-800 shadow-sm hover:bg-violet-100" disabled={sessionCompleteBusy || chargeBusy} onClick={() => setSessionConfirmTarget(s)}>수업 완료</button>
+                        ) : null}
+                        {access.tuition ? (
+                          <button type="button" className="rounded-[8px] border border-violet-400/60 bg-violet-700 px-3 py-2 text-[11px] font-medium text-white shadow-sm hover:bg-violet-800" disabled={sessionCompleteBusy || chargeBusy} onClick={() => setChargeTarget(s)}>충전</button>
+                        ) : null}
                       </>
                     ) : null}
                   </div>
                 </div>
                 {expandedId === s.id ? (
                   <div className="flex flex-wrap gap-1.5 border-t border-white/40 px-2 py-2 sm:px-3.5">
-                    <button type="button" className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90" onClick={() => setAttendanceTarget(s)}>출결</button>
-                    {s.tuitionDueDayOfMonth && s.tuitionAmount != null ? (
+                    {access.attendance ? (
+                      <button type="button" className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90" onClick={() => setAttendanceTarget(s)}>출결</button>
+                    ) : null}
+                    {access.invoice && s.tuitionDueDayOfMonth && s.tuitionAmount != null ? (
                       <button type="button" className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90" onClick={() => setInvoiceTarget(s)}>청구</button>
                     ) : null}
                     {s.weeklySessionCount != null ? (
                       <button type="button" className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90" onClick={() => setLogModalTarget(s)}>기록</button>
                     ) : null}
-                    <button type="button" className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90" onClick={() => setTuitionModalTarget(s)}>원비</button>
+                    {access.tuition ? (
+                      <button type="button" className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90" onClick={() => setTuitionModalTarget(s)}>원비</button>
+                    ) : null}
                     <button type="button" className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-foreground shadow-sm hover:bg-white/90" onClick={() => { openEdit(s); setExpandedId(null); }}>수정</button>
                     <button type="button" className="rounded-[8px] border border-red-200/80 bg-white/55 px-3 py-2 text-[11px] font-medium text-red-600 shadow-sm hover:bg-red-50" onClick={() => { setTeacherModalStudentId(null); setDeleteTarget(s); setExpandedId(null); }}>삭제</button>
                   </div>

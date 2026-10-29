@@ -5,13 +5,14 @@ import { maskKrPhoneForKiosk, phoneLast4Digits } from "@/lib/phone/kr-phone";
 
 export async function loadKioskStudentRows(academyId: string): Promise<KioskStudentRow[]> {
   const db = getFirebaseDb();
+  // 보호자 이름은 보조 정보 — 학부모 목록 권한이 없는 출결 담당 직원이면 이름 없이 학생만
   const [studentsSnap, parentsSnap] = await Promise.all([
     getDocs(collection(db, "academies", academyId, "students")),
-    getDocs(collection(db, "academies", academyId, "parents")),
+    getDocs(collection(db, "academies", academyId, "parents")).catch(() => null),
   ]);
 
   const parentNameByUid = new Map<string, string>();
-  for (const d of parentsSnap.docs) {
+  for (const d of parentsSnap?.docs ?? []) {
     const authUid = d.get("authUid");
     const uid = typeof authUid === "string" && authUid ? authUid : d.id;
     const name = d.get("displayName");

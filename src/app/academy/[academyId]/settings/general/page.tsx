@@ -20,7 +20,7 @@ function callableMessage(err: unknown, fallback: string): string {
 
 /** 설정 › 전체설정 — 권한(`settings.general`) 확인과 키오스크 중 잠금은 학원 공통 레이아웃이 한다 */
 export default function AcademyGeneralSettingsPage() {
-  const { academyId } = useAcademyShell();
+  const { academyId, permissions } = useAcademyShell();
   const [settings, setSettings] = useState<AcademyKioskSettingsPublic | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -145,12 +145,15 @@ export default function AcademyGeneralSettingsPage() {
           </div>
         </SettingsAccordionItem>
 
-        <OwnerSessionTuitionSettingsCard
-          academyId={academyId}
-          academyName=""
-          disabled={busy}
-          defaultCollapsed
-        />
+        {/* 기본 납부 방식 — 규칙상 수납(청구서)·원생 관리 권한만 읽고 쓴다 */}
+        {permissions.can(["billing.invoices", "operations.students"]) ? (
+          <OwnerSessionTuitionSettingsCard
+            academyId={academyId}
+            academyName=""
+            disabled={busy}
+            defaultCollapsed
+          />
+        ) : null}
 
         <OwnerTuitionSettingsCard
           academyId={academyId}

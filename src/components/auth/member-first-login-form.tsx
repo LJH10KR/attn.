@@ -6,7 +6,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 import { PasswordInput } from "@/components/ui/password-input";
-import { getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { resolveStaffLanding } from "@/lib/academy/staff-landing";
+import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { resolvePasswordConfirmHint } from "@/lib/ui/password-confirm-hint";
 
 const inputClass =
@@ -55,7 +56,17 @@ export function MemberFirstLoginForm({ role }: MemberFirstLoginFormProps) {
       try {
         const fn = httpsCallable(getFirebaseFunctions(), "completeMemberFirstLogin");
         await fn({ newPassword: password });
-        router.replace(role === "teacher" ? "/teacher" : "/parent");
+        if (role === "parent") {
+          router.replace("/parent");
+          return;
+        }
+        // 직원은 볼 수 있는 학원 메뉴가 있으면 학원 5탭 — 클레임의 학원 ID는 첫 로그인 전부터 들어 있음
+        const user = getFirebaseAuth().currentUser;
+        const academyId = await user
+          ?.getIdTokenResult()
+          .then(({ claims }) => (typeof claims.academyId === "string" ? claims.academyId : ""))
+          .catch(() => "");
+        router.replace(user && academyId ? await resolveStaffLanding(user, academyId) : "/teacher");
       } catch (err) {
         if (err instanceof FirebaseError) {
           setError(errorMessage(err));

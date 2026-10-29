@@ -15,6 +15,7 @@ import { httpsCallable } from "firebase/functions";
 import { EmailVerificationCodeModal } from "@/components/auth/email-verification-code-modal";
 import { LoginPasswordField } from "@/components/auth/login-password-field";
 import { GoogleMark } from "@/components/auth/google-mark";
+import { resolveStaffLanding } from "@/lib/academy/staff-landing";
 import {
   LOGIN_ROLE_OPTIONS,
   type LoginRole,
@@ -156,8 +157,9 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
     });
   }, [configured, role]);
 
+  /** 활성이면 착지 경로(학원 5탭 또는 선생님 화면, `staff-landing.ts`), 아니면 안내 화면으로 보내고 null */
   const checkTeacherActivationOrRedirect =
-    useCallback(async (): Promise<boolean> => {
+    useCallback(async (): Promise<string | null> => {
       const functions = getFirebaseFunctions();
       const fn = httpsCallable(functions, "getTeacherActivationState");
       const res = await fn({});
@@ -167,7 +169,12 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
         primaryAcademyId?: string | null;
       };
 
-      if (data?.anyActive) return true;
+      if (data?.anyActive) {
+        const user = getFirebaseAuth().currentUser;
+        return user && data.primaryAcademyId
+          ? resolveStaffLanding(user, data.primaryAcademyId)
+          : "/teacher";
+      }
 
       const state = data?.primaryStatus ?? "unknown";
       const academyId = data?.primaryAcademyId ?? "";
@@ -175,14 +182,14 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
       /** 학원이 직접 만들어 준 계정 — 최초 로그인 비밀번호 변경 화면 */
       if (state === "pending_setup") {
         router.replace("/teacher/setup");
-        return false;
+        return null;
       }
 
       const q = new URLSearchParams();
       q.set("state", state);
       if (academyId) q.set("academyId", academyId);
       router.replace(`/teacher/session?${q.toString()}`);
-      return false;
+      return null;
     }, [router]);
 
   const checkParentActivationOrRedirect =
@@ -282,8 +289,8 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
         return;
       }
       if (role === "teacher") {
-        const ok = await checkTeacherActivationOrRedirect();
-        if (ok) router.replace("/teacher");
+        const landing = await checkTeacherActivationOrRedirect();
+        if (landing) router.replace(landing);
         return;
       }
       if (role === "parent") {
@@ -363,13 +370,13 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
           return;
         }
         if (role === "teacher") {
-          const ok = await checkTeacherActivationOrRedirect();
-          if (!ok) return;
-        } else {
-          const ok = await checkParentActivationOrRedirect();
-          if (!ok) return;
+          const landing = await checkTeacherActivationOrRedirect();
+          if (landing) router.replace(landing);
+          return;
         }
-        router.replace(role === "teacher" ? "/teacher" : "/parent");
+        const ok = await checkParentActivationOrRedirect();
+        if (!ok) return;
+        router.replace("/parent");
       } catch (err) {
         if (err instanceof FirebaseError) {
           setError(
@@ -430,8 +437,9 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
           return;
         }
         if (role === "teacher") {
-          const ok = await checkTeacherActivationOrRedirect();
-          if (!ok) return;
+          const landing = await checkTeacherActivationOrRedirect();
+          if (landing) router.replace(landing);
+          return;
         }
         if (role === "parent") {
           const ok = await checkParentActivationOrRedirect();
@@ -443,11 +451,9 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
         router.replace(
           role === "owner"
             ? "/owner"
-            : role === "teacher"
-              ? "/teacher"
-              : role === "parent"
-                ? "/parent"
-                : "/",
+            : role === "parent"
+              ? "/parent"
+              : "/",
         );
       } catch (err) {
         const code = err instanceof FirebaseError ? err.code : "";
@@ -546,8 +552,9 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
           }
           throw linkErr;
         }
-        const ok = await checkTeacherActivationOrRedirect();
-        if (!ok) return;
+        const landing = await checkTeacherActivationOrRedirect();
+        if (landing) router.replace(landing);
+        return;
       }
       if (role === "parent") {
         const ok = await checkParentActivationOrRedirect();
@@ -559,11 +566,9 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
       router.replace(
         role === "owner"
           ? "/owner"
-          : role === "teacher"
-            ? "/teacher"
-            : role === "parent"
-              ? "/parent"
-              : "/",
+          : role === "parent"
+            ? "/parent"
+            : "/",
       );
     } catch (err) {
       if (role === "teacher" && getFirebaseAuth().currentUser) {

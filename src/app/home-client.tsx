@@ -10,6 +10,7 @@ import { redirectIfKnownSessionDashboard } from "@/lib/firebase/resolve-session-
 import { getLastDashboardRoleHintPath } from "@/lib/auth/last-dashboard-role";
 import {
   BOOT_PROGRESS,
+  closesBootOverlayItself,
   hasShownBootOverlayThisSession,
   markBootOverlayShown,
   useBootOverlay,
@@ -55,10 +56,12 @@ export function HomeClient() {
       setProgress(BOOT_PROGRESS.AUTH_RESTORED);
       try {
         const result = await redirectIfKnownSessionDashboard(user, (path) => {
-          if (!cancelled) router.replace(path);
+          if (cancelled) return;
+          if (!closesBootOverlayItself(path)) hideBootOverlay();
+          router.replace(path);
         });
         // "redirected"면 오버레이는 그대로 유지 — 대상 대시보드 페이지가 자기 로딩이
-        // 끝나는 시점에 hideBootOverlay()를 호출해 끊김 없이 이어진다.
+        // 끝나는 시점에 hideBootOverlay()를 호출해 끊김 없이 이어진다(스스로 닫지 않는 화면이면 위에서 닫음).
         if (!cancelled && result === "redirected") {
           setProgress(BOOT_PROGRESS.ROLE_RESOLVED);
         }

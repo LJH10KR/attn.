@@ -1,14 +1,15 @@
 "use client";
 
 import { onAuthStateChanged, type User } from "firebase/auth";
-import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { academyPath, visibleAcademyTabs } from "@/lib/academy/academy-routes";
+import { closesBootOverlayItself, useBootOverlay } from "@/components/boot/boot-overlay";
+import { academyPath } from "@/lib/academy/academy-routes";
 import { activeKioskAcademyId } from "@/lib/academy/kiosk-student-rows";
 import { readLastAcademy } from "@/lib/academy/last-academy";
-import { normalizePermissionList } from "@/lib/academy/permissions";
+import { resolveStaffLanding } from "@/lib/academy/staff-landing";
 import { attnIdSortKey, compareAttnIdAsc } from "@/lib/attn-id-sort";
 import { COLLECTIONS } from "@/lib/firebase/attn-schema";
 import { getFirebaseAuth, getFirebaseDb } from "@/lib/firebase/client-app";
@@ -19,7 +20,7 @@ import { fetchIsOwner } from "@/lib/firebase/owner-profile";
  * `/academy`로만 들어왔을 때 갈 곳.
  * - 키오스크 중: 키오스크 학원 홈
  * - 원장: 마지막으로 보던 학원(지금도 소유한 경우) → 오너 대시보드와 같은 순서의 첫 학원 → 학원이 없으면 /owner
- * - 직원: 로그인 정보의 소속 학원(볼 수 있는 메뉴가 없으면 1-F 전까지 /teacher)
+ * - 직원: 로그인 정보의 소속 학원 — 착지 판단은 `staff-landing.ts`(메뉴 없으면 /teacher, 활성 아니면 안내 화면)
  */
 async function resolveAcademyEntry(user: User): Promise<string | null> {
   const kioskAcademyId = activeKioskAcademyId();
@@ -40,14 +41,7 @@ async function resolveAcademyEntry(user: User): Promise<string | null> {
 
   const { claims } = await user.getIdTokenResult();
   if (claims.role === "teacher" && typeof claims.academyId === "string" && claims.academyId) {
-    const staff = await getDoc(doc(db, COLLECTIONS.academies, claims.academyId, "staff", user.uid)).catch(
-      () => null,
-    );
-    const granted = new Set(
-      staff?.get("status") === "active" ? normalizePermissionList(staff.get("permissions")) : [],
-    );
-    const hasMenus = visibleAcademyTabs((required) => required.some((p) => granted.has(p))).length > 0;
-    return hasMenus ? academyPath(claims.academyId) : "/teacher";
+    return resolveStaffLanding(user, claims.academyId);
   }
 
   if (await fetchIsOwner(user.uid)) return "/owner";
@@ -56,7 +50,12 @@ async function resolveAcademyEntry(user: User): Promise<string | null> {
 
 export function AcademyEntry() {
   const router = useRouter();
+  const { hide: hideBootOverlay } = useBootOverlay();
   const [state, setState] = useState<"loading" | "forbidden">("loading");
+
+  useEffect(() => {
+    if (state === "forbidden") hideBootOverlay();
+  }, [state, hideBootOverlay]);
 
   useEffect(() => {
     if (!isFirebaseConfigured()) {
@@ -64,16 +63,21 @@ export function AcademyEntry() {
       return;
     }
     let cancelled = false;
+    // 스스로 부팅 오버레이를 닫지 않는 화면으로 보낼 때는 보내기 전에 닫는다
+    const go = (target: string) => {
+      if (!closesBootOverlayItself(target)) hideBootOverlay();
+      router.replace(target);
+    };
     const unsub = onAuthStateChanged(getFirebaseAuth(), (user) => {
       if (!user) {
-        router.replace("/login");
+        go("/login");
         return;
       }
       void resolveAcademyEntry(user)
         .catch(() => null)
         .then((target) => {
           if (cancelled) return;
-          if (target) router.replace(target);
+          if (target) go(target);
           else setState("forbidden");
         });
     });
@@ -81,7 +85,7 @@ export function AcademyEntry() {
       cancelled = true;
       unsub();
     };
-  }, [router]);
+  }, [router, hideBootOverlay]);
 
   if (state === "loading") {
     return (

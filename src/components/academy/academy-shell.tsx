@@ -1,15 +1,16 @@
 "use client";
 
-import { onAuthStateChanged, type User } from "firebase/auth";
+import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { AcademyKioskPanel } from "@/components/academy/academy-kiosk-panel";
 import { AcademyTabIcon } from "@/components/academy/academy-tab-icons";
 import { KioskExitPinGate } from "@/components/academy/kiosk-exit-pin-gate";
 import { KioskHistoryGuard } from "@/components/academy/kiosk-history-guard";
 import { useAcademyKiosk, type AcademyKioskState } from "@/components/academy/use-academy-kiosk";
+import { closesBootOverlayItself, useBootOverlay } from "@/components/boot/boot-overlay";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardNotificationsModal } from "@/components/dashboard/dashboard-notifications-modal";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
@@ -22,6 +23,8 @@ import {
   type AcademyTab,
 } from "@/lib/academy/academy-routes";
 import { rememberLastAcademy } from "@/lib/academy/last-academy";
+import type { AcademyPermission } from "@/lib/academy/permissions";
+import { resolveStaffLanding } from "@/lib/academy/staff-landing";
 import { usePermissions, type AcademyPermissionState } from "@/lib/academy/use-permissions";
 import { useRoleLogout } from "@/lib/auth/use-role-logout";
 import { COLLECTIONS } from "@/lib/firebase/attn-schema";
@@ -65,6 +68,37 @@ function Loading() {
   );
 }
 
+/** 알림 벨(adminInbox) 읽기 권한 — 보안 규칙과 같은 목록 */
+const BELL_PERMISSIONS: readonly AcademyPermission[] = [
+  "settings.members",
+  "operations.parents",
+  "billing.payments",
+];
+
+/**
+ * 이 학원의 멤버로 보이지 않을 때(비활성·퇴사·계정 삭제·아직 활성 전) 갈 곳 — 본인 학원 직원만.
+ * 다른 학원 주소·학부모 등은 null(권한 없음 화면).
+ */
+async function landingForMissingActor(user: User, academyId: string): Promise<string | null> {
+  try {
+    const { claims } = await user.getIdTokenResult();
+    if (claims.role !== "teacher" || claims.academyId !== academyId) return null;
+    // 선생님 화면은 클레임의 "active"를 믿으므로 먼저 토큰을 새로 받는다 — 비활성·삭제·비밀번호 초기화면 실패
+    try {
+      await user.getIdToken(true);
+    } catch {
+      await signOut(getFirebaseAuth()).catch(() => undefined);
+      return "/login/teacher";
+    }
+    const target = await resolveStaffLanding(user, academyId);
+    const here = academyPath(academyId);
+    // 다시 이 학원이면(권한 구독 오류 등) 이동하지 않음 — 같은 주소로 되풀이 이동 방지
+    return target === here || target.startsWith(`${here}/`) ? null : target;
+  } catch {
+    return null;
+  }
+}
+
 function BackChevronIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -90,11 +124,20 @@ export function AcademyShell({ children }: { children: ReactNode }) {
   const [academyName, setAcademyName] = useState<string | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
 
+  const { hide: hideBootOverlay } = useBootOverlay();
   const permissions = usePermissions(academyId);
   const { actor, can, visibleTabs } = permissions;
-  /** 볼 수 있는 메뉴가 하나도 없는 직원(기본 "선생님") — 1-F 전까지 선생님 화면 사용 */
+  /** 볼 수 있는 메뉴가 하나도 없는 직원(기본 "선생님") — 선생님 화면 사용 */
   const staffWithoutMenus = actor === "staff" && visibleTabs.length === 0;
-  const kiosk = useAcademyKiosk(academyId, actor !== null && can(["lessons.attendance", "settings.general"]));
+  // 키오스크 체크인·종료 PIN 확인은 서버가 출결 권한만 허용 — 켜기도 출결 권한일 때만
+  const kiosk = useAcademyKiosk(academyId, actor !== null && can("lessons.attendance"));
+  const canBell = can(BELL_PERMISSIONS);
+
+  /** 멤버로 보이지 않을 때의 착지 판단 — actor가 null이 될 때마다 한 번만 */
+  const landingKey = authUser ? `${authUser.uid}|${academyId}` : null;
+  const landingKeyRef = useRef<string | null>(null);
+  const [forbiddenKey, setForbiddenKey] = useState<string | null>(null);
+  const actorMissing = Boolean(authUser) && !permissions.loading && actor === null;
 
   const {
     items: bellItems,
@@ -103,7 +146,7 @@ export function AcademyShell({ children }: { children: ReactNode }) {
     dismissOne: dismissBellOne,
     dismissAllVisible: dismissBellAll,
     refresh: refreshBell,
-  } = useAcademyDashboardBell(actor && !staffWithoutMenus ? academyId : null);
+  } = useAcademyDashboardBell(actor && !staffWithoutMenus && canBell ? academyId : null);
 
   const { logout, logoutBusy, logoutModal } = useRoleLogout({
     redirectTo: "/login",
@@ -139,6 +182,36 @@ export function AcademyShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (staffWithoutMenus) router.replace("/teacher");
   }, [staffWithoutMenus, router]);
+
+  useEffect(() => {
+    if (actor) {
+      landingKeyRef.current = null;
+      return;
+    }
+    if (!actorMissing || !authUser || !landingKey || landingKeyRef.current === landingKey) return;
+    landingKeyRef.current = landingKey;
+    void landingForMissingActor(authUser, academyId).then((target) => {
+      if (landingKeyRef.current !== landingKey) return;
+      if (!target) {
+        setForbiddenKey(landingKey);
+        return;
+      }
+      if (!closesBootOverlayItself(target)) hideBootOverlay();
+      router.replace(target);
+    });
+  }, [actor, actorMissing, authUser, landingKey, academyId, router, hideBootOverlay]);
+
+  // 콜드 부팅 오버레이 — 보여 줄 화면이 정해지면 닫는다(다른 화면으로 보내는 중이면 그 화면이 닫음)
+  const screenReady =
+    !configured ||
+    authUser === null ||
+    (authUser !== undefined && Boolean(kiosk.activeAcademyId)) ||
+    (!permissions.loading &&
+      !staffWithoutMenus &&
+      (actor !== null || (landingKey !== null && forbiddenKey === landingKey)));
+  useEffect(() => {
+    if (screenReady) hideBootOverlay();
+  }, [screenReady, hideBootOverlay]);
 
   useEffect(() => {
     if (notificationsOpen) refreshBell();
@@ -222,6 +295,8 @@ export function AcademyShell({ children }: { children: ReactNode }) {
   if (permissions.loading || staffWithoutMenus) return <Loading />;
 
   if (!actor) {
+    // 착지 판단 중이거나 다른 화면으로 보내는 중
+    if (forbiddenKey !== landingKey) return <Loading />;
     return (
       <CenterMessage>
         <p className="max-w-xs text-center text-sm text-neutral-600">
@@ -252,6 +327,8 @@ export function AcademyShell({ children }: { children: ReactNode }) {
   const backTitle = route?.backSub
     ? ACADEMY_TAB_MENUS.find((t) => t.tab === route.backSub)?.title ?? null
     : null;
+  // 상세 화면 권한만 빠졌으면 그 탭 요약으로, 탭 자체가 사라졌으면 홈으로
+  const forbiddenBackToTab = Boolean(route?.backSub) && visibleTabs.some((t) => t === route?.tab);
 
   return (
     <AcademyShellContext.Provider value={value}>
@@ -261,6 +338,7 @@ export function AcademyShell({ children }: { children: ReactNode }) {
           affiliationLabel={affiliationLabel}
           profile={authProfile}
           onHomeAction={() => router.push("/")}
+          showBell={canBell}
           onBellClickAction={() => setNotificationsOpen(true)}
           bellBadgeCount={bellCount}
           extraMenuActions={[
@@ -268,9 +346,10 @@ export function AcademyShell({ children }: { children: ReactNode }) {
               label: "내 계정",
               onSelectAction: () => router.push(actor === "owner" ? "/owner/settings" : "/teacher/settings"),
             },
-            ...(actor === "owner"
-              ? [{ label: "오너 대시보드", onSelectAction: () => router.push("/owner") }]
-              : []),
+            actor === "owner"
+              ? { label: "오너 대시보드", onSelectAction: () => router.push("/owner") }
+              : // 수업도 맡는 직원 — 담당 학생 목록·알림 보내기
+                { label: "선생님 화면", onSelectAction: () => router.push("/teacher") },
           ]}
           bottomTabs={tabs.map((t) => ({
             id: t,
@@ -309,8 +388,11 @@ export function AcademyShell({ children }: { children: ReactNode }) {
           ) : (
             <div className="glass-card px-4 py-12 text-center">
               <p className="text-sm text-neutral-600">이 화면을 볼 권한이 없습니다.</p>
-              <Link href={academyPath(academyId)} className="mt-3 inline-block text-sm underline">
-                홈으로
+              <Link
+                href={academyPath(academyId, forbiddenBackToTab ? (route?.backSub ?? "") : "")}
+                className="mt-3 inline-block text-sm underline"
+              >
+                {forbiddenBackToTab ? "탭 요약으로" : "홈으로"}
               </Link>
             </div>
           )}

@@ -3,7 +3,9 @@
 import type { User } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
+import { resolveStaffLanding } from "@/lib/academy/staff-landing";
 import { isRoleLoginPath } from "@/lib/auth/login-routes";
+import { activationPathFromState, type RoleActivationState } from "./activation-path";
 import {
   getFirebaseDbAfterAuthReady,
   getFirebaseFunctions,
@@ -22,11 +24,7 @@ export type SessionRedirectResult = "redirected" | "stay";
 const ACTIVATION_CACHE_TTL_MS = 45_000;
 const SESSION_DECISION_CACHE_TTL_MS = 3_000;
 
-export type RoleActivationState = {
-  anyActive: boolean;
-  primaryStatus: string | null;
-  primaryAcademyId: string | null;
-};
+export type { RoleActivationState };
 
 type ActivationCacheEntry = {
   state: RoleActivationState;
@@ -128,34 +126,6 @@ function normalizeActivationState(data: {
   };
 }
 
-function activationPathFromState(
-  role: "teacher" | "parent",
-  state: RoleActivationState,
-): string | null {
-  if (state.anyActive) {
-    return `/${role}`;
-  }
-  if (!state.primaryStatus) {
-    return null;
-  }
-  if (state.primaryStatus === "pending_setup") {
-    return `/${role}/setup`;
-  }
-  if (state.primaryStatus === "invitation_sent") {
-    const p = new URLSearchParams();
-    if (state.primaryAcademyId) p.set("academyId", state.primaryAcademyId);
-    const qs = p.toString();
-    return `/${role}/complete${qs ? `?${qs}` : ""}`;
-  }
-  if (state.primaryStatus === "pending_email_verification") {
-    return `/login/${role}`;
-  }
-  const q = new URLSearchParams();
-  q.set("state", state.primaryStatus);
-  if (state.primaryAcademyId) q.set("academyId", state.primaryAcademyId);
-  return `/${role}/session?${q.toString()}`;
-}
-
 /**
  * Firebase에 남아 있는 세션만으로 사용자의 기본 진입 경로를 결정합니다.
  * (앱 재실행·PWA 복원 시 홈/로그인에서 대시보드로 보낼 때 사용)
@@ -242,6 +212,10 @@ export async function resolveTeacherActivationPath(
   opts?: { maxCacheAgeMs?: number; bypassCache?: boolean },
 ): Promise<string | null> {
   const state = await resolveTeacherActivationState(user, opts);
+  // 활성 직원은 볼 수 있는 학원 메뉴가 있으면 학원 5탭(`staff-landing.ts`)
+  if (state.anyActive && state.primaryAcademyId) {
+    return resolveStaffLanding(user, state.primaryAcademyId);
+  }
   return activationPathFromState("teacher", state);
 }
 
