@@ -44,6 +44,22 @@ export function markBootOverlayShown(): void {
   }
 }
 
+/**
+ * 도착하면 준비가 끝날 때 스스로 `hide()`를 부르는 화면 — 역할 대시보드·학원 화면(`/academy` 진입 포함).
+ * 부팅 오버레이를 띄운 채 이 밖의 화면(첫 로그인·안내·로그인 등)으로 보낼 때는 보내기 전에 닫는다
+ * (닫지 않으면 failsafe까지 오버레이가 남는다).
+ */
+export function closesBootOverlayItself(path: string): boolean {
+  const p = path.split(/[?#]/)[0];
+  return (
+    p === "/owner" ||
+    p === "/teacher" ||
+    p === "/parent" ||
+    p === "/academy" ||
+    p.startsWith("/academy/")
+  );
+}
+
 const BootOverlayContext = createContext<BootOverlayContextValue | null>(null);
 
 /**

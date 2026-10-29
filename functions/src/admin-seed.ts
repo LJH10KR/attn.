@@ -4,6 +4,8 @@ import type { DocumentReference } from "firebase-admin/firestore";
 import { FieldValue } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
+import { DEFAULT_STAFF_ROLE_ID } from "./lib/permissions";
+import { ensureAcademyRoleTemplates } from "./roles";
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -263,7 +265,6 @@ export const createSeedBatch = onCall(async (request) => {
   }
 
   // 2) Firestore 시드(쓰기 수가 많지 않으므로 배치 단위 커밋)
-  const portalPassword = randomPassword();
   const writes: Array<{
     ref: DocumentReference;
     data: Record<string, unknown>;
@@ -278,12 +279,6 @@ export const createSeedBatch = onCall(async (request) => {
       createdAt: FieldValue.serverTimestamp(),
       status: "active",
     },
-  });
-
-  // secrets/login (필요할 때만 사용되므로 랜덤 값)
-  writes.push({
-    ref: db.doc(`academies/${academyId}/secrets/login`),
-    data: { portalPassword },
   });
 
   // owner profile
@@ -304,7 +299,7 @@ export const createSeedBatch = onCall(async (request) => {
   // teachers
   for (const t of teacherAuths) {
     writes.push({
-      ref: db.doc(`academies/${academyId}/teachers/${t.uid}`),
+      ref: db.doc(`academies/${academyId}/staff/${t.uid}`),
       data: {
         email: t.email,
         displayName: t.displayName,
@@ -313,6 +308,9 @@ export const createSeedBatch = onCall(async (request) => {
         academyId,
         status: "active",
         authUid: t.uid,
+        roleId: DEFAULT_STAFF_ROLE_ID,
+        permissions: [],
+        employmentStatus: "employed",
         activatedAt: FieldValue.serverTimestamp(),
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
@@ -402,6 +400,7 @@ export const createSeedBatch = onCall(async (request) => {
     for (const w of c) batch.set(w.ref, w.data);
     await batch.commit();
   }
+  await ensureAcademyRoleTemplates(db, academyId);
 
   logger.info("seedBatch created", {
     batchId,
@@ -473,16 +472,18 @@ export const deleteSeedBatch = onCall(async (request) => {
   }
 
   // Firestore 삭제
-  const academyTeachersRef = db.collection(`academies/${academyId}/teachers`);
+  const academyTeachersRef = db.collection(`academies/${academyId}/staff`);
   const academyParentsRef = db.collection(`academies/${academyId}/parents`);
   const academyStudentsRef = db.collection(`academies/${academyId}/students`);
+  const academyRolesRef = db.collection(`academies/${academyId}/roles`);
   const secretsLoginRef = db.doc(`academies/${academyId}/secrets/login`);
   const academyRef = db.doc(`academies/${academyId}`);
 
-  const [teachersSnap, parentsSnap, studentsSnap, secretsSnap] = await Promise.all([
+  const [teachersSnap, parentsSnap, studentsSnap, rolesSnap, secretsSnap] = await Promise.all([
     academyTeachersRef.get(),
     academyParentsRef.get(),
     academyStudentsRef.get(),
+    academyRolesRef.get(),
     secretsLoginRef.get(),
   ]);
 
@@ -490,6 +491,7 @@ export const deleteSeedBatch = onCall(async (request) => {
   teachersSnap.docs.forEach((d) => deleteOps.push(d.ref));
   parentsSnap.docs.forEach((d) => deleteOps.push(d.ref));
   studentsSnap.docs.forEach((d) => deleteOps.push(d.ref));
+  rolesSnap.docs.forEach((d) => deleteOps.push(d.ref));
   if (secretsSnap.exists) deleteOps.push(secretsLoginRef);
   deleteOps.push(academyRef);
 

@@ -22,9 +22,9 @@ service cloud.firestore {
       return isSignedIn() && academyData(academyId).ownerUid == request.auth.uid;
     }
 
-    /** 선생님 멤버 문서 경로 — 초청 후 문서 ID = Auth uid */
+    /** 직원 문서 경로(`staff`) — 계정이 있는 직원은 문서 ID = Auth uid(계정 없는 직원은 임의 ID) */
     function academyTeacherMemberPath(academyId) {
-      return /databases/$(database)/documents/academies/$(academyId)/teachers/$(request.auth.uid);
+      return /databases/$(database)/documents/academies/$(academyId)/staff/$(request.auth.uid);
     }
 
     function isAcademyTeacherMember(academyId) {
@@ -54,12 +54,35 @@ service cloud.firestore {
         && get(academyParentMemberPath(academyId)).data.status == 'active';
     }
 
-    /** 학원 포털 Custom Token — claim `role` / `academyId` (Cloud Functions 발급) */
-    function isAcademyPortalSession(academyId) {
-      return isSignedIn()
-        && request.auth.token.keys().hasAll(['role', 'academyId'])
-        && request.auth.token.role == 'academy'
-        && request.auth.token.academyId == academyId;
+
+    /** 권한 판별에 쓰는 본인 직원 문서 */
+    function staffMemberPath(academyId) {
+      return academyTeacherMemberPath(academyId);
+    }
+
+    /** 활성 직원의 세부 권한 목록(역할에서 서버가 복사, `functions/src/roles.ts`) — 없으면 [] */
+    function activeStaffPermissions(academyId) {
+      let m = get(staffMemberPath(academyId)).data;
+      return m.status == 'active'
+          && m.keys().hasAny(['permissions'])
+          && m.permissions is list
+        ? m.permissions
+        : [];
+    }
+
+    /**
+     * 세부 권한(`functions/src/lib/permissions.ts`) 중 하나라도 있는지 — 원장은 항상 참.
+     * 직원 권한은 멤버 문서에서 바로 읽으므로 역할을 바꾸면 즉시 반영된다.
+     */
+    function hasAnyPermission(academyId, keys) {
+      return isAcademyOwner(academyId)
+        || (isSignedIn()
+            && exists(staffMemberPath(academyId))
+            && activeStaffPermissions(academyId).hasAny(keys));
+    }
+
+    function hasPermission(academyId, key) {
+      return hasAnyPermission(academyId, [key]);
     }
 
     /** 학생의 부모로 지정된 학부모 문서가 존재하고 활성 상태인지 */
@@ -70,8 +93,8 @@ service cloud.firestore {
 
     function teacherDocActive(academyId, tid) {
       return tid is string
-        && exists(/databases/$(database)/documents/academies/$(academyId)/teachers/$(tid))
-        && get(/databases/$(database)/documents/academies/$(academyId)/teachers/$(tid)).data.status == 'active';
+        && exists(/databases/$(database)/documents/academies/$(academyId)/staff/$(tid))
+        && get(/databases/$(database)/documents/academies/$(academyId)/staff/$(tid)).data.status == 'active';
     }
 
     /** 전담 요소 하나 — 기존 전담(prev)이면 유지 허용, 새로 추가되는 경우에만 활성 선생 문서 필요 */
@@ -150,7 +173,7 @@ service cloud.firestore {
 
     /**
      * 학부모 클라이언트의 학생 문서 수정 — 납부 안내 확인 표시(`payment-reminder-modal.tsx`)만 허용.
-     * 그 외 필드(tuitionAmount·sessionBalance 등)는 학원(오너·포털)만 수정.
+     * 그 외 필드(tuitionAmount·sessionBalance 등)는 학원(원장·권한 직원)만 수정.
      */
     function parentStudentUpdateFieldsOk() {
       let d = request.resource.data;
@@ -160,6 +183,31 @@ service cloud.firestore {
             || d.tuitionReminderConfirmedAt == request.time)
         && (!d.keys().hasAny(['tuitionReminderConfirmedByUid'])
             || d.tuitionReminderConfirmedByUid == request.auth.uid);
+    }
+
+    /**
+     * 수납 권한(`billing.invoices`) 직원의 학생 문서 수정 — 원비·회차 필드만.
+     * 이름·연락처·전담 등 원생 정보는 원생 관리 권한(`operations.students`)만 수정.
+     * TODO(4단계 청구서): 원비·회차 값 자체는 검증하지 않음(sessionBalance 등 임의 값 가능) —
+     * 청구서·회차제 통합으로 이 필드들이 서버 전용이 되면 이 분기를 제거할 것.
+     */
+    function studentBillingFieldsOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'tuitionType', 'tuitionDueDayOfMonth', 'tuitionAmount', 'sentTuitionReminders',
+        'weeklySessionCount', 'pricePerSession', 'sessionBalance', 'extraSessionDates',
+        'sentSessionPaymentReminder', 'tuitionReminderConfirmedAt', 'tuitionReminderConfirmedByUid',
+        'absenceDeductionPerDay', 'updatedAt'
+      ]);
+    }
+
+    /**
+     * 출결 권한(`lessons.attendance`) 직원 — 수업 완료 기록 시 잔여 회차 차감 필드만.
+     * TODO(3단계 출결): sessionBalance를 아무 값으로나 바꿀 수 있음(1회 차감인지 검증 안 함) —
+     * 출석·지각 처리 시 서버가 자동 차감하는 구조로 바뀌면 이 분기를 제거할 것.
+     */
+    function studentSessionFieldsOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['sessionBalance', 'extraSessionDates', 'updatedAt']);
     }
 
     /**
@@ -211,35 +259,46 @@ service cloud.firestore {
        */
       allow read: if isAdmin()
         || (isSignedIn() && resource.data.ownerUid == request.auth.uid)
-        || isAcademyPortalSession(academyId)
         || isAcademyOwner(academyId)
         || isAcademyTeacherMember(academyId)
         || isAcademyParentMember(academyId);
 
-      /** 학원 생성 + 포털 비밀번호는 Cloud Functions(Admin SDK)에서만 처리 */
+      /** 학원 생성은 Cloud Functions(Admin SDK)에서만 처리 */
       allow create: if isAdmin();
 
       allow update, delete: if isAdmin()
         || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
 
-      /** 오너가 설정한 학원 포털 비밀번호 등 — 클라이언트 직접 접근 불가(Admin SDK만) */
+      /** 서버 전용 비밀 값(예전 포털 비밀번호 등) — 클라이언트 직접 접근 불가(Admin SDK만) */
       match /secrets/{secretId} {
         allow read, write: if false;
       }
 
-      match /teachers/{teacherId} {
+      /**
+       * 직원 — 인사 정보 + 선택적 계정(`authUid`, `status`)과 역할·권한(`roleId`, `permissions`)이 한 문서.
+       * 권한이 들어 있으므로 쓰기는 Functions(`staff.ts`, `teachers.ts`, `roles.ts`)만.
+       * 원생 관리·반 관리는 담당 선생님 지정 때문에 목록을 읽는다.
+       */
+      match /staff/{staffId} {
         allow read: if isAdmin()
-          || isAcademyOwner(academyId)
-          || isAcademyPortalSession(academyId)
+          || hasAnyPermission(academyId, [
+            'settings.staff', 'settings.members', 'operations.students', 'operations.classes'
+          ])
           || (isSignedIn() && resource.data.authUid == request.auth.uid);
 
         allow create, update, delete: if false;
       }
 
+      /** 역할(권한 묶음) — 생성·수정·배정은 Functions(`roles.ts`)만 */
+      match /roles/{roleId} {
+        allow read: if isAdmin() || hasPermission(academyId, 'settings.members');
+        allow write: if false;
+      }
+
+      /** 원생 관리는 보호자 선택·표시 때문에 학부모 목록을 읽는다 */
       match /parents/{parentId} {
         allow read: if isAdmin()
-          || isAcademyOwner(academyId)
-          || isAcademyPortalSession(academyId)
+          || hasAnyPermission(academyId, ['operations.parents', 'operations.students'])
           || (isSignedIn() && resource.data.authUid == request.auth.uid);
 
         allow create, update, delete: if false;
@@ -248,58 +307,75 @@ service cloud.firestore {
       /** 학원 대시보드 집계·알림 inbox — Functions(Admin SDK)만 쓰기 */
       match /meta/dashboardStats {
         allow read: if isAdmin()
-          || isAcademyOwner(academyId)
-          || isAcademyPortalSession(academyId);
+          || hasAnyPermission(academyId, [
+            'operations.students', 'operations.parents', 'settings.members'
+          ]);
         allow write: if false;
       }
 
+      /** 가입 대기·초청 만료(멤버·학부모)와 회차 자동 충전(결제) 알림 */
       match /adminInbox/{inboxId} {
         allow read: if isAdmin()
+          || hasAnyPermission(academyId, [
+            'settings.members', 'operations.parents', 'billing.payments'
+          ]);
+        allow write: if false;
+      }
+
+      /**
+       * 학원 선택지 목록(직무 등, `{id, label}` 배열) — 민감 정보가 없어 원장·활성 직원 읽기,
+       * 쓰기는 Functions(`saveAcademyOptionList`, 목록 종류별 권한 검사)만.
+       */
+      match /meta/options {
+        allow read: if isAdmin()
           || isAcademyOwner(academyId)
-          || isAcademyPortalSession(academyId);
+          || isAcademyTeacherActive(academyId);
         allow write: if false;
       }
 
       /** 출석 키오스크 설정(해시·잠금) — Functions만 쓰기, 공개 필드만 읽기 */
       match /meta/kioskSettings {
         allow read: if isAdmin()
-          || isAcademyOwner(academyId)
-          || isAcademyPortalSession(academyId);
+          || hasAnyPermission(academyId, ['lessons.attendance', 'settings.general']);
         allow write: if false;
       }
 
       /**
-       * 원비 납부 안내(카카오페이 링크·계좌) — 오너 쓰기, 학원 포털은 납부 안내 필드만
+       * 원비 납부 안내(카카오페이 링크·계좌) — 오너 쓰기, 수납 설정 권한은 납부 안내 필드만
        * (`owner-tuition-settings-card.tsx`). 포트원 channelKey는 결제 경로를 바꾸므로 오너만.
        * 소속 활성 학부모도 읽기 허용.
        */
       match /meta/tuitionSettings {
-        function portalTuitionFields() {
+        function delegatedTuitionFields() {
           return ['kakaoPayLink', 'bankName', 'accountNumber', 'accountHolder', 'updatedAt'];
         }
+        function canEditTuitionSettings() {
+          return hasAnyPermission(academyId, ['billing.invoices', 'settings.general']);
+        }
         allow read: if isAdmin()
-          || isAcademyOwner(academyId)
-          || isAcademyPortalSession(academyId)
+          || hasAnyPermission(academyId, [
+            'billing.invoices', 'billing.collections', 'settings.general'
+          ])
           || isAcademyParentActive(academyId);
         allow create: if isAdmin()
           || isAcademyOwner(academyId)
-          || (isAcademyPortalSession(academyId)
-              && request.resource.data.keys().hasOnly(portalTuitionFields()));
+          || (canEditTuitionSettings()
+              && request.resource.data.keys().hasOnly(delegatedTuitionFields()));
         allow update: if isAdmin()
           || isAcademyOwner(academyId)
-          || (isAcademyPortalSession(academyId)
+          || (canEditTuitionSettings()
               && request.resource.data.diff(resource.data).affectedKeys()
-                .hasOnly(portalTuitionFields()));
+                .hasOnly(delegatedTuitionFields()));
         allow delete: if isAdmin()
           || isAcademyOwner(academyId);
       }
 
       /**
-       * 원비 납부 방식 기본 설정 — 오너·학원 포털 쓰기(포털은 기본값 필드만:
-       * `owner-session-tuition-settings-card.tsx`, 학생 패널 기본 납부 방식 모달).
+       * 원비 납부 방식 기본 설정 — 오너 쓰기, 수납·원생 관리 권한은 기본값 필드만
+       * (`owner-session-tuition-settings-card.tsx`, 학생 패널 기본 납부 방식 모달).
        */
       match /meta/sessionTuitionSettings {
-        function portalSessionTuitionFieldsOk(keys) {
+        function delegatedSessionTuitionFieldsOk(keys) {
           return keys.hasOnly([
               'defaultTuitionType', 'defaultTuitionDueDayOfMonth', 'defaultTuitionAmount',
               'defaultWeeklySessionCount', 'defaultPricePerSession', 'updatedAt'
@@ -307,33 +383,32 @@ service cloud.firestore {
             && (!request.resource.data.keys().hasAny(['defaultTuitionType'])
                 || request.resource.data.defaultTuitionType in ['monthly_fixed', 'session_based']);
         }
-        allow read: if isAdmin()
-          || isAcademyOwner(academyId)
-          || isAcademyPortalSession(academyId);
+        function canEditSessionTuitionSettings() {
+          return hasAnyPermission(academyId, ['billing.invoices', 'operations.students']);
+        }
+        allow read: if isAdmin() || canEditSessionTuitionSettings();
         allow create: if isAdmin()
           || isAcademyOwner(academyId)
-          || (isAcademyPortalSession(academyId)
-              && portalSessionTuitionFieldsOk(request.resource.data.keys()));
+          || (canEditSessionTuitionSettings()
+              && delegatedSessionTuitionFieldsOk(request.resource.data.keys()));
         allow update: if isAdmin()
           || isAcademyOwner(academyId)
-          || (isAcademyPortalSession(academyId)
-              && portalSessionTuitionFieldsOk(
+          || (canEditSessionTuitionSettings()
+              && delegatedSessionTuitionFieldsOk(
                 request.resource.data.diff(resource.data).affectedKeys()));
         allow delete: if isAdmin()
           || isAcademyOwner(academyId);
       }
 
       /**
-       * 결석 차감 제안 기본값 — 오너·학원 포털 쓰기(값 형식 검증), 학부모 비공개.
+       * 결석 차감 제안 기본값 — 수납·전체설정 권한 쓰기(값 형식 검증), 학부모 비공개.
        * 차감은 원장이 청구 모달에서 확인 후 반영하므로 이 값 자체가 청구 금액을 바꾸지는 않음.
        */
       match /meta/absenceDeductionSettings {
         allow read: if isAdmin()
-          || isAcademyOwner(academyId)
-          || isAcademyPortalSession(academyId);
+          || hasAnyPermission(academyId, ['billing.invoices', 'settings.general']);
         allow write: if (isAdmin()
-            || isAcademyOwner(academyId)
-            || isAcademyPortalSession(academyId))
+            || hasAnyPermission(academyId, ['billing.invoices', 'settings.general']))
           && request.resource.data.keys().hasOnly(['method', 'perDayAmount', 'monthlyClassDays', 'updatedAt'])
           && request.resource.data.method in ['per_day', 'divide']
           && (request.resource.data.method != 'per_day'
@@ -351,9 +426,12 @@ service cloud.firestore {
          * list 쿼리 검증 시 OR 전체가 분석되므로, parentUserId 등 필드가 없을 때 직접 접근하면
          * evaluation error가 날 수 있음 → 키 존재·타입 확인 후 비교.
          */
+        /** 원생을 다루는 메뉴(원생·학부모·출결·수납)는 모두 학생 목록을 읽는다 */
         allow read: if isAdmin()
-          || isAcademyOwner(academyId)
-          || isAcademyPortalSession(academyId)
+          || hasAnyPermission(academyId, [
+            'operations.students', 'operations.parents', 'lessons.attendance',
+            'billing.invoices', 'billing.collections', 'billing.payments'
+          ])
           || (isAcademyTeacherActive(academyId) && teacherCanReadAssignedStudent(resource.data))
           || (isAcademyParentActive(academyId)
               && resource.data.keys().hasAny(['parentUserId'])
@@ -362,8 +440,7 @@ service cloud.firestore {
 
         allow create: if
           (((isAdmin()
-            || isAcademyOwner(academyId)
-            || isAcademyPortalSession(academyId))
+            || hasPermission(academyId, 'operations.students'))
           && request.resource.data.keys().hasAll(['parentUserId', 'name', 'createdAt'])
           && request.resource.data.parentUserId is string
           && request.resource.data.name is string
@@ -375,21 +452,21 @@ service cloud.firestore {
           && studentAssignedTeacherOk(academyId, []);
 
         /**
-         * 학부모는 전담 필드를 바꿀 수 없으므로(parentStudentUpdateFieldsOk) 전담 검증을 생략 —
-         * 전담 선생 중 비활성자가 있어도 납부 안내 확인 표시는 저장되도록.
+         * 학부모·수납·출결 분기는 전담 필드를 바꿀 수 없으므로 전담 검증을 생략 —
+         * 전담 선생 중 비활성자가 있어도 원비·회차·납부 안내 확인 표시는 저장되도록.
          */
         allow update: if ((isAdmin()
-          || isAcademyOwner(academyId)
-          || isAcademyPortalSession(academyId))
+          || hasPermission(academyId, 'operations.students'))
           && studentAssignedTeacherOk(academyId, prevAssignedTeacherUids()))
+          || (hasPermission(academyId, 'billing.invoices') && studentBillingFieldsOnly())
+          || (hasPermission(academyId, 'lessons.attendance') && studentSessionFieldsOnly())
           || (isAcademyParentActive(academyId)
               && resource.data.parentUserId == request.auth.uid
               && parentStudentUpdateFieldsOk());
 
         /** 학부모 측 삭제는 미수 회차 등 기록 소실 우려로 차단 — 삭제는 `deleteAcademyStudent`(학원 전용) */
         allow delete: if isAdmin()
-          || isAcademyOwner(academyId)
-          || isAcademyPortalSession(academyId);
+          || hasPermission(academyId, 'operations.students');
 
         match /serverSecrets/{secretId} {
           allow read, write: if false;
@@ -401,8 +478,7 @@ service cloud.firestore {
          */
         match /attendanceRecords/{date} {
           allow read: if isAdmin()
-            || isAcademyOwner(academyId)
-            || isAcademyPortalSession(academyId);
+            || hasAnyPermission(academyId, ['lessons.attendance', 'billing.invoices']);
           allow write: if false;
         }
 
@@ -412,20 +488,17 @@ service cloud.firestore {
          */
         match /tuitionInvoices/{period} {
           allow read: if isAdmin()
-            || isAcademyOwner(academyId)
-            || isAcademyPortalSession(academyId);
+            || hasAnyPermission(academyId, ['billing.invoices', 'billing.collections']);
           allow write: if false;
         }
 
-        /** 수업 완료 기록 로그 — 오너·포털·활성 선생님이 생성, 삭제는 오너만 */
+        /** 수업 완료 기록 로그 — 출결 권한·활성 선생님이 생성, 삭제는 오너만 */
         match /sessionLogs/{logId} {
           allow read: if isAdmin()
-            || isAcademyOwner(academyId)
-            || isAcademyPortalSession(academyId)
+            || hasAnyPermission(academyId, ['lessons.attendance', 'billing.invoices'])
             || isAcademyTeacherActive(academyId);
           allow create: if isAdmin()
-            || isAcademyOwner(academyId)
-            || isAcademyPortalSession(academyId)
+            || hasPermission(academyId, 'lessons.attendance')
             || isAcademyTeacherActive(academyId);
           allow update, delete: if isAdmin()
             || isAcademyOwner(academyId);
@@ -436,10 +509,15 @@ service cloud.firestore {
        * 카드 결제(포트원 V2) 이력 — 검증·상태 갱신은 Cloud Functions(Admin SDK, onRequest)만 수행.
        * 클라이언트 쓰기는 isAdmin/isAcademyOwner 외에는 항상 거부(위변조 방지).
        */
+      /**
+       * 결제 취소(환불)는 Next 서버(`/api/payment/cancel`)가 `billing.refunds`로 검사하고 Admin SDK로 갱신 —
+       * 환불 권한만 받은 직원도 취소할 결제를 찾을 수 있게 읽기를 허용.
+       */
       match /payments/{paymentId} {
         allow read: if isAdmin()
-          || isAcademyOwner(academyId)
-          || isAcademyPortalSession(academyId)
+          || hasAnyPermission(academyId, [
+            'billing.payments', 'billing.collections', 'billing.refunds'
+          ])
           || (isSignedIn()
               && resource.data.keys().hasAny(['parentUserId'])
               && resource.data.parentUserId is string

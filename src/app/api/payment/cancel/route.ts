@@ -4,6 +4,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { academyPaymentPath, COLLECTIONS } from "@/lib/firebase/attn-schema";
 import { reopenInvoiceForCancelledPayment } from "@/lib/payment/complete-payment";
+import { normalizePermissionList, type AcademyPermission } from "@/lib/academy/permissions";
 
 export const runtime = "nodejs";
 
@@ -16,19 +17,23 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-/** functions/src/lib/academy-access.ts의 assertCanManageAcademy() 로직과 동일 */
-async function canManageAcademy(
+/** functions/src/lib/academy-access.ts의 assertPermission() 판별과 동일 */
+async function hasAcademyPermission(
   academyId: string,
   uid: string,
-  claimRole: unknown,
-  claimAcademyId: unknown,
+  permission: AcademyPermission,
 ): Promise<boolean> {
-  if (claimRole === "academy" && claimAcademyId === academyId) {
-    return true;
-  }
   const academySnap = await adminDb.doc(`${COLLECTIONS.academies}/${academyId}`).get();
   if (!academySnap.exists) return false;
-  return academySnap.get("ownerUid") === uid;
+  if (academySnap.get("ownerUid") === uid) return true;
+  const staffSnap = await adminDb
+    .doc(`${COLLECTIONS.academies}/${academyId}/staff/${uid}`)
+    .get();
+  return (
+    staffSnap.exists &&
+    staffSnap.get("status") === "active" &&
+    normalizePermissionList(staffSnap.get("permissions")).includes(permission)
+  );
 }
 
 export async function POST(request: NextRequest) {
@@ -60,7 +65,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "인증 토큰이 유효하지 않습니다." }, { status: 401 });
   }
 
-  const allowed = await canManageAcademy(academyId, decoded.uid, decoded.role, decoded.academyId);
+  const allowed = await hasAcademyPermission(academyId, decoded.uid, "billing.refunds");
   if (!allowed) {
     return NextResponse.json({ error: "이 학원을 관리할 권한이 없습니다." }, { status: 403 });
   }

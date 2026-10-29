@@ -132,7 +132,7 @@ export const listAdminUserDirectory = onCall(async (request) => {
     const op = ownerProfiles.get(ownerUid) ?? { email: null, displayName: null };
 
     const [teachersSnap, parentsSnap] = await Promise.all([
-      db.collection(`academies/${academyId}/teachers`).get(),
+      db.collection(`academies/${academyId}/staff`).get(),
       db.collection(`academies/${academyId}/parents`).get(),
     ]);
 
@@ -173,7 +173,7 @@ export const listAdminUserDirectory = onCall(async (request) => {
 });
 
 /**
- * 관리자용 — 학원 문서와 하위 teachers/parents/students/secrets 전부 삭제 후
+ * 관리자용 — 학원 문서와 하위 staff/parents/students/secrets 전부 삭제 후
  * 연결된 Auth 사용자(오너·멤버)를 제거합니다. 운영 데이터에 영향을 주므로 신중히 사용하세요.
  */
 export const adminDeleteAcademyCascade = onCall(async (request) => {
@@ -242,7 +242,7 @@ export const adminDeleteMemberUser = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  const col = role === "teacher" ? "teachers" : "parents";
+  const col = role === "teacher" ? "staff" : "parents";
   const ref = db.doc(`academies/${academyId}/${col}/${memberDocId}`);
   const snap = await ref.get();
   if (!snap.exists) {

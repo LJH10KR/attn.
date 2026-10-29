@@ -3,10 +3,17 @@ import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { attnLoginIndexPath, formatStudentAttnId } from "./attn-id";
 import { allocateTeacherLoginId } from "./teacher-login-id";
+import { tempPasswordSecretFields } from "./password-hash";
+import { DEFAULT_STAFF_ROLE_ID } from "./permissions";
 
 export type MemberKind = "teacher" | "parent";
 
 export type MemberStatus = "pending_setup" | "active" | "inactive";
+
+/** 멤버 문서 컬렉션 — 선생님(직원)은 `staff`, 학부모는 `parents` */
+export function memberCollectionName(role: MemberKind): "staff" | "parents" {
+  return role === "teacher" ? "staff" : "parents";
+}
 
 export type ProvisionedMember = {
   authUid: string;
@@ -25,6 +32,16 @@ export function randomTempPassword(): string {
     s += chars[crypto.randomInt(0, chars.length)]!;
   }
   return s + "1a!";
+}
+
+/**
+ * 로그인 ID 계정(내부 이메일)의 Firebase Auth 비밀번호 — 아무도 모르는 무작위 값.
+ * 앱 로그인은 서버가 `secrets/login` 해시로 확인한 뒤 커스텀 토큰을 주므로 Auth 비밀번호를 쓰지 않는다.
+ * 사용자 비밀번호를 Auth에도 넣으면 내부 이메일로 `signInWithEmailAndPassword`를 시도해 연속 실패 잠금을 우회할 수 있음.
+ * Auth 비밀번호를 만들거나 바꾸는 모든 곳(계정 생성·첫 로그인·변경·재발급·초기화)에서 이 값만 쓸 것.
+ */
+export function randomAuthPassword(): string {
+  return crypto.randomBytes(32).toString("base64url");
 }
 
 function internalEmailForAttnId(attnId: string): string {
@@ -56,7 +73,7 @@ export async function provisionMemberAccount(params: {
   try {
     userRecord = await admin.auth().createUser({
       email,
-      password: tempPassword,
+      password: randomAuthPassword(),
       displayName,
       emailVerified: false,
       disabled: false,
@@ -70,7 +87,7 @@ export async function provisionMemberAccount(params: {
   }
 
   const authUid = userRecord.uid;
-  const col = role === "teacher" ? "teachers" : "parents";
+  const col = role === "teacher" ? "staff" : "parents";
   const memberRef = db.doc(`academies/${academyId}/${col}/${authUid}`);
 
   const memberData: Record<string, unknown> = {
@@ -85,6 +102,9 @@ export async function provisionMemberAccount(params: {
   };
   if (role === "teacher") {
     memberData.loginId = loginId;
+    memberData.roleId = DEFAULT_STAFF_ROLE_ID;
+    memberData.permissions = [];
+    memberData.employmentStatus = "employed";
   }
   if (role === "parent") {
     memberData.childrenCount = 0;
@@ -93,10 +113,11 @@ export async function provisionMemberAccount(params: {
 
   const batch = db.batch();
   batch.set(memberRef, memberData);
-  batch.set(db.doc(`academies/${academyId}/${col}/${authUid}/secrets/login`), {
-    tempPassword,
-    updatedAt: FieldValue.serverTimestamp(),
-  });
+  batch.set(
+    db.doc(`academies/${academyId}/${col}/${authUid}/secrets/login`),
+    await tempPasswordSecretFields(tempPassword),
+    { merge: true },
+  );
   batch.set(db.doc(attnLoginIndexPath(loginId)), {
     loginId,
     attnId,

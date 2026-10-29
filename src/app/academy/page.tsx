@@ -1,24 +1,12 @@
 ﻿import type { Metadata } from "next";
-import { Suspense } from "react";
-import { AcademyDashboard } from "./academy-dashboard";
+import { AcademyEntry } from "./academy-entry";
 
 export const metadata: Metadata = {
   title: "학원 대시보드 · attn.",
   description: "학원 운영 요약 및 알림 현황",
 };
 
-function AcademyFallback() {
-  return (
-    <div className="min-h-[100dvh] bg-background flex items-center justify-center">
-      <p className="text-sm text-neutral-500">불러오는 중…</p>
-    </div>
-  );
-}
-
+/** 학원 ID 없이 들어온 경우 — 갈 학원을 정해 `/academy/[academyId]`로 보낸다(예전 `?id=` 주소는 middleware가 먼저 옮김) */
 export default function AcademyPage() {
-  return (
-    <Suspense fallback={<AcademyFallback />}>
-      <AcademyDashboard />
-    </Suspense>
-  );
+  return <AcademyEntry />;
 }

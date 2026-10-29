@@ -1,10 +1,6 @@
 import {setGlobalOptions} from "firebase-functions";
 import {onCall, HttpsError} from "firebase-functions/v2/https";
-import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
-import { FieldValue } from "firebase-admin/firestore";
-import { assertCanManageAcademy } from "./lib/academy-access";
-import { ACADEMY_ATTN_ID_RE } from "./lib/attn-id";
 
 /**
  * `createCustomToken`용 IAM 서명 주체.
@@ -36,11 +32,6 @@ if (!admin.apps.length) {
 
 setGlobalOptions({maxInstances: 10, region: "asia-northeast3"});
 
-/** 신규 학원 등록용 — 소문자·슬러그 형식 */
-function normalizeNewAcademyId(raw: unknown): string {
-  return typeof raw === "string" ? raw.trim().toLowerCase() : "";
-}
-
 /**
  * 기존 문서 경로용 — Firestore 문서 ID는 대소문자를 구분하므로 소문자 강제 없음.
  * (예전 addDoc 자동 ID·혼합 대소문자 ID와 호환)
@@ -59,165 +50,9 @@ function requireAcademyDocumentId(raw: unknown): string {
   return id;
 }
 
-/** attnId 학원(o1_a3) 또는 구 슬러그 ID */
-function resolveAcademyLoginId(raw: unknown): string {
-  const id = requireAcademyDocumentId(raw);
-  if (ACADEMY_ATTN_ID_RE.test(id)) {
-    return id;
-  }
-  return id.toLowerCase();
-}
-
-function assertValidNewAcademySlug(academyId: string): void {
-  if (!/^[a-z0-9][a-z0-9_-]{1,47}$/.test(academyId)) {
-    throw new HttpsError(
-      "invalid-argument",
-      "학원 ID는 3~48자이며 영문 소문자, 숫자, 밑줄(_), 하이픈(-)만 사용할 수 있습니다.",
-    );
-  }
-}
-
-function assertOwnerOrNotFound(
-  academySnap: FirebaseFirestore.DocumentSnapshot,
-  uid: string,
-  action: "수정" | "삭제",
-): void {
-  if (!academySnap.exists) {
-    throw new HttpsError("not-found", "학원을 찾을 수 없습니다.");
-  }
-  const ownerUid = academySnap.get("ownerUid");
-  if (typeof ownerUid !== "string" || ownerUid !== uid) {
-    throw new HttpsError("permission-denied", `학원을 ${action}할 권한이 없습니다.`);
-  }
-}
-
 /**
- * 오너 전용 — 학원 문서(지정 ID) + 포털 비밀번호(secrets/login)를 한 번에 생성합니다.
- */
-export const createAcademyWithPortal = onCall(async (request) => {
-  const uid = request.auth?.uid;
-  if (!uid) {
-    throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
-  }
-
-  const academyId = normalizeNewAcademyId(request.data?.academyId);
-  assertValidNewAcademySlug(academyId);
-
-  const name = typeof request.data?.name === "string" ? request.data.name.trim() : "";
-  if (!name || name.length > 80) {
-    throw new HttpsError("invalid-argument", "학원 이름을 1~80자로 입력해 주세요.");
-  }
-
-  const portalPassword =
-    typeof request.data?.portalPassword === "string" ? request.data.portalPassword : "";
-  if (portalPassword.length < 6) {
-    throw new HttpsError("invalid-argument", "포털 비밀번호는 6자 이상이어야 합니다.");
-  }
-
-  const statusRaw = request.data?.status;
-  const status = statusRaw === "archived" ? "archived" : "active";
-
-  const db = admin.firestore();
-  const academyRef = db.doc(`academies/${academyId}`);
-  const existing = await academyRef.get();
-  if (existing.exists) {
-    throw new HttpsError("already-exists", "이미 사용 중인 학원 ID입니다.");
-  }
-
-  const batch = db.batch();
-  batch.set(academyRef, {
-    ownerUid: uid,
-    name,
-    createdAt: FieldValue.serverTimestamp(),
-    status,
-  });
-  batch.set(db.doc(`academies/${academyId}/secrets/login`), {
-    portalPassword,
-  });
-  await batch.commit();
-
-  return {academyId};
-});
-
-/**
- * 오너 전용 — 학원 포털 로그인 비밀번호 변경
- */
-export const updateAcademyPortalPassword = onCall(async (request) => {
-  const uid = request.auth?.uid;
-  if (!uid) {
-    throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
-  }
-
-  const academyId = requireAcademyDocumentId(request.data?.academyId);
-
-  const portalPassword =
-    typeof request.data?.portalPassword === "string" ? request.data.portalPassword : "";
-  if (portalPassword.length < 6) {
-    throw new HttpsError("invalid-argument", "포털 비밀번호는 6자 이상이어야 합니다.");
-  }
-
-  const db = admin.firestore();
-  const academySnap = await db.doc(`academies/${academyId}`).get();
-  assertOwnerOrNotFound(academySnap, uid, "수정");
-
-  await db.doc(`academies/${academyId}/secrets/login`).set({portalPassword}, {merge: true});
-  return {ok: true};
-});
-
-/**
- * 학원 포털(또는 오너) — 현재 비밀번호 확인 후 포털 로그인 비밀번호 변경
- */
-export const changeAcademyPortalPassword = onCall(async (request) => {
-  const auth = request.auth;
-  if (!auth?.uid) {
-    throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
-  }
-  const uid = auth.uid;
-
-  const academyId = requireAcademyDocumentId(request.data?.academyId);
-  const currentPassword =
-    typeof request.data?.currentPassword === "string" ? request.data.currentPassword : "";
-  const newPassword =
-    typeof request.data?.newPassword === "string" ? request.data.newPassword : "";
-
-  if (!currentPassword) {
-    throw new HttpsError("invalid-argument", "현재 비밀번호를 입력해 주세요.");
-  }
-  if (newPassword.length < 6) {
-    throw new HttpsError("invalid-argument", "새 비밀번호는 6자 이상이어야 합니다.");
-  }
-  if (currentPassword === newPassword) {
-    throw new HttpsError(
-      "invalid-argument",
-      "새 비밀번호는 현재 비밀번호와 달라야 합니다.",
-    );
-  }
-
-  const db = admin.firestore();
-  await assertCanManageAcademy(db, academyId, uid, auth.token);
-
-  const secretRef = db.doc(`academies/${academyId}/secrets/login`);
-  const secretSnap = await secretRef.get();
-  if (!secretSnap.exists) {
-    throw new HttpsError("failed-precondition", "학원 로그인이 아직 설정되지 않았습니다.");
-  }
-  const portalPassword = secretSnap.get("portalPassword");
-  if (typeof portalPassword !== "string" || portalPassword.length === 0) {
-    throw new HttpsError("failed-precondition", "학원 로그인이 아직 설정되지 않았습니다.");
-  }
-  if (currentPassword !== portalPassword) {
-    throw new HttpsError("permission-denied", "현재 비밀번호가 올바르지 않습니다.");
-  }
-
-  await secretRef.set(
-    {portalPassword: newPassword, updatedAt: FieldValue.serverTimestamp()},
-    {merge: true},
-  );
-  return {ok: true};
-});
-
-/**
- * 오너 전용 — 학원 문서 + 포털 시크릿 문서 삭제
+ * 오너 전용 — 학원 문서 삭제. 학원 공용 로그인(포털)은 폐지됐지만 예전에 만든
+ * `secrets/login` 문서가 남아 있을 수 있어 함께 지운다.
  */
 export const deleteOwnerAcademy = onCall(async (request) => {
   const uid = request.auth?.uid;
@@ -230,7 +65,12 @@ export const deleteOwnerAcademy = onCall(async (request) => {
   const db = admin.firestore();
   const academyRef = db.doc(`academies/${academyId}`);
   const academySnap = await academyRef.get();
-  assertOwnerOrNotFound(academySnap, uid, "삭제");
+  if (!academySnap.exists) {
+    throw new HttpsError("not-found", "학원을 찾을 수 없습니다.");
+  }
+  if (academySnap.get("ownerUid") !== uid) {
+    throw new HttpsError("permission-denied", "학원을 삭제할 권한이 없습니다.");
+  }
 
   const batch = db.batch();
   batch.delete(academyRef);
@@ -239,51 +79,6 @@ export const deleteOwnerAcademy = onCall(async (request) => {
 
   return {ok: true};
 });
-
-/**
- * 학원 포털 로그인
- */
-export const signInAcademy = onCall(async (request) => {
-  const academyId = resolveAcademyLoginId(request.data?.academyId);
-  const password = typeof request.data?.password === "string" ? request.data.password : "";
-
-  if (!password) {
-    throw new HttpsError("invalid-argument", "로그인 번호와 비밀번호를 입력해 주세요.");
-  }
-
-  const academySnap = await admin.firestore().doc(`academies/${academyId}`).get();
-  if (!academySnap.exists) {
-    throw new HttpsError("not-found", "학원을 찾을 수 없습니다.");
-  }
-
-  const secretSnap = await admin
-    .firestore()
-    .doc(`academies/${academyId}/secrets/login`)
-    .get();
-
-  if (!secretSnap.exists) {
-    logger.warn("Academy secrets/login missing", {academyId});
-    throw new HttpsError("failed-precondition", "학원 로그인이 아직 설정되지 않았습니다.");
-  }
-
-  const portalPassword = secretSnap.get("portalPassword");
-  if (typeof portalPassword !== "string" || portalPassword.length === 0) {
-    throw new HttpsError("failed-precondition", "학원 로그인이 아직 설정되지 않았습니다.");
-  }
-
-  if (password !== portalPassword) {
-    throw new HttpsError("permission-denied", "비밀번호가 올바르지 않습니다.");
-  }
-
-  const uid = `academy_${academyId.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 100)}`;
-  const customToken = await admin.auth().createCustomToken(uid, {
-    role: "academy",
-    academyId,
-  });
-
-  return {customToken};
-});
-
 export {
   sendStudentAttendanceNotification,
   syncParentPushSubscription,
@@ -312,16 +107,28 @@ export {
   sendParentInvitation,
   updateParentInvite,
 } from "./parents";
+export { deleteStaffMember, saveStaffMember } from "./staff";
+export { saveAcademyOptionList } from "./academy-options";
+export {
+  acceptStaffInvite,
+  cancelStaffInvite,
+  checkStaffInviteLoginId,
+  createStaffAccounts,
+  createStaffInvite,
+  getStaffInviteInfo,
+} from "./staff-invites";
+export {
+  assignStaffRole,
+  deleteAcademyRole,
+  listAcademyRoles,
+  saveAcademyRole,
+} from "./roles";
 export {
   activateTeacher,
   deactivateTeacher,
   deleteTeacherInvite,
-  finalizeTeacherOnboarding,
   getTeacherActivationState,
   listTeacherAssignedStudents,
-  registerTeacherInvite,
-  sendTeacherInvitation,
-  updateTeacherInvite,
 } from "./teachers";
 
 export {
@@ -354,9 +161,7 @@ export { sendOwnerSignupVerificationEmail } from "./owner-auth-mail";
 export { issueEmailVerificationOtp, verifyEmailVerificationOtp } from "./email-verification-otp";
 export {
   createAcademyEasy,
-  provisionTemplateTeachers,
   provisionTemplateParents,
-  provisionTeachersBatch,
   provisionParentsBatch,
   provisionStudentsBatch,
 } from "./academy-provision";
@@ -364,8 +169,10 @@ export {
   signInTeacher,
   signInTeacherGoogle,
   signInParent,
+  reauthenticateMember,
   completeMemberFirstLogin,
   regenerateMemberTempPassword,
+  resetMemberPassword,
   listAcademyIssuedAccounts,
 } from "./member-auth";
 export {

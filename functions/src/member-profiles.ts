@@ -8,12 +8,15 @@ import {
   validateMemberLoginIdFormat,
 } from "./lib/member-login-id";
 import { parseOptionalKrPhone } from "./lib/kr-phone";
+import { verifyLoginPasswordThrottled } from "./lib/login-throttle";
+import { randomAuthPassword } from "./lib/member-credentials";
+import { hasLoginSecret, passwordSecretFields } from "./lib/password-hash";
 import type { DocumentReference } from "firebase-admin/firestore";
 import { isParentLoginEmail, normalizeParentLoginEmail } from "./lib/parent-login-id";
 import { syncUserAdminProfile } from "./lib/firestore-cleanup";
 
 function teacherAcademyIdFromMemberPath(path: string): string | null {
-  const m = path.match(/^academies\/([^/]+)\/teachers\//);
+  const m = path.match(/^academies\/([^/]+)\/staff\//);
   return m ? m[1] : null;
 }
 
@@ -32,7 +35,7 @@ async function assertTeacherAuth(request: {
 
   const snaps = await admin
     .firestore()
-    .collectionGroup("teachers")
+    .collectionGroup("staff")
     .where("authUid", "==", uid)
     .limit(10)
     .get();
@@ -71,22 +74,15 @@ async function verifyMemberLoginPassword(
   role: "teacher" | "parent",
   password: string,
 ): Promise<void> {
-  const col = role === "teacher" ? "teachers" : "parents";
-  const secretSnap = await admin
-    .firestore()
-    .doc(`academies/${academyId}/${col}/${uid}/secrets/login`)
-    .get();
-  if (!secretSnap.exists) {
-    throw new HttpsError("failed-precondition", "로그인 정보가 설정되지 않았습니다.");
-  }
-  const stored = secretSnap.get("tempPassword");
-  const current = secretSnap.get("password");
-  const ok =
-    (typeof stored === "string" && stored === password) ||
-    (typeof current === "string" && current === password);
-  if (!ok) {
-    throw new HttpsError("permission-denied", "현재 비밀번호가 올바르지 않습니다.");
-  }
+  // 로그인과 같은 연속 실패 잠금 — 열린 세션으로 현재 비밀번호를 대입해 알아내지 못하게
+  const col = role === "teacher" ? "staff" : "parents";
+  const db = admin.firestore();
+  await verifyLoginPasswordThrottled(
+    db,
+    db.doc(`academies/${academyId}/${col}/${uid}/secrets/login`),
+    password,
+    "현재 비밀번호가 올바르지 않습니다.",
+  );
 }
 
 async function parentHasStoredPassword(academyId: string, uid: string): Promise<boolean> {
@@ -94,13 +90,7 @@ async function parentHasStoredPassword(academyId: string, uid: string): Promise<
     .firestore()
     .doc(`academies/${academyId}/parents/${uid}/secrets/login`)
     .get();
-  if (!secretSnap.exists) return false;
-  const stored = secretSnap.get("tempPassword");
-  const current = secretSnap.get("password");
-  return (
-    (typeof stored === "string" && stored.length > 0) ||
-    (typeof current === "string" && current.length > 0)
-  );
+  return hasLoginSecret(secretSnap.data());
 }
 
 function assertDisplayName(raw: unknown): string {
@@ -118,7 +108,7 @@ export const updateTeacherProfile = onCall(async (request) => {
   const displayName = assertDisplayName(request.data?.displayName);
   const hasPhoneField = request.data != null && "phone" in request.data;
   const phone = hasPhoneField ? parseOptionalKrPhone(request.data?.phone) : undefined;
-  const ref = admin.firestore().doc(`academies/${academyId}/teachers/${memberDocId}`);
+  const ref = admin.firestore().doc(`academies/${academyId}/staff/${memberDocId}`);
   const snap = await ref.get();
   if (!snap.exists) {
     throw new HttpsError("not-found", "선생님 정보를 찾을 수 없습니다.");
@@ -278,7 +268,7 @@ export const syncTeacherGoogleLink = onCall(async (request) => {
 
   const memberRef = admin
     .firestore()
-    .doc(`academies/${academyId}/teachers/${memberDocId}`);
+    .doc(`academies/${academyId}/staff/${memberDocId}`);
   const snap = await memberRef.get();
   if (!snap.exists) {
     throw new HttpsError("not-found", "선생님 정보를 찾을 수 없습니다.");
@@ -291,7 +281,7 @@ export const syncTeacherGoogleLink = onCall(async (request) => {
   });
   await admin
     .firestore()
-    .doc(`academies/${academyId}/teachers/${memberDocId}/secrets/login`)
+    .doc(`academies/${academyId}/staff/${memberDocId}/secrets/login`)
     .set({ googleLinked: true, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
 
   return { ok: true, googleEmail };
@@ -314,7 +304,7 @@ export const checkTeacherLoginIdAvailable = onCall(async (request) => {
 
   const memberSnap = await admin
     .firestore()
-    .doc(`academies/${academyId}/teachers/${memberDocId}`)
+    .doc(`academies/${academyId}/staff/${memberDocId}`)
     .get();
   const currentLoginId =
     typeof memberSnap.get("loginId") === "string" ? memberSnap.get("loginId") : "";
@@ -349,7 +339,7 @@ export const updateTeacherLoginId = onCall(async (request) => {
   await verifyMemberLoginPassword(academyId, uid, "teacher", currentPassword);
 
   const db = admin.firestore();
-  const memberRef = db.doc(`academies/${academyId}/teachers/${memberDocId}`);
+  const memberRef = db.doc(`academies/${academyId}/staff/${memberDocId}`);
   const memberSnap = await memberRef.get();
   if (!memberSnap.exists) {
     throw new HttpsError("not-found", "선생님 정보를 찾을 수 없습니다.");
@@ -572,18 +562,11 @@ export const updateTeacherPassword = onCall(async (request) => {
 
   await verifyMemberLoginPassword(academyId, uid, "teacher", currentPassword);
 
-  await admin.auth().updateUser(uid, { password: newPassword });
+  await admin.auth().updateUser(uid, { password: randomAuthPassword() });
   await admin
     .firestore()
-    .doc(`academies/${academyId}/teachers/${memberDocId}/secrets/login`)
-    .set(
-      {
-        password: newPassword,
-        tempPassword: FieldValue.delete(),
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
+    .doc(`academies/${academyId}/staff/${memberDocId}/secrets/login`)
+    .set(await passwordSecretFields(newPassword), { merge: true });
 
   return { ok: true };
 });
@@ -633,15 +616,11 @@ export const updateParentPassword = onCall(async (request) => {
     await verifyMemberLoginPassword(academyId, uid, "parent", currentPassword);
   }
 
-  await admin.auth().updateUser(uid, { password: newPassword });
-  await admin.firestore().doc(`academies/${academyId}/parents/${uid}/secrets/login`).set(
-    {
-      password: newPassword,
-      tempPassword: FieldValue.delete(),
-      updatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true },
-  );
+  await admin.auth().updateUser(uid, { password: randomAuthPassword() });
+  await admin
+    .firestore()
+    .doc(`academies/${academyId}/parents/${uid}/secrets/login`)
+    .set(await passwordSecretFields(newPassword), { merge: true });
 
   const loginId =
     typeof memberSnap.get("loginId") === "string" ? memberSnap.get("loginId") : "";

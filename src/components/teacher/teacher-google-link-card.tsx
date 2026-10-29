@@ -2,11 +2,9 @@
 
 import { FirebaseError } from "firebase/app";
 import {
-  EmailAuthProvider,
   GoogleAuthProvider,
   linkWithPopup,
   onAuthStateChanged,
-  reauthenticateWithCredential,
   type User,
 } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
@@ -14,6 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { GoogleMark } from "@/components/auth/google-mark";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { reauthenticateMemberWithPassword } from "@/lib/firebase/member-reauth";
 
 const glassCard = "glass-card";
 
@@ -159,26 +158,23 @@ export function TeacherGoogleLinkCard({
 
   const onReauthAndLink = useCallback(async () => {
     if (!configured) return;
-    const u = getFirebaseAuth().currentUser;
-    if (!u?.email || !reauthPassword) {
+    if (!getFirebaseAuth().currentUser || !reauthPassword) {
       setError("비밀번호를 입력해 주세요.");
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      const cred = EmailAuthProvider.credential(u.email, reauthPassword);
-      await reauthenticateWithCredential(u, cred);
+      // 서버가 로그인 ID 비밀번호를 확인(연속 실패 잠금)하고 새 토큰으로 다시 로그인 → 최근 로그인
+      const u = await reauthenticateMemberWithPassword(reauthPassword);
       await runLinkWithPopup(u);
       setNeedReauth(false);
       setReauthPassword("");
     } catch (err) {
       if (err instanceof FirebaseError) {
-        if (
-          err.code === "auth/wrong-password" ||
-          err.code === "auth/invalid-credential"
-        ) {
-          setError("비밀번호가 올바르지 않습니다.");
+        // 비밀번호 틀림·잠금은 서버 문구 그대로
+        if (err.code.startsWith("functions/")) {
+          setError(err.message || "본인 확인에 실패했습니다.");
           return;
         }
         setError(linkGoogleErrorMessage(err.code) || err.message);

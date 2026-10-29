@@ -34,7 +34,7 @@ const PARENT_STATUS_PRIORITY: ParentStatus[] = [
 ];
 
 function teacherDocAcademyId(ref: admin.firestore.DocumentReference): string | null {
-  const m = ref.path.match(/^academies\/([^/]+)\/teachers\//);
+  const m = ref.path.match(/^academies\/([^/]+)\/staff\//);
   return m ? m[1] : null;
 }
 
@@ -54,7 +54,7 @@ export async function computeTeacherActivationForUid(
   uid: string,
 ): Promise<RoleActivationSlice> {
   const activeSnap = await db
-    .collectionGroup("teachers")
+    .collectionGroup("staff")
     .where("authUid", "==", uid)
     .where("status", "==", "active")
     .limit(1)
@@ -69,7 +69,7 @@ export async function computeTeacherActivationForUid(
     };
   }
 
-  const snaps = await db.collectionGroup("teachers").where("authUid", "==", uid).limit(25).get();
+  const snaps = await db.collectionGroup("staff").where("authUid", "==", uid).limit(25).get();
 
   if (snaps.empty) {
     return {
@@ -218,6 +218,8 @@ function authUidsFromMembershipChange(
   const uids = new Set<string>();
   for (const snap of [before, after]) {
     if (!snap?.exists) continue;
+    // 계정 없이 인사 정보만 있는 직원(문서 ID 임의) — 대응하는 Auth 사용자가 없음
+    if (snap.get("status") === "no_account") continue;
     if (snap.id) {
       uids.add(snap.id);
     }
@@ -232,7 +234,7 @@ function authUidsFromMembershipChange(
 const firestoreTriggerOpts = { region: "asia-northeast3" as const };
 
 export const onTeacherMembershipWritten = onDocumentWritten(
-  { document: "academies/{academyId}/teachers/{teacherId}", ...firestoreTriggerOpts },
+  { document: "academies/{academyId}/staff/{teacherId}", ...firestoreTriggerOpts },
   async (event) => {
     const uids = authUidsFromMembershipChange(event.data?.before, event.data?.after);
     if (uids.length === 0) return;

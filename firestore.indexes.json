@@ -1,7 +1,7 @@
 {
   "indexes": [
     {
-      "collectionGroup": "teachers",
+      "collectionGroup": "staff",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
         { "fieldPath": "authUid", "order": "ASCENDING" },
@@ -36,7 +36,7 @@
   ],
   "fieldOverrides": [
     {
-      "collectionGroup": "teachers",
+      "collectionGroup": "staff",
       "fieldPath": "authUid",
       "indexes": [
         {

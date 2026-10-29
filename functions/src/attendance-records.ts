@@ -2,7 +2,7 @@ import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
-import { assertCanManageAcademy } from "./lib/academy-access";
+import { assertPermission, type AcademyActor } from "./lib/academy-access";
 import {
   sendStudentAttendanceNotificationCore,
   type AttendanceSender,
@@ -138,15 +138,11 @@ export async function upsertTodayAttendanceRecord(
   });
 }
 
-function academySenderFromToken(
-  uid: string,
-  token: admin.auth.DecodedIdToken,
-  academyId: string,
-): AttendanceSender {
-  const isPortal = token.role === "academy" && token.academyId === academyId;
+/** 학원 화면의 작업 주체 → 기록자 역할(권한을 위임받은 직원은 teacher) */
+export function academySenderForActor(actor: AcademyActor): AttendanceSender {
   return {
-    role: isPortal ? "academy" : "owner",
-    actorUid: uid,
+    role: actor.kind === "staff" ? "teacher" : "owner",
+    actorUid: actor.uid,
     source: "academy_dashboard",
     canBypassCooldown: false,
   };
@@ -208,13 +204,13 @@ export const recordStudentAbsences = onCall(async (request) => {
   const dates = parseAbsenceDates(request.data?.dates);
 
   const db = admin.firestore();
-  await assertCanManageAcademy(db, academyId, uid, token);
+  const actor = await assertPermission(db, academyId, uid, token, "lessons.attendance");
 
   const studentSnap = await db.doc(`academies/${academyId}/students/${studentId}`).get();
   if (!studentSnap.exists) {
     throw new HttpsError("not-found", "학생을 찾을 수 없습니다.");
   }
-  const sender = academySenderFromToken(uid, token, academyId);
+  const sender = academySenderForActor(actor);
   const refs = dates.map((d) => attendanceRecordRef(db, academyId, studentId, d));
 
   await db.runTransaction(async (tx) => {
@@ -298,7 +294,7 @@ export const deleteStudentAttendanceRecord = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  await assertCanManageAcademy(db, academyId, request.auth.uid, request.auth.token);
+  await assertPermission(db, academyId, request.auth.uid, request.auth.token, "lessons.attendance");
 
   const ref = attendanceRecordRef(db, academyId, studentId, date);
   const snap = await ref.get();

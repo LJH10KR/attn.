@@ -17,6 +17,7 @@ import {
   PARENT_INVITE_TTL_MS,
   type ParentRegistrationStatus,
 } from "@/lib/firebase/attn-schema";
+import { useAcademyShell } from "@/components/academy/academy-shell";
 import { AcademyParentStudentList } from "@/components/academy/academy-student-panel";
 import { compareAttnIdAsc } from "@/lib/attn-id-sort";
 import { getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
@@ -345,6 +346,8 @@ function ParentRowActions({
   onListRefresh,
 }: RowActionsProps) {
   const fn = getFirebaseFunctions();
+  // 자녀 등록(`provisionStudentsBatch`)은 원생 관리 권한
+  const canRegisterChild = useAcademyShell().permissions.can("operations.students");
   const k = (action: string) => `${row.id}:${action}`;
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [childModalOpen, setChildModalOpen] = useState(false);
@@ -452,14 +455,16 @@ function ParentRowActions({
     case "active":
       panel = (
         <div className="flex flex-wrap gap-2" role="group" aria-label="학부모 작업">
-          <button
-            type="button"
-            disabled={busyKey !== null}
-            className={actionBtnClass}
-            onClick={() => openChildModal()}
-          >
-            자녀 등록
-          </button>
+          {canRegisterChild ? (
+            <button
+              type="button"
+              disabled={busyKey !== null}
+              className={actionBtnClass}
+              onClick={() => openChildModal()}
+            >
+              자녀 등록
+            </button>
+          ) : null}
           <button type="button" disabled className={actionBtnClass}>
             수정
           </button>
@@ -676,6 +681,7 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
   const [listError, setListError] = useState<string | null>(null);
   const [registerOpen, setRegisterOpen] = useState(false);
   const [studentProvisionParentId, setStudentProvisionParentId] = useState<string | null>(null);
+  const canRegisterChild = useAcademyShell().permissions.can("operations.students");
   useBodyScrollLock(registerOpen);
   const [formEmail, setFormEmail] = useState("");
   const [formName, setFormName] = useState("");
@@ -967,13 +973,15 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
                       loginId={t.loginId}
                       status={t.status}
                     />
-                    <button
-                      type="button"
-                      onClick={() => setStudentProvisionParentId(t.id)}
-                      className="mb-3 w-full rounded-[8px] border border-neutral-300/70 bg-white/50 py-2 text-xs font-medium text-foreground"
-                    >
-                      자녀 등록
-                    </button>
+                    {canRegisterChild ? (
+                      <button
+                        type="button"
+                        onClick={() => setStudentProvisionParentId(t.id)}
+                        className="mb-3 w-full rounded-[8px] border border-neutral-300/70 bg-white/50 py-2 text-xs font-medium text-foreground"
+                      >
+                        자녀 등록
+                      </button>
+                    ) : null}
                     <ParentRowActions
                       academyId={academyId}
                       row={t}

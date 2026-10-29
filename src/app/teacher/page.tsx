@@ -28,6 +28,8 @@ import {
   attendanceButtonResultMessage,
   type AttendanceNotifyResult,
 } from "@/lib/academy/attendance-records";
+import { academyPath } from "@/lib/academy/academy-routes";
+import { staffDocHasAcademyMenus } from "@/lib/academy/staff-landing";
 import { setLastDashboardRoleHint } from "@/lib/auth/last-dashboard-role";
 import { useBootOverlay } from "@/components/boot/boot-overlay";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
@@ -94,6 +96,8 @@ export default function TeacherDashboardPage() {
   const [memberDisplayName, setMemberDisplayName] = useState<string | null>(null);
   const [googleLinked, setGoogleLinked] = useState(false);
   const [googleEmail, setGoogleEmail] = useState<string | null>(null);
+  /** 학원 메뉴 권한을 위임받은 직원 — 학원 관리 화면(5탭)으로 가는 길 */
+  const [hasAcademyMenus, setHasAcademyMenus] = useState(false);
   const [students, setStudents] = useState<StudentRowVM[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
@@ -346,9 +350,11 @@ export default function TeacherDashboardPage() {
       }
 
       if (uid) {
-        const snap = await getDoc(doc(db, "academies", academyId, "teachers", uid));
+        // 본인 문서를 못 읽으면(규칙 거부·네트워크) 프로필·학원 관리 링크 없이 비워 둠
+        const d = await getDoc(doc(db, "academies", academyId, "staff", uid))
+          .then((snap) => snap.data())
+          .catch(() => undefined);
         if (cancelled) return;
-        const d = snap.data();
         setMemberDisplayName(
           typeof d?.displayName === "string" ? d.displayName : null,
         );
@@ -358,6 +364,7 @@ export default function TeacherDashboardPage() {
         setGoogleEmail(
           typeof d?.googleEmail === "string" ? d.googleEmail.trim() || null : null,
         );
+        setHasAcademyMenus(staffDocHasAcademyMenus(d));
       }
     })();
     return () => {
@@ -417,19 +424,41 @@ export default function TeacherDashboardPage() {
             setNotificationsOpen(true);
           }}
           bellBadgeCount={sentLogCount}
+          extraMenuActions={
+            hasAcademyMenus && academyId
+              ? [{ label: "학원 관리 화면", onSelectAction: () => router.push(academyPath(academyId)) }]
+              : undefined
+          }
           bottomTabs={[
             {
               id: "home",
               label: "홈",
               iconAction: (active: boolean) => <HomeTabIcon active={active} />,
               active: true,
-              onSelectAction: () => router.push("/"),
+              // "/"는 위임 직원을 학원 5탭으로 보내므로 이 화면에 머문다
+              onSelectAction: () => router.push("/teacher"),
             },
           ]}
           onLogoutAction={() => void onLogout()}
           logoutBusy={logoutBusy}
           profile={headerProfile}
         />
+
+        {hasAcademyMenus && academyId ? (
+          <button
+            type="button"
+            onClick={() => router.push(academyPath(academyId))}
+            className={`mt-[26px] flex w-full items-center justify-between gap-3 px-4 py-3 text-left ${glassCard}`}
+          >
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-foreground">학원 관리 화면</span>
+              <span className="mt-0.5 block text-xs text-neutral-500">
+                위임받은 메뉴(운영·수납·수업·설정)로 이동합니다.
+              </span>
+            </span>
+            <span aria-hidden className="shrink-0 text-neutral-400">›</span>
+          </button>
+        ) : null}
         {/* <p className="mb-6 mt-1 text-[11px] leading-relaxed text-neutral-500 dark:text-neutral-400">
           전담 학생 정보는 <span className="font-medium text-neutral-700 dark:text-neutral-300">조회만</span> 가능합니다.
           수정·삭제는 학원 대시보드에서 진행됩니다.

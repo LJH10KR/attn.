@@ -5,13 +5,14 @@ import { maskKrPhoneForKiosk, phoneLast4Digits } from "@/lib/phone/kr-phone";
 
 export async function loadKioskStudentRows(academyId: string): Promise<KioskStudentRow[]> {
   const db = getFirebaseDb();
+  // 보호자 이름은 보조 정보 — 학부모 목록 권한이 없는 출결 담당 직원이면 이름 없이 학생만
   const [studentsSnap, parentsSnap] = await Promise.all([
     getDocs(collection(db, "academies", academyId, "students")),
-    getDocs(collection(db, "academies", academyId, "parents")),
+    getDocs(collection(db, "academies", academyId, "parents")).catch(() => null),
   ]);
 
   const parentNameByUid = new Map<string, string>();
-  for (const d of parentsSnap.docs) {
+  for (const d of parentsSnap?.docs ?? []) {
     const authUid = d.get("authUid");
     const uid = typeof authUid === "string" && authUid ? authUid : d.id;
     const name = d.get("displayName");
@@ -44,8 +45,25 @@ export async function loadKioskStudentRows(academyId: string): Promise<KioskStud
   return rows;
 }
 
+const KIOSK_MODE_KEY_PREFIX = "attn_kiosk_mode_";
+
 export function kioskModeStorageKey(academyId: string): string {
-  return `attn_kiosk_mode_${academyId}`;
+  return `${KIOSK_MODE_KEY_PREFIX}${academyId}`;
+}
+
+/** 이 탭에서 키오스크가 켜진 학원 — 없으면 null(다른 학원 주소로 빠져나가는 것을 막을 때 사용) */
+export function activeKioskAcademyId(): string | null {
+  try {
+    for (let i = 0; i < sessionStorage.length; i += 1) {
+      const key = sessionStorage.key(i);
+      if (key?.startsWith(KIOSK_MODE_KEY_PREFIX) && sessionStorage.getItem(key) === "1") {
+        return key.slice(KIOSK_MODE_KEY_PREFIX.length) || null;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
 export function isKioskModeActive(academyId: string): boolean {

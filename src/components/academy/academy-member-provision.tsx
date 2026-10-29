@@ -13,9 +13,10 @@ type IssuedRow = {
   tempPassword: string;
 };
 
+/** 학부모·자녀 발급 — 직원 계정은 직원 관리의 초대 링크·직접 만들어 주기(`createStaffAccounts`) */
 type AcademyMemberProvisionProps = {
   academyId: string;
-  kind: "teacher" | "parent" | "students";
+  kind: "parent" | "students";
   parentAuthUid?: string;
   open: boolean;
   onCloseAction: () => void;
@@ -44,24 +45,14 @@ export function AcademyMemberProvisionModal({
   const [issued, setIssued] = useState<IssuedRow[]>([]);
   const [studentLines, setStudentLines] = useState<string[]>([]);
 
-  const title =
-    kind === "teacher"
-      ? "선생님 등록"
-      : kind === "parent"
-        ? "학부모 등록"
-        : "자녀 등록";
+  const title = kind === "parent" ? "학부모 등록" : "자녀 등록";
 
   const handleSubmit = useCallback(async () => {
     setError(null);
     setBusy(true);
     try {
       const fn = getFirebaseFunctions();
-      if (kind === "teacher") {
-        const call = httpsCallable(fn, "provisionTeachersBatch");
-        const res = await call({ academyId, count });
-        const data = res.data as { teachers?: IssuedRow[] };
-        setIssued(data.teachers ?? []);
-      } else if (kind === "parent") {
+      if (kind === "parent") {
         const call = httpsCallable(fn, "provisionParentsBatch");
         const res = await call({ academyId, count, childrenPerParent: 0 });
         const data = res.data as {
@@ -119,11 +110,7 @@ export function AcademyMemberProvisionModal({
             <p className="text-neutral-600">발급 완료 — 아래 정보는 이번에만 표시됩니다.</p>
             {issued.map((row) => (
               <p key={row.attnId} className="font-mono leading-relaxed">
-                {row.displayName} ·{" "}
-                {kind === "teacher" && row.loginId
-                  ? `${row.loginId} (attn: ${row.attnId})`
-                  : row.attnId}{" "}
-                · {row.tempPassword}
+                {row.displayName} · {row.attnId} · {row.tempPassword}
               </p>
             ))}
             {studentLines.map((line) => (
