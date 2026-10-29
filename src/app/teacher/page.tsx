@@ -350,9 +350,11 @@ export default function TeacherDashboardPage() {
       }
 
       if (uid) {
-        const snap = await getDoc(doc(db, "academies", academyId, "staff", uid));
+        // 본인 문서를 못 읽으면(규칙 거부·네트워크) 프로필·학원 관리 링크 없이 비워 둠
+        const d = await getDoc(doc(db, "academies", academyId, "staff", uid))
+          .then((snap) => snap.data())
+          .catch(() => undefined);
         if (cancelled) return;
-        const d = snap.data();
         setMemberDisplayName(
           typeof d?.displayName === "string" ? d.displayName : null,
         );

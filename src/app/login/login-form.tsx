@@ -39,11 +39,13 @@ function authErrorMessage(code: string, role: LoginRole): string {
     case "auth/invalid-email":
       return "이메일 형식을 확인해 주세요.";
     case "auth/user-disabled":
+      // 직원은 비활성·퇴사일 때만 Auth가 꺼짐(승인 대기는 켜진 채 안내 화면으로 감)
       if (role === "teacher") {
-        return "선생님 등록 대기(pending) 상태라 로그인할 수 없습니다. 학원에서 활성 처리 후 다시 시도해 주세요.";
+        return "사용할 수 없는 계정입니다. 학원에 문의해 주세요.";
       }
+      // 학부모는 예전 이메일 초청 가입의 승인 대기도 Auth가 꺼져 있음(`finalizeParentOnboarding`)
       if (role === "parent") {
-        return "학부모 등록 대기(pending) 상태라 로그인할 수 없습니다. 학원에서 활성 처리 후 다시 시도해 주세요.";
+        return "사용할 수 없는 계정입니다. 가입 승인 전이거나 사용이 중지된 계정이면 학원에 문의해 주세요.";
       }
       return "이 계정은 현재 로그인할 수 없습니다. 학원에서 승인·활성 처리가 끝난 뒤 다시 시도하거나 문의해 주세요.";
     case "auth/user-not-found":
@@ -380,10 +382,13 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
       } catch (err) {
         if (err instanceof FirebaseError) {
           setError(
-            err.code === "functions/permission-denied" ||
-              err.code === "functions/not-found"
-              ? "로그인 ID 또는 비밀번호가 올바르지 않습니다."
-              : functionsErrorMessage(err),
+            // 커스텀 토큰 로그인(signInWithCustomToken) 단계의 Auth 오류 — 원문 대신 안내 문구
+            err.code.startsWith("auth/")
+              ? authErrorMessage(err.code, role)
+              : err.code === "functions/permission-denied" ||
+                  err.code === "functions/not-found"
+                ? "로그인 ID 또는 비밀번호가 올바르지 않습니다."
+                : functionsErrorMessage(err),
           );
         } else {
           setError("로그인에 실패했습니다.");

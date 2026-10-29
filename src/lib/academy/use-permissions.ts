@@ -42,10 +42,13 @@ export type AcademyPermissionState = {
   visibleTabs: AcademyNavTab[];
   /** 본인·더 넓은 권한 대상 버튼을 숨길 때(`role-policy.ts`) — 학원과 무관하면 null */
   viewer: PermissionViewer | null;
+  /** 처음부터 다시 읽기(연결 오류 뒤 다시 시도) — 다시 받을 때까지 loading */
+  retry: () => void;
 };
 
 export function usePermissions(academyId: string | null): AcademyPermissionState {
   const [snapshot, setSnapshot] = useState<PermissionSnapshot | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!academyId || !isFirebaseConfigured()) return;
@@ -98,7 +101,12 @@ export function usePermissions(academyId: string | null): AcademyPermissionState
       unsubMember?.();
       unsubAuth();
     };
-  }, [academyId]);
+  }, [academyId, reloadKey]);
+
+  const retry = useCallback(() => {
+    setSnapshot(null);
+    setReloadKey((k) => k + 1);
+  }, []);
 
   const current = snapshot && snapshot.academyId === academyId ? snapshot : null;
   const permissionList = current?.permissions;
@@ -133,5 +141,6 @@ export function usePermissions(academyId: string | null): AcademyPermissionState
     can,
     visibleTabs,
     viewer,
+    retry,
   };
 }

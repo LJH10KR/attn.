@@ -1,5 +1,6 @@
 "use client";
 
+import { FirebaseError } from "firebase/app";
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import Link from "next/link";
@@ -24,7 +25,7 @@ import {
 } from "@/lib/academy/academy-routes";
 import { rememberLastAcademy } from "@/lib/academy/last-academy";
 import type { AcademyPermission } from "@/lib/academy/permissions";
-import { resolveStaffLanding } from "@/lib/academy/staff-landing";
+import { isAccountAuthError, resolveStaffLanding } from "@/lib/academy/staff-landing";
 import { usePermissions, type AcademyPermissionState } from "@/lib/academy/use-permissions";
 import { useRoleLogout } from "@/lib/auth/use-role-logout";
 import { COLLECTIONS } from "@/lib/firebase/attn-schema";
@@ -77,25 +78,37 @@ const BELL_PERMISSIONS: readonly AcademyPermission[] = [
 
 /**
  * 이 학원의 멤버로 보이지 않을 때(비활성·퇴사·계정 삭제·아직 활성 전) 갈 곳 — 본인 학원 직원만.
- * 다른 학원 주소·학부모 등은 null(권한 없음 화면).
+ * 다른 학원 주소·학부모 등은 권한 없음, 연결 문제로 판단할 수 없으면 연결 확인 화면(이동·로그아웃 없음).
  */
-async function landingForMissingActor(user: User, academyId: string): Promise<string | null> {
+type MissingActorLanding = { kind: "go"; target: string } | { kind: "forbidden" } | { kind: "offline" };
+
+function isOfflineError(err: unknown): boolean {
+  return (
+    (typeof navigator !== "undefined" && navigator.onLine === false) ||
+    (err instanceof FirebaseError && err.code === "auth/network-request-failed")
+  );
+}
+
+async function landingForMissingActor(user: User, academyId: string): Promise<MissingActorLanding> {
+  // 오프라인이면 학원 문서·권한 구독이 실패해 actor가 비었을 수 있음 — 권한 없음으로 단정하지 않음
+  if (isOfflineError(null)) return { kind: "offline" };
   try {
     const { claims } = await user.getIdTokenResult();
-    if (claims.role !== "teacher" || claims.academyId !== academyId) return null;
+    if (claims.role !== "teacher" || claims.academyId !== academyId) return { kind: "forbidden" };
     // 선생님 화면은 클레임의 "active"를 믿으므로 먼저 토큰을 새로 받는다 — 비활성·삭제·비밀번호 초기화면 실패
     try {
       await user.getIdToken(true);
-    } catch {
+    } catch (err) {
+      if (!isAccountAuthError(err)) return isOfflineError(err) ? { kind: "offline" } : { kind: "forbidden" };
       await signOut(getFirebaseAuth()).catch(() => undefined);
-      return "/login/teacher";
+      return { kind: "go", target: "/login/teacher" };
     }
     const target = await resolveStaffLanding(user, academyId);
     const here = academyPath(academyId);
     // 다시 이 학원이면(권한 구독 오류 등) 이동하지 않음 — 같은 주소로 되풀이 이동 방지
-    return target === here || target.startsWith(`${here}/`) ? null : target;
-  } catch {
-    return null;
+    return target === here || target.startsWith(`${here}/`) ? { kind: "forbidden" } : { kind: "go", target };
+  } catch (err) {
+    return isOfflineError(err) ? { kind: "offline" } : { kind: "forbidden" };
   }
 }
 
@@ -136,7 +149,10 @@ export function AcademyShell({ children }: { children: ReactNode }) {
   /** 멤버로 보이지 않을 때의 착지 판단 — actor가 null이 될 때마다 한 번만 */
   const landingKey = authUser ? `${authUser.uid}|${academyId}` : null;
   const landingKeyRef = useRef<string | null>(null);
-  const [forbiddenKey, setForbiddenKey] = useState<string | null>(null);
+  /** 착지 판단 결과 중 이 화면에 남는 경우(권한 없음·연결 확인) — 어느 판단의 결과인지 key로 구분 */
+  const [missing, setMissing] = useState<{ key: string; kind: "forbidden" | "offline" } | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
+  const missingKind = landingKey !== null && missing?.key === landingKey ? missing.kind : null;
   const actorMissing = Boolean(authUser) && !permissions.loading && actor === null;
 
   const {
@@ -173,7 +189,7 @@ export function AcademyShell({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [authUser, academyId]);
+  }, [authUser, academyId, retryTick]);
 
   useEffect(() => {
     if (actor === "owner" && authUser) rememberLastAcademy(authUser.uid, academyId);
@@ -190,25 +206,32 @@ export function AcademyShell({ children }: { children: ReactNode }) {
     }
     if (!actorMissing || !authUser || !landingKey || landingKeyRef.current === landingKey) return;
     landingKeyRef.current = landingKey;
-    void landingForMissingActor(authUser, academyId).then((target) => {
+    void landingForMissingActor(authUser, academyId).then((result) => {
       if (landingKeyRef.current !== landingKey) return;
-      if (!target) {
-        setForbiddenKey(landingKey);
+      if (result.kind !== "go") {
+        setMissing({ key: landingKey, kind: result.kind });
         return;
       }
-      if (!closesBootOverlayItself(target)) hideBootOverlay();
-      router.replace(target);
+      if (!closesBootOverlayItself(result.target)) hideBootOverlay();
+      router.replace(result.target);
     });
   }, [actor, actorMissing, authUser, landingKey, academyId, router, hideBootOverlay]);
+
+  /** 연결 확인 화면의 다시 시도 — 착지 판단 기록을 지우고 권한을 처음부터 다시 읽는다 */
+  const { retry: retryPermissions } = permissions;
+  const retryAfterOffline = () => {
+    landingKeyRef.current = null;
+    setMissing(null);
+    setRetryTick((t) => t + 1);
+    retryPermissions();
+  };
 
   // 콜드 부팅 오버레이 — 보여 줄 화면이 정해지면 닫는다(다른 화면으로 보내는 중이면 그 화면이 닫음)
   const screenReady =
     !configured ||
     authUser === null ||
     (authUser !== undefined && Boolean(kiosk.activeAcademyId)) ||
-    (!permissions.loading &&
-      !staffWithoutMenus &&
-      (actor !== null || (landingKey !== null && forbiddenKey === landingKey)));
+    (!permissions.loading && !staffWithoutMenus && (actor !== null || missingKind !== null));
   useEffect(() => {
     if (screenReady) hideBootOverlay();
   }, [screenReady, hideBootOverlay]);
@@ -296,7 +319,23 @@ export function AcademyShell({ children }: { children: ReactNode }) {
 
   if (!actor) {
     // 착지 판단 중이거나 다른 화면으로 보내는 중
-    if (forbiddenKey !== landingKey) return <Loading />;
+    if (missingKind === null) return <Loading />;
+    if (missingKind === "offline") {
+      return (
+        <CenterMessage>
+          <p className="max-w-xs text-center text-sm text-neutral-600">
+            학원 정보를 불러오지 못했습니다. 연결을 확인해 주세요.
+          </p>
+          <button
+            type="button"
+            onClick={retryAfterOffline}
+            className="rounded-2xl bg-[#222] px-6 py-3 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-950"
+          >
+            다시 시도
+          </button>
+        </CenterMessage>
+      );
+    }
     return (
       <CenterMessage>
         <p className="max-w-xs text-center text-sm text-neutral-600">
