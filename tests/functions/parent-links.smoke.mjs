@@ -4,7 +4,8 @@
  * 연결 → active·parentUids·approvedAt·결제 parentUids, 해제 → pending_approval(approvedAt 유지)·결제에서 빠짐,
  * 직접 만들기 → 첫 로그인 → active, 연결 대기 비밀번호 초기화, 비활성 계정 푸시 제외·자동 전환과 겹쳐도 inactive 유지,
  * 이메일 인증 전·비활성 계정 연결 거부, 연결된 보호자 항목 삭제 거부, 계정 삭제(원생 유지·색인 해제),
- * 학생 삭제 시 결제 parentUids 유지, 권한 없는 직원 거부를 확인한다.
+ * 학생 삭제 시 결제 parentUids 유지, 권한 없는 직원 거부,
+ * 연결 전부 실패 시 새로 잡은 색인 되돌림(기존 색인·동시 연결 성공 시 유지), 원생 저장 시 보호자 생략 = 변경 없음을 확인한다.
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -168,11 +169,16 @@ assert.equal(st3.guardians[1].linkedParentUid, mom.uid);
 assert.deepEqual((await call("linkParentToStudents", { academyId: A, parentUid: mom.uid, studentIds: [s3] })).alreadyLinked, [s3]);
 
 // --- 연결된 보호자 항목 삭제는 원생 저장으로 할 수 없다 ---
+const s3Base = { academyId: A, studentId: s3, name: "다른 집", grade: "e3", status: "enrolled" };
 await assert.rejects(
-  call("saveStudent", { academyId: A, studentId: s3, name: "다른 집", grade: "e3", status: "enrolled",
-    guardians: [{ id: st3.guardians[0].id, relationId: "father", phone: "010-6666-7777" }] }),
+  call("saveStudent", { ...s3Base, guardians: [{ id: st3.guardians[0].id, relationId: "father", phone: "010-6666-7777" }] }),
   /앱에 연결된 보호자입니다/,
 );
+await assert.rejects(call("saveStudent", { ...s3Base, guardians: [] }), /앱에 연결된 보호자입니다/);
+// 보호자 목록을 보내지 않으면 그대로(연결 유지)
+await call("saveStudent", s3Base);
+assert.deepEqual((await studentDoc(s3)).guardians, st3.guardians, "guardians 생략 = 변경 없음");
+assert.deepEqual((await studentDoc(s3)).parentUids, [mom.uid]);
 
 // 연결된 학부모 앱에서 자녀 목록
 await asParent("momseven", "pw123456");
@@ -196,6 +202,32 @@ momSnap = await parentDoc(mom.uid);
 assert.ok(momSnap.get("approvedAt"), "해제해도 approvedAt 유지(승인 대기 배지에 다시 잡히지 않음)");
 assert.deepEqual(momSnap.get("linkedStudentIds"), []);
 assert.equal((await db.doc(`academies/${A}/parentPhones/${PHONE_KEY}`).get()).get("parentUid"), mom.uid, "색인은 유지");
+// 이미 잡고 있던 색인은 연결이 전부 실패해도 그대로
+const momFail = await call("linkParentToStudents", { academyId: A, parentUid: mom.uid, studentIds: ["no-such-student"] });
+assert.equal(momFail.failures.length, 1);
+assert.equal((await db.doc(`academies/${A}/parentPhones/${PHONE_KEY}`).get()).get("parentUid"), mom.uid, "기존 색인 유지");
+
+// --- 연결이 전부 실패하면 이번에 새로 잡은 색인은 되돌린다 ---
+const SOLO_PHONE = "010-3030-4040";
+const SOLO_KEY = "01030304040";
+const solo = await selfSignupAndVerify("soloseven", "혼자", SOLO_PHONE);
+await solo.verify();
+await asOwner();
+const soloFail = await call("linkParentToStudents", { academyId: A, parentUid: solo.uid, studentIds: ["no-such-student"] });
+assert.deepEqual(soloFail.linked, []);
+assert.equal(soloFail.failures.length, 1);
+assert.equal((await db.doc(`academies/${A}/parentPhones/${SOLO_KEY}`).get()).exists, false, "전부 실패 → 색인 없음");
+assert.equal((await parentDoc(solo.uid)).get("approvedAt"), null, "연결 0건이면 approvedAt도 그대로");
+// 같은 계정에 대한 연결 2건 동시(한쪽은 전부 실패) → 연결된 쪽이 있으므로 색인이 남는다
+const s4 = (await mk("넷째 집", [{ relationId: "mother", phone: SOLO_PHONE }])).studentId;
+const [raceFail, raceOk] = await Promise.all([
+  call("linkParentToStudents", { academyId: A, parentUid: solo.uid, studentIds: ["no-such-student"] }),
+  call("linkParentToStudents", { academyId: A, parentUid: solo.uid, studentIds: [s4] }),
+]);
+assert.equal(raceFail.failures.length, 1);
+assert.deepEqual(raceOk.linked, [s4]);
+assert.deepEqual((await studentDoc(s4)).parentUids, [solo.uid]);
+assert.equal((await db.doc(`academies/${A}/parentPhones/${SOLO_KEY}`).get()).get("parentUid"), solo.uid, "연결이 있으면 색인 유지");
 
 // --- 연결 대기 계정 비밀번호 초기화 → 첫 로그인 → 다시 연결 대기(스스로 활성화 안 됨) ---
 const reset = await call("resetMemberPassword", { academyId: A, memberAuthUid: mom.uid, role: "parent" });

@@ -23,6 +23,7 @@ import {
   type GradeCode,
   type StudentStatus,
 } from "./lib/student-profile";
+import { isRetriableError, MAX_TRIGGER_RETRY_AGE_MS, triggerEventAgeMs } from "./lib/trigger-retry";
 
 /**
  * 운영 › 원생 관리 — `academies/{academyId}/students/{studentId}`의 원생 정보.
@@ -171,12 +172,15 @@ export const saveStudent = onCall(async (request) => {
     if (!snap.exists) {
       throw new HttpsError("not-found", "원생 정보를 찾을 수 없습니다.");
     }
-    // 연결(linkedParentUid)은 이 트랜잭션에서 읽은 값에서만 이어받는다
-    const guardians = parseGuardiansInput(
-      request.data?.guardians,
-      readGuardians(snap.get("guardians")),
-      relationIds,
-    );
+    // 보호자 목록을 보내지 않으면 그대로 둔다([]만 전부 삭제). 연결(linkedParentUid)은 이 트랜잭션에서 읽은 값에서만 이어받는다
+    const guardiansRaw = request.data?.guardians;
+    const guardiansPatch =
+      guardiansRaw === undefined || guardiansRaw === null
+        ? {}
+        : (() => {
+          const guardians = parseGuardiansInput(guardiansRaw, readGuardians(snap.get("guardians")), relationIds);
+          return { guardians, ...deriveGuardianFields(guardians) };
+        })();
     const grade = resolveGrade(
       request.data?.grade,
       { grade: snap.get("grade"), gradeYear: snap.get("gradeYear") },
@@ -188,8 +192,7 @@ export const saveStudent = onCall(async (request) => {
       ...grade,
       status,
       ...(statusChanged ? { statusChangedAt: FieldValue.serverTimestamp() } : {}),
-      guardians,
-      ...deriveGuardianFields(guardians),
+      ...guardiansPatch,
       updatedAt: FieldValue.serverTimestamp(),
     });
     if (memo !== null) {
@@ -225,17 +228,6 @@ export const deleteAcademyStudent = onCall(async (request) => {
   return { ok: true };
 });
 
-/** 일시 오류(다시 하면 될 수 있음)만 재시도 — 그 밖의 오류는 로그만 남기고 끝낸다(무한 재시도 방지) */
-const RETRIABLE_CODES = new Set<unknown>([
-  4, 8, 10, 13, 14,
-  "deadline-exceeded", "resource-exhausted", "aborted", "internal", "unavailable",
-]);
-const MAX_TRIGGER_RETRY_AGE_MS = 24 * 60 * 60 * 1000;
-
-function isRetriableError(e: unknown): boolean {
-  return RETRIABLE_CODES.has((e as { code?: unknown } | null)?.code);
-}
-
 /**
  * 보호자 연결이 바뀐 학생 — `parentUids`가 바뀐 계정마다 학부모 요약(`linkedStudentIds`·`pending_approval ↔ active`)을,
  * 학생 결제 문서의 `parentUids`를 현재 값에 맞춘다. 연결·해제·계정 삭제·원생 저장 등 모든 경로가 여기를 거친다.
@@ -254,7 +246,7 @@ export const onAcademyStudentParentLinksWritten = onDocumentWritten(
     if (changed.length === 0) return;
 
     const { academyId, studentId } = event.params;
-    const eventAgeMs = Date.now() - Date.parse(event.time);
+    const eventAgeMs = triggerEventAgeMs(event.time);
     if (eventAgeMs > MAX_TRIGGER_RETRY_AGE_MS) {
       logger.error("onAcademyStudentParentLinksWritten: 오래된 이벤트 — 처리하지 않음", { academyId, studentId, eventAgeMs });
       return;

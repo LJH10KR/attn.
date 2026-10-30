@@ -8,6 +8,7 @@ import { DEFAULT_STAFF_ROLE_ID } from "./lib/permissions";
 import { academySeqMetaPath, formatStudentAttnId } from "./lib/attn-id";
 import { deleteCollectionDocs, deleteStudentDocs } from "./lib/firestore-cleanup";
 import { deriveGuardianFields, type Guardian } from "./lib/student-guardians";
+import { classesCol, classHistoryCol, classHistoryEntry, computeTeacherUids } from "./lib/class-teachers";
 import { kstYear, type GradeCode, type StudentStatus } from "./lib/student-profile";
 import { academyOptionsRef, DEFAULT_GUARDIAN_RELATIONS } from "./academy-options";
 import { ensureAcademyRoleTemplates } from "./roles";
@@ -205,7 +206,7 @@ export const createSeedBatch = onCall(async (request) => {
   const studentsPerParent = clampInt(request.data?.studentsPerParent, 3, 1, 10);
   const teachersPerStudent = clampInt(request.data?.teachersPerStudent, 2, 1, 5);
 
-  // teacherAssignedTeacherUidsListOk는 길이 <= 20 검증이므로, 여기서는 훨씬 더 보수적으로 제한
+  // 반당 선생님 수(입력 이름은 예전 그대로 teachersPerStudent)
   if (teachersPerStudent > teachersCount) {
     throw new HttpsError("invalid-argument", "teachersPerStudent는 teachersCount보다 작거나 같아야 합니다.");
   }
@@ -329,6 +330,55 @@ export const createSeedBatch = onCall(async (request) => {
     });
   }
 
+  // 반 3개 — 여러 명 반 2개(반당 선생님 teachersPerStudent명) + 1인 반 1개, 강의실 선택지 2개
+  const pickTeachers = (start: number, n: number) =>
+    Array.from({ length: n }, (_, k) => teacherAuths[(start + k) % teacherAuths.length]!.uid).sort();
+  const seedClasses: Array<{ id: string; data: Record<string, unknown> }> = [
+    {
+      id: "class_a",
+      data: {
+        name: "A반", status: "active", roomId: "room1", capacity: 10, sortOrder: 0,
+        schedule: [{ weekday: 1, start: "16:00", end: "17:30" }, { weekday: 3, start: "16:00", end: "17:30" }],
+        teacherUids: pickTeachers(0, teachersPerStudent),
+      },
+    },
+    {
+      id: "class_b",
+      data: {
+        name: "B반", status: "active", roomId: "room2", capacity: null, sortOrder: 1,
+        schedule: [{ weekday: 2, start: "18:00", end: "19:30" }, { weekday: 4, start: "18:00", end: "19:30" }],
+        teacherUids: pickTeachers(1, teachersPerStudent),
+      },
+    },
+    {
+      id: "class_solo",
+      data: {
+        name: "1:1 지도", status: "active", roomId: null, capacity: 1, sortOrder: 2,
+        schedule: [{ weekday: 5, start: "15:00", end: "16:00" }],
+        teacherUids: pickTeachers(teacherAuths.length - 1, 1),
+      },
+    },
+  ];
+  const classById = new Map(seedClasses.map((c) => [c.id, c.data]));
+  for (const c of seedClasses) {
+    writes.push({
+      ref: classesCol(db, academyId).doc(c.id),
+      data: {
+        ...c.data,
+        endedAt: null,
+        createdByUid: createdByUid,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+    });
+    writes.push({
+      ref: classHistoryCol(db, academyId).doc(),
+      data: classHistoryEntry({
+        classId: c.id, className: String(c.data.name), type: "created", actorUid: createdByUid,
+      }),
+    });
+  }
+
   // parents + students
   const parentStudentDocs: Array<{
     ref: DocumentReference;
@@ -366,11 +416,8 @@ export const createSeedBatch = onCall(async (request) => {
 
     for (let s = 0; s < studentsPerParent; s++) {
       const studentId = `student_${p + 1}_${s + 1}`;
-      const assigned: string[] = [];
-      for (let k = 0; k < teachersPerStudent; k++) {
-        const tidx = (p + s + k) % teacherAuths.length;
-        assigned.push(teacherAuths[tidx]!.uid);
-      }
+      // A반·B반 번갈아, 맨 처음 원생은 1인 반도
+      const classIds = [studentSeq % 2 === 0 ? "class_a" : "class_b", ...(studentSeq === 0 ? ["class_solo"] : [])];
 
       // 상태·학년을 섞어 둔다(재원 위주) — 두 번째 보호자는 앱 계정 없이 연락처만
       const guardians: Guardian[] = [
@@ -408,9 +455,8 @@ export const createSeedBatch = onCall(async (request) => {
           firstAttendedOn: null,
           guardians,
           ...deriveGuardianFields(guardians),
-          classIds: [],
-          teacherUids: [],
-          assignedTeacherUids: assigned,
+          classIds,
+          teacherUids: computeTeacherUids(classIds, classById),
           createdAt: FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp(),
         },
@@ -467,7 +513,11 @@ export const createSeedBatch = onCall(async (request) => {
     },
     {
       ref: academyOptionsRef(db, academyId),
-      data: { guardianRelations: DEFAULT_GUARDIAN_RELATIONS, updatedAt: FieldValue.serverTimestamp() },
+      data: {
+        guardianRelations: DEFAULT_GUARDIAN_RELATIONS,
+        rooms: [{ id: "room1", label: "1강의실" }, { id: "room2", label: "2강의실" }],
+        updatedAt: FieldValue.serverTimestamp(),
+      },
     },
   );
 
@@ -588,6 +638,8 @@ export const deleteSeedBatch = onCall(async (request) => {
   await deleteStudentDocs(db, academyId, studentsSnap.docs.map((d) => d.id));
   await deleteCollectionDocs(db, `academies/${academyId}/studentNotes`);
   await deleteCollectionDocs(db, `academies/${academyId}/parentPhones`);
+  await deleteCollectionDocs(db, `academies/${academyId}/classes`);
+  await deleteCollectionDocs(db, `academies/${academyId}/classHistory`);
 
   const deleteOps: DocumentReference[] = [];
   teachersSnap.docs.forEach((d) => deleteOps.push(d.ref));

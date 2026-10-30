@@ -59,8 +59,8 @@ type CallableStudentPayload = {
   status?: string;
   billable?: boolean;
   phone?: string;
-  assignedTeacherUids?: string[];
-  assignedTeacherUid?: string | null;
+  classIds?: string[];
+  teacherUids?: string[];
   createdAtMillis?: number | null;
 };
 
@@ -75,10 +75,7 @@ function studentRowFromCallablePayload(
     name: s.name ?? "",
     gradeLabel: s.gradeLabel ?? "",
     phone: s.phone ?? "",
-    assignedTeacherUids: s.assignedTeacherUids ?? [],
-    ...(s.assignedTeacherUid
-      ? { assignedTeacherUid: s.assignedTeacherUid }
-      : {}),
+    teacherUids: s.teacherUids ?? [],
     ...(createdAt ? { createdAt } : {}),
   });
 }
@@ -232,7 +229,7 @@ export default function TeacherDashboardPage() {
           if (!cancelled && gen === teacherInitGenerationRef.current) {
             setStudents([]);
             setListError(
-              "전담 학생 목록을 불러오지 못했습니다. 잠시 후 새로고침해 주세요.",
+              "담당 학생 목록을 불러오지 못했습니다. 잠시 후 새로고침해 주세요.",
             );
           }
         } finally {
@@ -285,7 +282,7 @@ export default function TeacherDashboardPage() {
       setListError(null);
     } catch {
       setListError(
-        "전담 학생 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
+        "담당 학생 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
       );
     } finally {
       setListRefreshBusy(false);
@@ -463,7 +460,7 @@ export default function TeacherDashboardPage() {
         </p> */}
 
         <div className="mt-[26px] mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-foreground">전담 학생</h2>
+          <h2 className="text-sm font-semibold text-foreground">담당 학생</h2>
           <button
             type="button"
             onClick={() => void refreshAssignedStudents()}
@@ -490,13 +487,13 @@ export default function TeacherDashboardPage() {
           {listInitialLoading ? (
             <StudentListSectionSkeleton
               rows={3}
-              label="전담 학생 목록 불러오는 중"
+              label="담당 학생 목록 불러오는 중"
             />
           ) : students.length === 0 ? (
             <p
               className={`py-12 text-center text-sm text-neutral-500 ${glassCard}`}
             >
-              전담으로 연결된 학생이 없습니다. 학원에서 배정이 되면 여기에
+              담당 반 학생이 없습니다. 학원에서 반 선생님으로 지정되면 여기에
               표시됩니다.
             </p>
           ) : (

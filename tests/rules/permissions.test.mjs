@@ -4,6 +4,7 @@
  * 원장(ownerUid)은 모든 권한, 직원은 직원 문서 `permissions`만큼,
  * 비활성 직원·무관한 계정·폐지된 포털 토큰은 거부되는지 확인한다.
  */
+import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { readFileSync } from "node:fs";
 import {
@@ -111,12 +112,28 @@ beforeEach(async () => {
       sessionBalance: 4,
       ...extra,
     });
+    // STUDENT는 반 class-a(담당 staff-teacher·비활성 staff-inactive) 학생, OTHER_STUDENT는 다른 반
     await setDoc(
       doc(db, academyPath("students", STUDENT)),
-      student([PARENT, PARENT_INACTIVE, PARENT_SETUP], { assignedTeacherUids: ["staff-teacher"] }),
+      student([PARENT, PARENT_INACTIVE, PARENT_SETUP], {
+        classIds: ["class-a"],
+        teacherUids: ["staff-inactive", "staff-teacher"],
+      }),
     );
     await setDoc(doc(db, academyPath("students", SIBLING)), student([PARENT]));
-    await setDoc(doc(db, academyPath("students", OTHER_STUDENT)), student([]));
+    await setDoc(
+      doc(db, academyPath("students", OTHER_STUDENT)),
+      student([], { classIds: ["class-b"], teacherUids: ["staff-hr"] }),
+    );
+    await setDoc(doc(db, academyPath("classes", "class-a")), {
+      name: "A반", status: "active", schedule: [], teacherUids: ["staff-inactive", "staff-teacher"],
+      roomId: null, capacity: null, sortOrder: 0,
+    });
+    await setDoc(doc(db, academyPath("classes", "class-b")), {
+      name: "B반", status: "active", schedule: [], teacherUids: ["staff-hr"],
+      roomId: null, capacity: null, sortOrder: 1,
+    });
+    await setDoc(doc(db, academyPath("classHistory", "h-1")), { classId: "class-a", type: "created" });
     await setDoc(doc(db, academyPath("studentNotes", STUDENT)), { memo: "학원 내부 메모" });
     const paidAt = Timestamp.fromMillis(Date.now() - 24 * 60 * 60 * 1000);
     await setDoc(doc(db, academyPath("payments", "pay-1")), {
@@ -335,17 +352,78 @@ describe("직원 관리(settings.staff)·선택지 목록", () => {
   });
 });
 
-describe("권한 없는 직원·비활성·무관한 계정", () => {
-  /**
-   * 전담 학생 목록 쿼리(array-contains)는 변경 전 규칙에서도 에뮬레이터 evaluation error가 나서
-   * 앱은 `listTeacherAssignedStudents` Callable을 쓴다 — 2단계 `teacherUids` 전환 때 다시 볼 것.
-   */
-  it("권한 없는 선생님은 전담 학생 단건만 읽는다", async () => {
+/** 선생님 담당 학생 목록 쿼리 — 2-F "내 반"이 쓸 형태 */
+const taughtQuery = (db, uid) =>
+  query(collection(db, academyPath("students")), where("teacherUids", "array-contains", uid));
+
+describe("선생님 — 담당 반 학생(teacherUids)", () => {
+  it("권한 없는 활성 선생님은 담당 반 학생을 단건·목록(teacherUids array-contains)으로 읽는다", async () => {
     const db = dbAs("staff-teacher");
     await assertSucceeds(getDoc(doc(db, academyPath("students", STUDENT))));
-    await assertFails(getDocs(collection(db, academyPath("students"))));
-    await assertFails(updateDoc(doc(db, academyPath("students", STUDENT)), { name: "x" }));
+    const list = await assertSucceeds(getDocs(taughtQuery(db, "staff-teacher")));
+    assert.deepEqual(list.docs.map((d) => d.id), [STUDENT]);
   });
+
+  it("다른 반 학생 단건, where 없는 전체 목록, 학생 수정은 거부", async () => {
+    const db = dbAs("staff-teacher");
+    await assertFails(getDoc(doc(db, academyPath("students", OTHER_STUDENT))));
+    await assertFails(getDoc(doc(db, academyPath("students", SIBLING))));
+    await assertFails(getDocs(collection(db, academyPath("students"))));
+    await assertFails(getDocs(taughtQuery(db, "staff-hr")));
+    await assertFails(updateDoc(doc(db, academyPath("students", STUDENT)), { name: "x" }));
+    await assertFails(updateDoc(doc(db, academyPath("students", STUDENT)), { teacherUids: [] }));
+  });
+
+  it("비활성 선생님은 teacherUids에 있어도 단건·목록 거부", async () => {
+    const db = dbAs("staff-inactive");
+    await assertFails(getDoc(doc(db, academyPath("students", STUDENT))));
+    await assertFails(getDocs(taughtQuery(db, "staff-inactive")));
+  });
+});
+
+describe("반(classes)·반 변경 이력(classHistory)", () => {
+  it("원장·활성 직원(권한 없음 포함)은 반을 읽는다 — 내 반 목록(teacherUids array-contains) 포함", async () => {
+    await assertSucceeds(getDocs(collection(dbAs(OWNER), academyPath("classes"))));
+    await assertSucceeds(getDocs(collection(dbAs("staff-classes"), academyPath("classes"))));
+    await assertSucceeds(getDoc(doc(dbAs("staff-teacher"), academyPath("classes", "class-b"))));
+    const mine = await assertSucceeds(
+      getDocs(
+        query(collection(dbAs("staff-teacher"), academyPath("classes")),
+          where("teacherUids", "array-contains", "staff-teacher")),
+      ),
+    );
+    assert.deepEqual(mine.docs.map((d) => d.id), ["class-a"]);
+  });
+
+  it("학부모·비활성 직원·무관한 계정은 반을 읽지 못한다", async () => {
+    for (const uid of [PARENT, PARENT_PENDING, "staff-inactive", "stranger"]) {
+      await assertFails(getDoc(doc(dbAs(uid), academyPath("classes", "class-a"))));
+      await assertFails(getDocs(collection(dbAs(uid), academyPath("classes"))));
+    }
+  });
+
+  it("반은 클라이언트가 쓰지 못한다(원장·반 관리 권한 포함)", async () => {
+    for (const uid of [OWNER, "staff-classes"]) {
+      const db = dbAs(uid);
+      await assertFails(setDoc(doc(db, academyPath("classes", "class-new")), { name: "x", teacherUids: [uid] }));
+      await assertFails(updateDoc(doc(db, academyPath("classes", "class-a")), { teacherUids: [uid] }));
+      await assertFails(deleteDoc(doc(db, academyPath("classes", "class-a"))));
+      // 학생 반 배정 필드도 클라이언트 수정 불가
+      await assertFails(updateDoc(doc(db, academyPath("students", STUDENT)), { classIds: [] }));
+    }
+  });
+
+  it("반 변경 이력은 누구도 읽거나 쓰지 못한다", async () => {
+    for (const uid of [OWNER, "staff-classes", "staff-teacher", PARENT]) {
+      const db = dbAs(uid);
+      await assertFails(getDoc(doc(db, academyPath("classHistory", "h-1"))));
+      await assertFails(getDocs(collection(db, academyPath("classHistory"))));
+      await assertFails(setDoc(doc(db, academyPath("classHistory", "h-2")), { classId: "class-a" }));
+    }
+  });
+});
+
+describe("권한 없는 직원·비활성·무관한 계정", () => {
 
   it("본인 멤버 문서(권한 포함)는 읽는다", async () => {
     await assertSucceeds(

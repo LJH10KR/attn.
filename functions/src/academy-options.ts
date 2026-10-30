@@ -9,12 +9,14 @@ import type { AcademyPermission } from "./lib/permissions";
  * 학원 선택지 목록 — `academies/{academyId}/meta/options`에 종류별 `{id, label}[]`.
  * 다른 문서는 label이 아니라 id를 저장하므로 이름을 바꿔도 따로 갱신할 필요가 없고,
  * 지운 선택지를 가리키는 id는 화면에서 "없음"으로 보인다.
- * 강의실·청구 항목 등은 해당 단계에서 종류만 추가한다.
+ * 청구 항목 등은 해당 단계에서 종류만 추가한다.
  */
 export const OPTION_LIST_KINDS = {
   jobTitles: { permission: "settings.staff", maxItems: 30 },
   /** 원생 보호자 관계 — 원생 추가·수정 시트에서 편집 */
   guardianRelations: { permission: "operations.students", maxItems: 20 },
+  /** 강의실 — 반 추가·수정 시트에서 편집(이름만, 시간 충돌 검사 없음) */
+  rooms: { permission: "operations.classes", maxItems: 50 },
 } as const satisfies Record<string, { permission: AcademyPermission; maxItems: number }>;
 
 export type OptionListKind = keyof typeof OPTION_LIST_KINDS;

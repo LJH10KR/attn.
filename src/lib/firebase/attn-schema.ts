@@ -272,7 +272,7 @@ export type AcademyStaff = {
 /** `academies/{academyId}/meta/options` — 종류별 선택지 `{id, label}[]`(쓰기는 `saveAcademyOptionList`만) */
 export const ACADEMY_OPTIONS_DOC_ID = "options" as const;
 
-export type AcademyOptionListKind = "jobTitles" | "guardianRelations";
+export type AcademyOptionListKind = "jobTitles" | "guardianRelations" | "rooms";
 
 export type AcademyOptionItem = { id: string; label: string };
 
@@ -329,8 +329,30 @@ export type AcademyParent = {
   updatedAt?: Timestamp;
 };
 
-/** 학생당 전담 선생 상한 — Firestore 규칙과 클라이언트가 동일 값 사용 */
-export const MAX_ASSIGNED_TEACHERS_PER_STUDENT = 20;
+/** 반 상태 — 운영중·준비중·종강(종강 반은 학생 `teacherUids` 계산에서 빠짐, 원생 추가 불가) */
+export type AcademyClassStatus = "active" | "preparing" | "ended";
+
+/** 수업 시간 한 칸 — 요일 월=1~일=7 */
+export type AcademyClassScheduleSlot = { weekday: number; start: string; end: string };
+
+/**
+ * `academies/{academyId}/classes/{classId}` — 쓰기는 Functions(`classes.ts`)만, 원장·활성 직원 읽기.
+ * 원생 수는 저장하지 않는다(학생 `classIds array-contains`로 셈).
+ */
+export type AcademyClass = {
+  name: string;
+  status: AcademyClassStatus;
+  schedule: AcademyClassScheduleSlot[];
+  /** 원장 uid 또는 계정이 있는 직원 uid, 최대 10명 */
+  teacherUids: string[];
+  /** `meta/options.rooms` 선택지 id — 지운 선택지면 "강의실 미지정" */
+  roomId: string | null;
+  capacity: number | null;
+  sortOrder: number;
+  endedAt?: Timestamp | null;
+  createdAt: Timestamp;
+  updatedAt?: Timestamp;
+};
 
 /** 원비 납부 방식 */
 export type TuitionType = "monthly_fixed" | "session_based";
@@ -371,18 +393,8 @@ export type AcademyStudent = {
   parentUids?: string[];
   /** 배정된 반 — 반 배정 함수만 */
   classIds?: string[];
-  /** 반 담당 선생님 — 서버 파생(2-D) */
+  /** 반 담당 선생님 — `classIds`의 반(종강 제외) 선생님 합집합, 서버 파생. 선생님 읽기 규칙이 이 필드로 판별 */
   teacherUids?: string[];
-  /**
-   * 전담 선생님 Auth uid 목록 — 과목별로 동일 학생이 여러 선생님에게 전담될 수 있음.
-   * 활성 선생만 허용(규칙), 최대 `MAX_ASSIGNED_TEACHERS_PER_STUDENT`명.
-   */
-  assignedTeacherUids?: string[];
-  /**
-   * @deprecated 구 단일 전담 필드 — 기존 문서 호환용. 클라이언트는 읽을 때 `assignedTeacherUids`와 병합하고
-   * 전담 저장 시 제거(`deleteField`)합니다.
-   */
-  assignedTeacherUid?: string | null;
   /** 매월 지정일 납부 — tuitionType이 "monthly_fixed"이거나 미설정(학원 기본값) 시 사용 */
   tuitionDueDayOfMonth?: number;
   tuitionAmount?: number;

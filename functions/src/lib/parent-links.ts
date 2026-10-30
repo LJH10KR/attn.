@@ -81,7 +81,7 @@ export async function readLinkedStudentIdsInTx(
 
 /**
  * 번호 색인 확인·생성(트랜잭션 안, 읽기 단계에서 부를 것). 다른 계정이 잡고 있으면 거부, 같은 계정이면 그대로.
- * 반환된 함수는 쓰기 단계에서 호출한다(색인이 없을 때만 생성).
+ * 반환된 함수는 쓰기 단계에서 호출한다(색인이 없을 때만 생성, 새로 만들었으면 true).
  */
 export async function claimParentPhoneIndexInTx(
   tx: Transaction,
@@ -89,15 +89,38 @@ export async function claimParentPhoneIndexInTx(
   academyId: string,
   phone: string,
   uid: string,
-): Promise<() => void> {
+): Promise<() => boolean> {
   const ref = parentPhoneIndexRef(db, academyId, phone);
   const snap = await tx.get(ref);
   if (snap.exists && snap.get("parentUid") !== uid) {
     throw new HttpsError("already-exists", PARENT_PHONE_TAKEN_MSG);
   }
   return () => {
-    if (!snap.exists) tx.set(ref, { parentUid: uid, createdAt: FieldValue.serverTimestamp() });
+    if (snap.exists) return false;
+    tx.set(ref, { parentUid: uid, createdAt: FieldValue.serverTimestamp() });
+    return true;
   };
+}
+
+/**
+ * 이번 연결 요청에서 새로 잡은 색인을 되돌린다(연결이 하나도 안 됐을 때). 색인이 이 계정 것이고
+ * 연결된 학생이 0명일 때만 지운다 — 같은 계정의 다른 연결 요청이 그 사이 연결했으면 그대로 둔다.
+ */
+export async function releaseUnusedParentPhoneIndex(
+  db: admin.firestore.Firestore,
+  academyId: string,
+  phone: string,
+  uid: string,
+): Promise<boolean> {
+  const ref = parentPhoneIndexRef(db, academyId, phone);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists || snap.get("parentUid") !== uid) return false;
+    const linked = await tx.get(linkedStudentsQuery(db, academyId, uid).limit(1));
+    if (!linked.empty) return false;
+    tx.delete(ref);
+    return true;
+  });
 }
 
 /** 이 계정이 자기 번호 색인을 잡고 있는지(연결된 적 있는 계정) */
@@ -117,6 +140,8 @@ export type LinkTarget = { uid: string; phone: string; displayName: string };
 /**
  * 학생 1명에 계정 연결(트랜잭션). 번호가 같은 보호자 항목에 연결하고, 없으면(원장이 직접 고른 원생)
  * 계정 이름·번호로 보호자 항목을 추가한다. 이미 연결돼 있으면 "already".
+ * 같은 트랜잭션에서 번호 색인도 확인한다(다른 계정이 잡았으면 거부, 없으면 다시 잡음) —
+ * 같은 계정의 다른 요청이 색인을 되돌리는 것과 겹쳐도 색인 없는 연결이 생기지 않게.
  */
 export async function linkParentToStudentTx(
   db: admin.firestore.Firestore,
@@ -133,6 +158,7 @@ export async function linkParentToStudentTx(
     }
     const guardians = readGuardians(snap.get("guardians"));
     if (guardians.some((g) => g.linkedParentUid === target.uid)) return "already";
+    const writeIndex = await claimParentPhoneIndexInTx(tx, db, academyId, target.phone, target.uid);
 
     const idx = guardians.findIndex((g) => guardianPhoneKey(g.phone) === key);
     if (idx >= 0) {
@@ -159,6 +185,7 @@ export async function linkParentToStudentTx(
         linkedParentUid: target.uid,
       });
     }
+    writeIndex();
     tx.update(ref, {
       guardians,
       ...deriveGuardianFields(guardians),

@@ -69,8 +69,6 @@ type CallableStudentPayload = {
   status?: string;
   billable?: boolean;
   phone?: string;
-  assignedTeacherUids?: string[];
-  assignedTeacherUid?: string | null;
   createdAtMillis?: number | null;
   hasCheckInPin?: boolean;
   tuitionDueDayOfMonth?: number | null;
@@ -123,10 +121,6 @@ function studentRowFromCallablePayload(
     name: s.name ?? "",
     gradeLabel: s.gradeLabel ?? "",
     phone: s.phone ?? "",
-    assignedTeacherUids: s.assignedTeacherUids ?? [],
-    ...(s.assignedTeacherUid
-      ? { assignedTeacherUid: s.assignedTeacherUid }
-      : {}),
     ...(createdAt ? { createdAt } : {}),
   });
 }

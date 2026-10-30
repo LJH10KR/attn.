@@ -112,6 +112,13 @@ export {
   linkParentToStudents,
   unlinkParentFromStudent,
 } from "./parent-links";
+export {
+  deleteClass,
+  onAcademyClassWritten,
+  reorderClasses,
+  saveClass,
+  setClassStudents,
+} from "./classes";
 export { deleteStaffMember, saveStaffMember } from "./staff";
 export { saveAcademyOptionList } from "./academy-options";
 export {

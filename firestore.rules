@@ -65,7 +65,7 @@ service cloud.firestore {
         && get(academyParentMemberPath(academyId)).data.status in ['active', 'pending_approval'];
     }
 
-    /** 문서의 uid 목록 필드(`parentUids` 등)에 본인이 있는지 — list 쿼리(array-contains)도 이 형태로 통과 */
+    /** 문서의 uid 목록 필드(`parentUids`·`teacherUids`)에 본인이 있는지 — list 쿼리(array-contains)도 이 형태로 통과 */
     function uidListHasMe(list) {
       return list.hasAny([request.auth.uid]);
     }
@@ -137,20 +137,6 @@ service cloud.firestore {
     function studentSessionFieldsOnly() {
       return request.resource.data.diff(resource.data).affectedKeys()
         .hasOnly(['sessionBalance', 'extraSessionDates', 'updatedAt']);
-    }
-
-    /**
-     * 활성 선생님 클라이언트 — 학생 문서는 본인 전담(배열·구 단일 필드)에 한해 읽기만.
-     * TODO(2-D 반 관리): 반에서 계산한 `teacherUids`로 바꾸고 이 함수는 삭제.
-     */
-    function teacherCanReadAssignedStudent(student) {
-      return student is map
-        && ((student.keys().hasAny(['assignedTeacherUids'])
-            && student.assignedTeacherUids is list
-            && student.assignedTeacherUids.hasAny([request.auth.uid]))
-          || (student.keys().hasAny(['assignedTeacherUid'])
-              && student.assignedTeacherUid is string
-              && student.assignedTeacherUid == request.auth.uid));
     }
 
     match /users/{userId} {
@@ -358,9 +344,25 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      /**
+       * 반 — 민감 정보가 없어 원장·활성 직원 읽기(선생님 "내 반" 조회), 쓰기는 Functions(`classes.ts`)만.
+       */
+      match /classes/{classId} {
+        allow read: if isAdmin()
+          || isAcademyOwner(academyId)
+          || isAcademyTeacherActive(academyId);
+        allow write: if false;
+      }
+
+      /** 반 변경 이력 — 저장만(서버 전용) */
+      match /classHistory/{entryId} {
+        allow read, write: if false;
+      }
+
       match /students/{studentId} {
         /**
          * 원생을 다루는 메뉴(원생·학부모·반·출결·수납)는 모두 학생 목록을 읽는다.
+         * 활성 선생님은 담당 반 학생(`teacherUids`, 반에서 서버 계산)만 — list는 `teacherUids array-contains` 쿼리.
          * 학부모는 연결된 자녀(`parentUids`, 서버 계산)만 — 계정 상태도 함께 본다.
          */
         allow read: if isAdmin()
@@ -368,7 +370,7 @@ service cloud.firestore {
             'operations.students', 'operations.parents', 'operations.classes', 'lessons.attendance',
             'billing.invoices', 'billing.collections', 'billing.payments'
           ])
-          || (isAcademyTeacherActive(academyId) && teacherCanReadAssignedStudent(resource.data))
+          || (isAcademyTeacherActive(academyId) && uidListHasMe(resource.data.teacherUids))
           || (isAcademyParentReader(academyId) && uidListHasMe(resource.data.parentUids));
 
         /** 생성·원생 정보 수정은 서버(`saveStudent`)만 — 파생 필드(parentUids 등)를 클라이언트가 못 바꾸게 */

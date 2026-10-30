@@ -9,15 +9,9 @@ import { actorHasPermission, resolveAcademyActor } from "./lib/academy-access";
 import { readUidList } from "./lib/parent-recipients";
 import { isActiveStudent } from "./lib/student-profile";
 
-function studentAssignedToTeacher(data: Record<string, unknown>, teacherUid: string): boolean {
-  const raw = data.assignedTeacherUids;
-  const fromList =
-    Array.isArray(raw) && raw.every((x: unknown) => typeof x === "string")
-      ? (raw as string[]).filter((x) => x.length > 0)
-      : [];
-  if (fromList.includes(teacherUid)) return true;
-  const legacy = data.assignedTeacherUid;
-  return typeof legacy === "string" && legacy.length > 0 && legacy === teacherUid;
+/** 반 담당 선생님(학생 `teacherUids`, 반에서 서버가 계산)인지 */
+function studentTaughtByTeacher(data: Record<string, unknown>, teacherUid: string): boolean {
+  return readUidList(data.teacherUids).includes(teacherUid);
 }
 
 type AttendanceSender = {
@@ -48,12 +42,12 @@ async function resolveAttendanceSender(params: {
     };
   }
 
-  // 활성 직원 — 출결관리 권한이 없으면 전담 학생만
+  // 활성 직원 — 출결관리 권한이 없으면 담당 반 학생만
   if (
     !actorHasPermission(actor, "lessons.attendance") &&
-    !studentAssignedToTeacher(studentData, callerUid)
+    !studentTaughtByTeacher(studentData, callerUid)
   ) {
-    throw new HttpsError("permission-denied", "전담 학생에게만 알림을 보낼 수 있습니다.");
+    throw new HttpsError("permission-denied", "담당 반 학생에게만 알림을 보낼 수 있습니다.");
   }
   return {
     role: "teacher",

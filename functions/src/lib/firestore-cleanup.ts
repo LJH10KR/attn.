@@ -254,6 +254,8 @@ export async function deleteAcademyFirestoreCascade(
   await deleteStudentDocs(db, academyId, studentsSnap.docs.map((s) => s.id));
   await deleteCollectionDocs(db, `academies/${academyId}/studentNotes`);
   await deleteCollectionDocs(db, `academies/${academyId}/parentPhones`);
+  await deleteCollectionDocs(db, `academies/${academyId}/classes`);
+  await deleteCollectionDocs(db, `academies/${academyId}/classHistory`);
 
   const metaSnap = await db.collection(`academies/${academyId}/meta`).get();
   metaSnap.docs.forEach((d) => deleteOps.push(d.ref));
@@ -277,45 +279,6 @@ export async function deleteAcademyFirestoreCascade(
   }
 
   return { teacherSnapshots, parentSnapshots };
-}
-
-export async function stripTeacherFromStudents(
-  db: admin.firestore.Firestore,
-  academyId: string,
-  teacherUid: string,
-): Promise<void> {
-  const studentsSnap = await db.collection(`academies/${academyId}/students`).get();
-  const updates: Array<{ ref: DocumentReference; patch: Record<string, unknown> }> = [];
-
-  for (const doc of studentsSnap.docs) {
-    const data = doc.data();
-    const arr = Array.isArray(data.assignedTeacherUids)
-      ? (data.assignedTeacherUids as string[])
-      : [];
-    const legacy =
-      typeof data.assignedTeacherUid === "string" ? (data.assignedTeacherUid as string) : null;
-    const next = arr.filter((id) => id !== teacherUid);
-    let patch: Record<string, unknown> | null = null;
-    if (next.length !== arr.length) {
-      patch = {
-        assignedTeacherUids: next,
-        updatedAt: FieldValue.serverTimestamp(),
-      };
-    }
-    if (legacy === teacherUid) {
-      patch = {
-        ...(patch ?? { updatedAt: FieldValue.serverTimestamp() }),
-        assignedTeacherUid: FieldValue.delete(),
-      };
-    }
-    if (patch) updates.push({ ref: doc.ref, patch });
-  }
-
-  for (const chunk of chunkArray(updates, 400)) {
-    const batch = db.batch();
-    for (const u of chunk) batch.update(u.ref, u.patch);
-    await batch.commit();
-  }
 }
 
 /** 학생 하위 기록 컬렉션 — 학생·학원 삭제 때 함께 지운다 */

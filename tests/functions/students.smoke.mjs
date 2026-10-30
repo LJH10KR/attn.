@@ -1,6 +1,6 @@
 /**
  * 원생 Callable 통합 스모크 — `npm run test:functions` (Auth·Firestore·Functions 에뮬레이터)
- * saveStudent(생성·수정·검증·학년 유지·상태 시각·attnId·메모·보호자 연결 보존), deleteAcademyStudent,
+ * saveStudent(생성·수정·검증·학년 유지·상태 시각·attnId·메모·보호자 연결 보존·보호자 생략 시 변경 없음), deleteAcademyStudent,
  * 권한 거부, 상태 제외(출결 알림·키오스크), 출결 알림 수신자(활성 보호자만)를 확인한다.
  */
 import assert from "node:assert/strict";
@@ -121,7 +121,16 @@ await assert.rejects(
   call("saveStudent", { ...saveBase, guardians: [{ id: gFather.id, relationId: "father", phone: "010-3333-4444" }] }),
   /앱에 연결된 보호자입니다/,
 );
-await assert.rejects(call("saveStudent", saveBase), /앱에 연결된 보호자입니다/, "보호자 목록을 빼고 보내도 거부");
+await assert.rejects(
+  call("saveStudent", { ...saveBase, guardians: [] }),
+  /앱에 연결된 보호자입니다/,
+  "빈 목록([] = 모두 삭제)도 연결된 항목이 있으면 거부",
+);
+// 보호자 목록을 보내지 않으면 그대로 둔다(연결 유지)
+const guardiansBefore = (await studentDoc(created.studentId)).guardians;
+await call("saveStudent", saveBase);
+assert.deepEqual((await studentDoc(created.studentId)).guardians, guardiansBefore, "guardians 생략 = 변경 없음");
+assert.deepEqual((await studentDoc(created.studentId)).parentUids, ["p-active", "p-inactive"]);
 // 연결된 항목의 번호·이름 수정은 허용(연결 유지)
 await call("saveStudent", {
   ...saveBase,

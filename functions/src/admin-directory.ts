@@ -7,8 +7,8 @@ import {
   deleteAttnLoginIndexForMember,
   deleteMemberLoginSecrets,
   purgeUserFirestoreData,
-  stripTeacherFromStudents,
 } from "./lib/firestore-cleanup";
+import { stripTeacherFromClasses } from "./lib/class-teachers";
 import { deleteParentAccountData } from "./lib/parent-links";
 import { reconcileUserActivationMirror } from "./user-activation-mirror";
 
@@ -253,10 +253,11 @@ export const adminDeleteMemberUser = onCall(async (request) => {
   const authUid = memberAuthUid(data, memberDocId);
 
   if (role === "teacher") {
-    await stripTeacherFromStudents(db, academyId, authUid);
     await deleteMemberLoginSecrets(db, academyId, "teacher", memberDocId);
     await deleteAttnLoginIndexForMember(db, data, authUid);
     await ref.delete();
+    // staff 문서를 지운 뒤 반 선생님에서 뺀다(학생 teacherUids는 반 트리거가 맞춤)
+    await stripTeacherFromClasses(db, academyId, authUid, request.auth?.uid ?? null);
     await safeDeleteAuthUser(authUid, "adminDeleteMemberUser teacher");
     if (!(await authUserHasAdminClaim(authUid))) {
       await purgeUserFirestoreData(db, authUid);

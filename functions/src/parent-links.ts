@@ -14,6 +14,7 @@ import {
   parentLinkTargetViolation,
   parentPhoneIndexRef,
   PARENT_PHONE_TAKEN_MSG,
+  releaseUnusedParentPhoneIndex,
   unlinkParentFromStudentTx,
   type LinkTarget,
 } from "./lib/parent-links";
@@ -71,6 +72,7 @@ async function linkStudents(
 /**
  * 승인·직접 연결 — 계정(승인 대기·사용 중·첫 로그인 전)을 원생들의 보호자에 연결.
  * 계정의 번호 색인을 먼저 잡고(다른 계정이 잡은 번호면 거부), 첫 연결이면 `approvedAt`을 기록한다.
+ * 하나도 연결되지 않으면 이번 호출에서 새로 잡은 색인은 되돌린다.
  */
 export const linkParentToStudents = onCall(async (request) => {
   if (!request.auth?.uid) {
@@ -100,18 +102,24 @@ export const linkParentToStudents = onCall(async (request) => {
     }
     const phone = assertKrPhoneRequired(phoneRaw);
     const writeIndex = await claimParentPhoneIndexInTx(tx, db, academyId, phone, parentUid);
-    writeIndex();
+    const indexCreated = writeIndex();
     const displayName = snap.get("displayName");
     return {
       uid: parentUid,
       phone,
       displayName: typeof displayName === "string" ? displayName.trim() : "",
       approved: snap.get("approvedAt") != null,
+      indexCreated,
     };
   });
 
   const result = await linkStudents(db, academyId, target, studentIds);
-  if (!target.approved && result.linked.length + result.alreadyLinked.length > 0) {
+  const anyLinked = result.linked.length + result.alreadyLinked.length > 0;
+  if (!anyLinked && target.indexCreated) {
+    // 하나도 연결되지 않았으면 이번에 새로 잡은 번호 색인을 되돌린다(이미 잡고 있던 색인은 그대로)
+    await releaseUnusedParentPhoneIndex(db, academyId, target.phone, parentUid);
+  }
+  if (!target.approved && anyLinked) {
     await ref.update({
       approvedAt: FieldValue.serverTimestamp(),
       approvedByUid: callerUid,

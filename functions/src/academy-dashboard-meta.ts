@@ -290,6 +290,8 @@ export const onAcademyParentDashboardMetaWritten = onDocumentWritten(
 export const onAcademyStudentDashboardMetaWritten = onDocumentWritten(
   { document: "academies/{academyId}/students/{studentId}", ...firestoreTriggerOpts },
   async (event) => {
+    // 집계가 쓰는 학생 값은 총수뿐 — 생성·삭제만 처리(반 배정·원비 수정 등 학생 수정마다 count 쿼리를 돌리지 않게)
+    if (event.data?.before?.exists === event.data?.after?.exists) return;
     const academyId = event.params.academyId;
     const db = admin.firestore();
     try {

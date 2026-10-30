@@ -24,7 +24,6 @@ import { createPortal } from "react-dom";
 import {
   academySessionTuitionSettingsPath,
   academyStudentSessionLogsPath,
-  MAX_ASSIGNED_TEACHERS_PER_STUDENT,
   type TeacherRegistrationStatus,
   type TuitionType,
 } from "@/lib/firebase/attn-schema";
@@ -62,9 +61,9 @@ const miniBtnClass =
 function useStudentActionAccess() {
   const { can, viewer } = useAcademyShell().permissions;
   return {
-    /** 출석 알림 — 출결 권한이 없으면 전담 학생만(`sendStudentAttendanceNotification`) */
+    /** 출석 알림 — 출결 권한이 없으면 담당 반 학생만(`sendStudentAttendanceNotification`) */
     present: (s: StudentRowVM) =>
-      can("lessons.attendance") || (viewer !== null && s.assignedTeacherUids.includes(viewer.uid)),
+      can("lessons.attendance") || (viewer !== null && s.teacherUids.includes(viewer.uid)),
     /** 결석 기록(`recordStudentAbsences`) */
     absence: can("lessons.attendance"),
     /** 잔여 회차 차감 — 학생 문서 회차 필드 수정 규칙 */
@@ -93,8 +92,8 @@ export type StudentRowVM = {
   age: number;
   phone: string;
   emergencyContact: string;
-  /** 병합된 전담 선생 uid — 구 `assignedTeacherUid` 단일 필드는 읽을 때 여기에 합쳐짐 */
-  assignedTeacherUids: string[];
+  /** 반 담당 선생님(서버가 반에서 계산) */
+  teacherUids: string[];
   createdAt?: Timestamp;
   /** 매월 지정일 납부 */
   tuitionDueDayOfMonth?: number | null;
@@ -121,28 +120,6 @@ function fsErr(err: unknown): string {
   return "요청에 실패했습니다.";
 }
 
-function mergeAssignedTeacherUidsFromDoc(data: Record<string, unknown>): string[] {
-  const raw = data.assignedTeacherUids;
-  const fromList =
-    Array.isArray(raw) && raw.every((x) => typeof x === "string")
-      ? (raw as string[]).filter((x) => x.length > 0)
-      : [];
-  const legacy = data.assignedTeacherUid;
-  const legacyOne = typeof legacy === "string" && legacy.length > 0 ? legacy : null;
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const x of fromList) {
-    if (!seen.has(x)) {
-      seen.add(x);
-      out.push(x);
-    }
-  }
-  if (legacyOne && !seen.has(legacyOne)) {
-    out.push(legacyOne);
-  }
-  return out;
-}
-
 export function docToStudentRow(id: string, data: Record<string, unknown>): StudentRowVM {
   const ageRaw = data.age;
   const age =
@@ -150,7 +127,6 @@ export function docToStudentRow(id: string, data: Record<string, unknown>): Stud
       ? Math.max(0, Math.floor(ageRaw))
       : 0;
   const createdAt = data.createdAt;
-  const assignedTeacherUids = mergeAssignedTeacherUidsFromDoc(data);
 
   const rawDueDayOfMonth = data.tuitionDueDayOfMonth;
   const tuitionDueDayOfMonth =
@@ -206,7 +182,9 @@ export function docToStudentRow(id: string, data: Record<string, unknown>): Stud
     age,
     phone: typeof data.phone === "string" ? data.phone : "",
     emergencyContact: typeof data.emergencyContact === "string" ? data.emergencyContact : "",
-    assignedTeacherUids,
+    teacherUids: Array.isArray(data.teacherUids)
+      ? data.teacherUids.filter((x): x is string => typeof x === "string" && x.length > 0)
+      : [],
     createdAt:
       createdAt &&
       typeof createdAt === "object" &&
@@ -1178,22 +1156,20 @@ function TuitionSettingModal({
   );
 }
 
+/**
+ * 반 담당 선생님(읽기 전용) — 학생 `teacherUids`는 반에서 서버가 계산한다(2-D).
+ * 지정은 반 관리에서. 2-E 학생 상세 시트로 교체되며 삭제.
+ */
 function StudentAssignedTeachersModal({
   academyId,
   student,
   onClose,
-  activeTeachersSorted,
   teacherNameById,
-  teacherAssignBusyId,
-  onToggleTeacher,
 }: {
   academyId: string;
   student: StudentRowWithParent | null;
   onClose: () => void;
-  activeTeachersSorted: TeacherBrief[];
   teacherNameById: Record<string, string>;
-  teacherAssignBusyId: string | null;
-  onToggleTeacher: (row: StudentRowVM, teacherUid: string, add: boolean) => void;
 }) {
   useBodyScrollLock(student !== null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -1202,26 +1178,22 @@ function StudentAssignedTeachersModal({
   }, [student]);
   useEffect(() => {
     if (!student) return;
-    const busyHere = teacherAssignBusyId === student.id;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !busyHere) onClose();
+      if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [student, teacherAssignBusyId, onClose]);
+  }, [student, onClose]);
 
   if (!student) return null;
 
-  const busyHere = teacherAssignBusyId === student.id;
   const s = student;
 
   return createPortal(
     <div
       className="fixed inset-0 z-[210] flex items-center justify-center bg-black/45 p-4 backdrop-blur-[2px]"
       role="presentation"
-      onClick={() => {
-        if (!busyHere) onClose();
-      }}
+      onClick={onClose}
     >
       <div
         role="dialog"
@@ -1231,7 +1203,7 @@ function StudentAssignedTeachersModal({
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id="student-assign-teachers-title" className="shrink-0 text-base font-semibold text-foreground">
-          전담 선생님
+          반 담당 선생님
         </h2>
         <p className="mt-1 shrink-0 text-xs text-neutral-600">
           <span className="font-medium text-foreground">{s.name}</span>
@@ -1239,81 +1211,30 @@ function StudentAssignedTeachersModal({
         </p>
         <p className="mt-0.5 shrink-0 text-[11px] text-neutral-500">
           학부모: <span className="font-medium text-foreground">{s.parentName}</span>
-          <span className="font-mono text-[10px] text-neutral-400"> ({s.parentUids.join(", ")})</span>
         </p>
-        <p className="mt-2 shrink-0 text-[11px] leading-relaxed text-neutral-600">
-          활성 선생님을 복수 선택할 수 있습니다. 학생당 최대{" "}
-          {MAX_ASSIGNED_TEACHERS_PER_STUDENT}명 · 학원{" "}
+        <p className="mt-2 shrink-0 break-keep text-[11px] leading-relaxed text-neutral-600">
+          담당 선생님은 원생이 속한 반에서 정해집니다. 반 관리에서 지정해 주세요. · 학원{" "}
           <span className="font-mono text-[10px] text-foreground">{academyId}</span>
         </p>
-        <div className="mt-4 flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
-          <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/60 bg-white/25 px-2 py-2">
-            <p className="mb-1.5 px-1 text-[11px] font-medium text-neutral-600">활성 선생님</p>
-            <div className="max-h-48 space-y-0.5 overflow-y-auto">
-              {activeTeachersSorted.length === 0 ? (
-                <p className="px-1 py-2 text-xs text-neutral-500">활성 선생님이 없습니다.</p>
-              ) : (
-                activeTeachersSorted.map((t) => {
-                  const on = s.assignedTeacherUids.includes(t.id);
-                  const atCap =
-                    !on && s.assignedTeacherUids.length >= MAX_ASSIGNED_TEACHERS_PER_STUDENT;
-                  return (
-                    <label
-                      key={t.id}
-                      className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 text-[11px] text-foreground hover:bg-white/50"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={on}
-                        disabled={busyHere || atCap}
-                        onChange={() => onToggleTeacher(s, t.id, !on)}
-                        className="h-3.5 w-3.5 rounded border-neutral-400"
-                      />
-                      <span>{t.name || t.id}</span>
-                    </label>
-                  );
-                })
-              )}
-            </div>
-          </div>
-          {s.assignedTeacherUids.some((tid) => !activeTeachersSorted.some((t) => t.id === tid)) ? (
-            <div className="shrink-0 overflow-y-auto rounded-xl border border-amber-500/20 bg-amber-500/5 px-2 py-2">
-              <p className="mb-1 px-1 text-[11px] font-medium text-amber-950/90">비활성·기타 전담</p>
-              <ul className="space-y-1 text-[11px] text-amber-950">
-                {s.assignedTeacherUids
-                  .filter((tid) => !activeTeachersSorted.some((t) => t.id === tid))
-                  .map((tid) => (
-                    <li
-                      key={tid}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/40 bg-white/30 px-2 py-1.5"
-                    >
-                      <span>
-                        {teacherNameById[tid] ?? tid}
-                        <span className="text-neutral-700"> (연결 해제만 가능)</span>
-                      </span>
-                      <button
-                        type="button"
-                        className={miniBtnClass}
-                        disabled={busyHere}
-                        onClick={() => onToggleTeacher(s, tid, false)}
-                      >
-                        제거
-                      </button>
-                    </li>
-                  ))}
-              </ul>
-            </div>
-          ) : null}
+        <div className="mt-4 min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/60 bg-white/25 px-3 py-2">
+          {s.teacherUids.length === 0 ? (
+            <p className="py-2 text-xs text-neutral-500">담당 선생님이 없습니다.</p>
+          ) : (
+            <ul className="space-y-1 text-[11px] text-foreground">
+              {s.teacherUids.map((tid) => (
+                <li key={tid}>{teacherNameById[tid] ?? tid}</li>
+              ))}
+            </ul>
+          )}
         </div>
         <div className="mt-6 flex shrink-0 justify-end">
           <button
             ref={closeRef}
             type="button"
-            disabled={busyHere}
-            className="rounded-2xl border border-neutral-300/80 bg-white/80 px-4 py-2.5 text-sm font-medium text-neutral-800 disabled:opacity-50"
+            className="rounded-2xl border border-neutral-300/80 bg-white/80 px-4 py-2.5 text-sm font-medium text-neutral-800"
             onClick={onClose}
           >
-            {busyHere ? "저장 중…" : "닫기"}
+            닫기
           </button>
         </div>
       </div>
@@ -1778,10 +1699,10 @@ export function AcademyParentStudentList({
                     연락 {formatKrPhoneDisplay(s.phone) || "—"} · 비상{" "}
                     {formatKrPhoneDisplay(s.emergencyContact) || "—"}
                   </div>
-                  {s.assignedTeacherUids.length > 0 ? (
+                  {s.teacherUids.length > 0 ? (
                     <div className="mt-0.5 text-[11px] text-sky-900">
-                      전담:{" "}
-                      {s.assignedTeacherUids.map((uid, i) => (
+                      담당:{" "}
+                      {s.teacherUids.map((uid, i) => (
                         <span key={uid}>
                           {i > 0 ? ", " : ""}
                           <span className="font-medium">{teacherNames[uid] ?? uid}</span>
@@ -1991,7 +1912,6 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
   const [editBusy, setEditBusy] = useState(false);
   const [editErr, setEditErr] = useState<string | null>(null);
   const [delBusy, setDelBusy] = useState(false);
-  const [teacherAssignBusyId, setTeacherAssignBusyId] = useState<string | null>(null);
   const [teacherModalStudentId, setTeacherModalStudentId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [formName, setFormName] = useState("");
@@ -2139,16 +2059,9 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
     return m;
   }, [teachers]);
 
-  const activeTeachersSorted = useMemo(() => {
-    return teachers
-      .filter((t) => t.status === "active")
-      .slice()
-      .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id, "ko"));
-  }, [teachers]);
-
   const rowsWithParent = useMemo((): StudentRowWithParent[] => {
     return students.map((s) => {
-      const teacherLabel = s.assignedTeacherUids
+      const teacherLabel = s.teacherUids
         .map((uid) => teacherNameById[uid] ?? uid)
         .join(", ");
       return {
@@ -2172,7 +2085,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
         ageStr.includes(q) ||
         r.parentUids.some((uid) => uid.toLowerCase().includes(q)) ||
         r.teacherLabel.toLowerCase().includes(q) ||
-        r.assignedTeacherUids.some((uid) => uid.toLowerCase().includes(q))
+        r.teacherUids.some((uid) => uid.toLowerCase().includes(q))
       );
     });
   }, [rowsWithParent, queryText]);
@@ -2181,7 +2094,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
     if (!teacherModalStudentId) return null;
     const s = students.find((x) => x.id === teacherModalStudentId);
     if (!s) return null;
-    const teacherLabel = s.assignedTeacherUids
+    const teacherLabel = s.teacherUids
       .map((uid) => teacherNameById[uid] ?? uid)
       .join(", ");
     return {
@@ -2270,43 +2183,6 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
     }
   }, [academyId, deleteTarget, refreshStudentPanel]);
 
-  const toggleTeacherForStudent = useCallback(
-    async (student: StudentRowVM, teacherUid: string, add: boolean) => {
-      const cur = student.assignedTeacherUids;
-      let next: string[];
-      if (add) {
-        if (cur.includes(teacherUid)) return;
-        if (cur.length >= MAX_ASSIGNED_TEACHERS_PER_STUDENT) {
-          setNotice(
-            `전담 선생님은 학생당 최대 ${MAX_ASSIGNED_TEACHERS_PER_STUDENT}명까지 지정할 수 있습니다.`,
-          );
-          return;
-        }
-        next = [...cur, teacherUid];
-      } else {
-        next = cur.filter((id) => id !== teacherUid);
-      }
-      setTeacherAssignBusyId(student.id);
-      try {
-        const db = getFirebaseDb();
-        await updateDoc(doc(db, "academies", academyId, "students", student.id), {
-          assignedTeacherUids: next,
-          assignedTeacherUid: deleteField(),
-          updatedAt: serverTimestamp(),
-        });
-        setNotice(
-          next.length > 0 ? "전담 선생님을 저장했습니다." : "전담 선생님을 모두 해제했습니다.",
-        );
-        refreshStudentPanel();
-      } catch (e) {
-        setNotice(fsErr(e));
-      } finally {
-        setTeacherAssignBusyId(null);
-      }
-    },
-    [academyId, refreshStudentPanel],
-  );
-
   return (
     <div className="space-y-4">
       {notice ? (
@@ -2338,7 +2214,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
         <input
           type="search"
           className="min-w-0 flex-1 rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-2.5 text-sm text-foreground shadow-inner outline-none placeholder:text-neutral-400 focus:border-[#4a90e2]/50 focus:bg-white/70"
-          placeholder="이름·학부모·연락처·나이·학부모ID·전담선생으로 검색"
+          placeholder="이름·학부모·연락처·나이·학부모ID·담당 선생으로 검색"
           value={queryText}
           onChange={(e) => setQueryText(e.target.value)}
           aria-label="학생 검색"
@@ -2383,10 +2259,10 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                         학부모 {s.parentName || "—"} · {s.gradeLabel || "학년 미입력"}
                       </span>
                       <span className="mt-0.5 block text-[11px] text-neutral-500">
-                        연락 {formatKrPhoneDisplay(s.phone) || "—"} · 전담 선생{" "}
+                        연락 {formatKrPhoneDisplay(s.phone) || "—"} · 담당 선생{" "}
                         <span className="font-medium text-sky-900/90">
-                          {s.assignedTeacherUids.length > 0
-                            ? `${s.assignedTeacherUids.length}명`
+                          {s.teacherUids.length > 0
+                            ? `${s.teacherUids.length}명`
                             : "없음"}
                         </span>
                       </span>
@@ -2424,7 +2300,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                       className="flex shrink-0 items-center gap-0.5 text-[11px] font-medium text-sky-900/90"
                       aria-hidden
                     >
-                      전담
+                      담당
                       <ChevronRightGlyph className="text-neutral-400" />
                     </span>
                   </button>
@@ -2488,10 +2364,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
         academyId={academyId}
         student={teacherModalRow}
         onClose={closeTeacherModal}
-        activeTeachersSorted={activeTeachersSorted}
         teacherNameById={teacherNameById}
-        teacherAssignBusyId={teacherAssignBusyId}
-        onToggleTeacher={toggleTeacherForStudent}
       />
 
       {editTarget ? (
