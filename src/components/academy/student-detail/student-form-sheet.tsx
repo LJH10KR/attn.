@@ -122,8 +122,10 @@ export function StudentFormSheet({
   const [firstAttendedOn, setFirstAttendedOn] = useState(target?.firstAttendedOn ?? "");
   const [baseGuardians, setBaseGuardians] = useState<GuardianDraft[]>(() => toDrafts(target?.guardians ?? []));
   const [guardians, setGuardians] = useState<GuardianDraft[]>(baseGuardians);
-  const initialMemo = note.loaded ? note.memo : "";
-  const [memo, setMemo] = useState(initialMemo);
+  // 메모 기준값은 시트를 연 순간의 값으로 고정 — 이후 note가 바뀌어도 입력값·비교 기준이 어긋나지 않게.
+  // null(읽지 못함)이면 메모를 보내지 않고 입력란도 보이지 않는다.
+  const [memoBase] = useState<string | null>(() => (note.loaded ? note.memo : null));
+  const [memo, setMemo] = useState(memoBase ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const errorRef = useRef<HTMLParagraphElement>(null);
@@ -226,7 +228,7 @@ export function StudentFormSheet({
       return;
     }
     const guardiansChanged = !target || comparable(guardians) !== comparable(baseGuardians);
-    const memoChanged = note.loaded && memo.trim() !== initialMemo.trim();
+    const memoChanged = memoBase !== null && memo.trim() !== memoBase.trim();
     setBusy(true);
     setError(null);
     try {
@@ -251,7 +253,7 @@ export function StudentFormSheet({
               })),
             }
           : {}),
-        ...(memoChanged || (!target && memo.trim()) ? { memo: memo.trim() } : {}),
+        ...(memoChanged ? { memo: memo.trim() } : {}),
       });
       const studentId = (res.data as { studentId?: string }).studentId ?? target?.id ?? "";
       onSavedAction(target ? `${name.trim()} 원생 정보를 저장했습니다.` : `${name.trim()} 원생을 추가했습니다.`, studentId);
@@ -495,7 +497,7 @@ export function StudentFormSheet({
               <label htmlFor="sf-memo" className={labelClass}>
                 메모 <span className="font-normal text-neutral-400">(학원 내부용 · 학부모에게 보이지 않음)</span>
               </label>
-              {note.loaded ? (
+              {memoBase !== null ? (
                 <>
                   <textarea
                     id="sf-memo"

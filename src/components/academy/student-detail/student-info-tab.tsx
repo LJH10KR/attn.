@@ -80,7 +80,7 @@ export function StudentInfoTab({
           </h3>
           <p className="whitespace-pre-wrap break-words text-xs text-neutral-700">
             {note === "loading"
-              ? "불러오는 중…"
+              ? "메모를 불러오는 중입니다"
               : note.loaded
                 ? note.memo || "메모가 없습니다."
                 : "메모를 불러오지 못했습니다."}

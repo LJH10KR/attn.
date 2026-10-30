@@ -146,6 +146,8 @@ export function StudentDetailSheet({
   }, [activeTab]);
 
   const childOpen = formOpen || deleteOpen;
+  /** 수정 시트는 메모 읽기가 끝난 뒤(성공·실패)에만 연다 — 읽는 중에 열면 메모 기준값이 비어 저장 때 덮어쓸 수 있음 */
+  const noteReady = !readNotes || note !== "loading";
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || childOpen) return;
@@ -221,13 +223,14 @@ export function StudentDetailSheet({
                         <button
                           type="button"
                           role="menuitem"
-                          className="block w-full px-4 py-2.5 text-left text-sm hover:bg-black/[0.04]"
+                          disabled={!noteReady}
+                          className="block w-full px-4 py-2.5 text-left text-sm hover:bg-black/[0.04] disabled:text-neutral-400 disabled:hover:bg-transparent"
                           onClick={() => {
                             setMenuOpen(false);
                             setFormOpen(true);
                           }}
                         >
-                          정보 수정
+                          {noteReady ? "정보 수정" : "정보 수정 (불러오는 중)"}
                         </button>
                         <button
                           type="button"
@@ -375,11 +378,11 @@ export function StudentDetailSheet({
         </main>
       </div>
 
-      {formOpen && student ? (
+      {formOpen && student && noteReady ? (
         <StudentFormSheet
           academyId={academyId}
           target={student}
-          note={note === "loading" ? { loaded: false } : note}
+          note={readNotes && note !== "loading" ? note : { loaded: false }}
           relations={relations}
           onSaveRelationsAction={access.manage ? saveRelations : undefined}
           onCloseAction={() => setFormOpen(false)}
