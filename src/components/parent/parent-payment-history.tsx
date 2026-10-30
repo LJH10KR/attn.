@@ -70,7 +70,7 @@ export function ParentPaymentHistory({ academyId, parentUid }: Props) {
     const db = getFirebaseDb();
     const qy = query(
       collection(db, academyPaymentsPath(academyId)),
-      where("parentUserId", "==", parentUid),
+      where("parentUids", "array-contains", parentUid),
       where("createdAt", ">=", threeMonthsAgoTimestamp()),
       orderBy("createdAt", "desc"),
     );

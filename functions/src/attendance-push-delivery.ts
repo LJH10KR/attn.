@@ -29,7 +29,7 @@ export type AttendancePushDeliveryDoc = {
   deliveryId: string;
   academyId: string;
   studentId: string;
-  parentUserId: string;
+  recipientUid: string;
   kind: "present" | "absent";
   studentName: string;
   body: string;
@@ -163,7 +163,7 @@ export async function deliverAttendancePushOnce(
   }
 
   const {
-    parentUserId,
+    recipientUid,
     academyId,
     studentId,
     kind,
@@ -171,7 +171,7 @@ export async function deliverAttendancePushOnce(
     body,
   } = attemptClaim.delivery;
 
-  const parentUserRef = db.doc(`users/${parentUserId}`);
+  const parentUserRef = db.doc(`users/${recipientUid}`);
   const userSnap = await parentUserRef.get();
   if (!userSnap.exists || userSnap.get("pushNotificationsEnabled") !== true) {
     return { sent: 0, failureCount: 0 };
@@ -189,7 +189,7 @@ export async function deliverAttendancePushOnce(
     return { sent: 0, failureCount: 0 };
   }
 
-  const appBadgeCount = await countUserDashboardBellItems(db, parentUserId);
+  const appBadgeCount = await countUserDashboardBellItems(db, recipientUid);
   const dataPayload: Record<string, string> = {
     title: "attn.",
     body,
@@ -198,7 +198,7 @@ export async function deliverAttendancePushOnce(
     studentId,
     studentName,
     academyId,
-    parentUserId,
+    recipientUid,
     appBadgeCount: String(appBadgeCount),
     deliveryId,
   };
@@ -211,7 +211,7 @@ export async function deliverAttendancePushOnce(
   if (resp.failureCount > 0) {
     logger.warn("deliverAttendancePushOnce partial failure", {
       deliveryId,
-      parentUserId,
+      recipientUid,
       success: resp.successCount,
       failure: resp.failureCount,
       fcmAttempt: attemptClaim.attempts,
@@ -221,7 +221,7 @@ export async function deliverAttendancePushOnce(
 
   const { skippedGraceCount } = await applyMulticastDeliveryResults({
     db,
-    parentUserId,
+    recipientUid,
     userLastSyncedAt,
     buckets,
     responses: resp.responses,
@@ -250,7 +250,7 @@ export async function deliverAttendancePushOnce(
     isRecentParentPushSync(userData) &&
     wasGraceInvalidOnlyFailure({ buckets, responses: resp.responses, userLastSyncedAt })
   ) {
-    await maybeScheduleAttendancePushRetries(db, deliveryId, parentUserId);
+    await maybeScheduleAttendancePushRetries(db, deliveryId, recipientUid);
   }
 
   return { sent: resp.successCount, failureCount: resp.failureCount };
@@ -262,7 +262,7 @@ export async function deliverAttendancePushOnce(
 async function maybeScheduleAttendancePushRetries(
   db: admin.firestore.Firestore,
   deliveryId: string,
-  parentUserId: string,
+  recipientUid: string,
 ): Promise<void> {
   const deliveryRef = db.doc(`_pushDeliveries/${deliveryId}`);
   const shouldSchedule = await db.runTransaction(async (tx) => {
@@ -296,13 +296,13 @@ async function maybeScheduleAttendancePushRetries(
     }
     logger.info("scheduled attendance push retries", {
       deliveryId,
-      parentUserId,
+      recipientUid,
       delaysSec: [...PUSH_DELIVERY_RETRY_DELAYS_SEC],
     });
   } catch (e) {
     logger.error("maybeScheduleAttendancePushRetries enqueue failed", {
       deliveryId,
-      parentUserId,
+      recipientUid,
       e,
     });
   }
@@ -314,7 +314,7 @@ export async function createAttendancePushDeliveryDoc(
     deliveryId: string;
     academyId: string;
     studentId: string;
-    parentUserId: string;
+    recipientUid: string;
     kind: "present" | "absent";
     studentName: string;
     body: string;
@@ -325,7 +325,7 @@ export async function createAttendancePushDeliveryDoc(
     deliveryId: params.deliveryId,
     academyId: params.academyId,
     studentId: params.studentId,
-    parentUserId: params.parentUserId,
+    recipientUid: params.recipientUid,
     kind: params.kind,
     studentName: params.studentName,
     body: params.body,

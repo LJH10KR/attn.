@@ -20,6 +20,7 @@ export function AcademyTabSummary({ tab }: { tab: AcademyNavTab }) {
         href: href(m.sub),
         ready: m.ready,
         summary: stats[m.permission]?.summary,
+        detail: stats[m.permission]?.detail,
         badge: stats[m.permission]?.badge,
       }))}
     />

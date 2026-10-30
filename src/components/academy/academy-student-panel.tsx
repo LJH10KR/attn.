@@ -45,6 +45,7 @@ import { cachedRead } from "@/lib/firebase/cached-read";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 import { KrPhoneInput } from "@/components/ui/kr-phone-input";
 import { formatKrPhoneDisplay, phoneMatchesSearch } from "@/lib/phone/kr-phone";
+import { displayGrade, gradeLabel } from "@/lib/academy/student-profile";
 
 const glassCard = "glass-card";
 
@@ -83,8 +84,12 @@ function useStudentActionAccess() {
 
 export type StudentRowVM = {
   id: string;
-  parentUserId: string;
+  /** 연결된 보호자 앱 계정(서버 계산) — 2-E에서 새 원생 화면으로 교체 */
+  parentUids: string[];
   name: string;
+  /** 표시 학년(초3 등) */
+  gradeLabel: string;
+  /** @deprecated 예전 나이 필드 — 2-E에서 학년으로 교체되며 삭제 */
   age: number;
   phone: string;
   emergencyContact: string;
@@ -190,8 +195,14 @@ export function docToStudentRow(id: string, data: Record<string, unknown>): Stud
 
   return {
     id,
-    parentUserId: typeof data.parentUserId === "string" ? data.parentUserId : "",
+    parentUids: Array.isArray(data.parentUids)
+      ? data.parentUids.filter((x): x is string => typeof x === "string")
+      : [],
     name: typeof data.name === "string" ? data.name : "",
+    gradeLabel:
+      typeof data.gradeLabel === "string"
+        ? data.gradeLabel
+        : gradeLabel(displayGrade(data.grade, data.gradeYear)),
     age,
     phone: typeof data.phone === "string" ? data.phone : "",
     emergencyContact: typeof data.emergencyContact === "string" ? data.emergencyContact : "",
@@ -444,7 +455,7 @@ function DeleteStudentConfirmModal({
         </h2>
         <p className="mt-3 text-sm text-neutral-700">
           <span className="font-medium">{student.name}</span>
-          {student.age != null ? <span className="text-neutral-500"> (만 {student.age}세)</span> : null} — 이
+          {student.gradeLabel ? <span className="text-neutral-500"> ({student.gradeLabel})</span> : null} — 이
           정보를 삭제합니다. 되돌릴 수 없습니다.
         </p>
         <div className="mt-6 flex flex-wrap justify-end gap-2">
@@ -1224,11 +1235,11 @@ function StudentAssignedTeachersModal({
         </h2>
         <p className="mt-1 shrink-0 text-xs text-neutral-600">
           <span className="font-medium text-foreground">{s.name}</span>
-          <span className="text-neutral-500"> · 만 {s.age}세</span>
+          <span className="text-neutral-500"> · {s.gradeLabel || "학년 미입력"}</span>
         </p>
         <p className="mt-0.5 shrink-0 text-[11px] text-neutral-500">
           학부모: <span className="font-medium text-foreground">{s.parentName}</span>
-          <span className="font-mono text-[10px] text-neutral-400"> ({s.parentUserId})</span>
+          <span className="font-mono text-[10px] text-neutral-400"> ({s.parentUids.join(", ")})</span>
         </p>
         <p className="mt-2 shrink-0 text-[11px] leading-relaxed text-neutral-600">
           활성 선생님을 복수 선택할 수 있습니다. 학생당 최대{" "}
@@ -1519,11 +1530,11 @@ function ChargeSessionModal({
 /** 학부모 카드 확장 영역 — 해당 학부모의 자녀만 */
 export function AcademyParentStudentList({
   academyId,
-  parentUserId,
+  parentUid,
   setNoticeAction,
 }: {
   academyId: string;
-  parentUserId: string;
+  parentUid: string;
   setNoticeAction: (msg: string | null) => void;
 }) {
   const [teacherNames, setTeacherNames] = useState<Record<string, string>>({});
@@ -1565,7 +1576,7 @@ export function AcademyParentStudentList({
         getDocs(
           query(
             collection(db, "academies", academyId, "students"),
-            where("parentUserId", "==", parentUserId),
+            where("parentUids", "array-contains", parentUid),
           ),
         ),
       ]);
@@ -1585,11 +1596,11 @@ export function AcademyParentStudentList({
       setListError(err instanceof Error ? err.message : "목록을 불러오지 못했습니다.");
       setRows([]);
     }
-  }, [academyId, parentUserId, readStaff]);
+  }, [academyId, parentUid, readStaff]);
 
   const { refresh: refreshParentChildren } = useAcademyListPoll(loadParentChildren, [
     academyId,
-    parentUserId,
+    parentUid,
   ]);
 
   const recordSessionComplete = useCallback(async (student: StudentRowVM) => {
@@ -1762,7 +1773,7 @@ export function AcademyParentStudentList({
               <div className="flex items-start justify-between gap-2 px-3 py-2">
                 <div className="min-w-0">
                   <span className="font-medium text-foreground">{s.name}</span>
-                  <span className="text-neutral-500"> · 만 {s.age}세</span>
+                  <span className="text-neutral-500"> · {s.gradeLabel || "학년 미입력"}</span>
                   <div className="mt-0.5 text-[11px] text-neutral-600">
                     연락 {formatKrPhoneDisplay(s.phone) || "—"} · 비상{" "}
                     {formatKrPhoneDisplay(s.emergencyContact) || "—"}
@@ -2142,7 +2153,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
         .join(", ");
       return {
         ...s,
-        parentName: parentsById[s.parentUserId] ?? s.parentUserId,
+        parentName: s.parentUids.map((uid) => parentsById[uid] ?? uid).join(", "),
         teacherLabel,
       };
     });
@@ -2159,7 +2170,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
         phoneMatchesSearch(r.phone, q) ||
         phoneMatchesSearch(r.emergencyContact, q) ||
         ageStr.includes(q) ||
-        r.parentUserId.toLowerCase().includes(q) ||
+        r.parentUids.some((uid) => uid.toLowerCase().includes(q)) ||
         r.teacherLabel.toLowerCase().includes(q) ||
         r.assignedTeacherUids.some((uid) => uid.toLowerCase().includes(q))
       );
@@ -2175,7 +2186,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
       .join(", ");
     return {
       ...s,
-      parentName: parentsById[s.parentUserId] ?? s.parentUserId,
+      parentName: s.parentUids.map((uid) => parentsById[uid] ?? uid).join(", "),
       teacherLabel,
     };
   }, [teacherModalStudentId, students, parentsById, teacherNameById]);
@@ -2369,7 +2380,7 @@ export function AcademyStudentPanel({ academyId }: { academyId: string }) {
                     <span className="min-w-0 flex-1">
                       <span className="block font-medium text-foreground">{s.name}</span>
                       <span className="mt-0.5 block truncate text-xs text-neutral-500">
-                        학부모 {s.parentName} · 만 {s.age}세
+                        학부모 {s.parentName || "—"} · {s.gradeLabel || "학년 미입력"}
                       </span>
                       <span className="mt-0.5 block text-[11px] text-neutral-500">
                         연락 {formatKrPhoneDisplay(s.phone) || "—"} · 전담 선생{" "}

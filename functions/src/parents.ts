@@ -10,6 +10,13 @@ import { getRequireStudentCheckInPin } from "./kiosk";
 import { loadNextDueInvoiceSummaries } from "./tuition-invoices";
 import { assertPermission } from "./lib/academy-access";
 import {
+  displayGrade,
+  gradeLabel,
+  isBillableStudent,
+  normalizeStudentStatus,
+  type StudentStatus,
+} from "./lib/student-profile";
+import {
   deleteAttnLoginIndexForMember,
   deleteMemberLoginSecrets,
   deleteStudentDocs,
@@ -383,13 +390,12 @@ function serializeStudentDocForCallable(
   opts?: { hasCheckInPin?: boolean },
 ): {
   id: string;
-  parentUserId: string;
   name: string;
-  age: number;
-  phone: string;
-  emergencyContact: string;
-  assignedTeacherUids: string[];
-  assignedTeacherUid: string | null;
+  /** 표시 학년 라벨(초3 등) — 학년 코드·기준 연도는 내려주지 않는다 */
+  gradeLabel: string;
+  status: StudentStatus;
+  /** 청구 대상(재원)인지 — 결제 카드 노출 */
+  billable: boolean;
   createdAtMillis: number | null;
   hasCheckInPin?: boolean;
   tuitionDueDayOfMonth: number | null;
@@ -404,12 +410,6 @@ function serializeStudentDocForCallable(
   const createdAt = data.createdAt as Timestamp | undefined;
   const createdAtMillis =
     createdAt && typeof createdAt.toMillis === "function" ? createdAt.toMillis() : null;
-  const rawUids = data.assignedTeacherUids;
-  const assignedTeacherUids =
-    Array.isArray(rawUids) && rawUids.every((x: unknown) => typeof x === "string")
-      ? (rawUids as string[]).filter((x) => x.length > 0)
-      : [];
-  const legacyUid = data.assignedTeacherUid;
   const rawDay = data.tuitionDueDayOfMonth;
   const tuitionDueDayOfMonth =
     typeof rawDay === "number" && Number.isInteger(rawDay) && rawDay >= 1 && rawDay <= 31
@@ -433,14 +433,10 @@ function serializeStudentDocForCallable(
       : [];
   return {
     id: d.id,
-    parentUserId: typeof data.parentUserId === "string" ? data.parentUserId : "",
     name: typeof data.name === "string" ? data.name : "",
-    age: typeof data.age === "number" && Number.isFinite(data.age) ? Math.floor(data.age) : 0,
-    phone: typeof data.phone === "string" ? data.phone : "",
-    emergencyContact: typeof data.emergencyContact === "string" ? data.emergencyContact : "",
-    assignedTeacherUids,
-    assignedTeacherUid:
-      typeof legacyUid === "string" && legacyUid.length > 0 ? legacyUid : null,
+    gradeLabel: gradeLabel(displayGrade(data.grade, data.gradeYear)),
+    status: normalizeStudentStatus(data.status),
+    billable: isBillableStudent(data),
     createdAtMillis,
     ...(opts?.hasCheckInPin !== undefined ? { hasCheckInPin: opts.hasCheckInPin } : {}),
     tuitionDueDayOfMonth,
@@ -565,7 +561,7 @@ export const listParentChildrenStudents = onCall(
 
     const [parentSnap, snap, requireStudentCheckInPin] = await Promise.all([
       parentRef.get(),
-      col.where("parentUserId", "==", uid).get(),
+      col.where("parentUids", "array-contains", uid).get(),
       getRequireStudentCheckInPin(db, academyId),
     ]);
     if (!parentSnap.exists || parentSnap.get("status") !== "active") {
@@ -575,16 +571,21 @@ export const listParentChildrenStudents = onCall(
       );
     }
 
-    const pinRefs = snap.docs.map((d) => db.doc(studentCheckInSecretPath(academyId, d.id)));
+    // 학부모 앱에는 재원·휴원 자녀만(미등록·퇴원은 연결은 유지하되 숨김)
+    const visibleDocs = snap.docs.filter((d) => {
+      const status = normalizeStudentStatus(d.get("status"));
+      return status === "enrolled" || status === "on_leave";
+    });
+    const pinRefs = visibleDocs.map((d) => db.doc(studentCheckInSecretPath(academyId, d.id)));
     const [pinSnaps, invoiceSummaries] = await Promise.all([
       pinRefs.length ? db.getAll(...pinRefs) : Promise.resolve([]),
       loadNextDueInvoiceSummaries(
         db,
         academyId,
-        snap.docs.map((d) => ({ id: d.id, data: d.data() })),
+        visibleDocs.filter((d) => isBillableStudent(d.data())).map((d) => ({ id: d.id, data: d.data() })),
       ),
     ]);
-    const students = snap.docs.map((d, i) => {
+    const students = visibleDocs.map((d, i) => {
       const pinSnap = pinSnaps[i];
       const hasCheckInPin =
         typeof pinSnap?.get("pinHash") === "string" && (pinSnap.get("pinHash") as string).length > 0;
@@ -743,32 +744,5 @@ export const deleteParentInvite = onCall(async (request) => {
     await purgeUserFirestoreData(db, authUid);
   }
 
-  return { ok: true };
-});
-
-/** 학원·오너 — 학생 삭제(문서 + serverSecrets) */
-export const deleteAcademyStudent = onCall(async (request) => {
-  if (!request.auth?.uid) {
-    throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
-  }
-  const { uid: callerUid, token } = request.auth;
-  const academyId =
-    typeof request.data?.academyId === "string" ? request.data.academyId.trim() : "";
-  const studentId =
-    typeof request.data?.studentId === "string" ? request.data.studentId.trim() : "";
-  if (!academyId || !studentId) {
-    throw new HttpsError("invalid-argument", "요청이 올바르지 않습니다.");
-  }
-
-  const db = admin.firestore();
-  await assertPermission(db, academyId, callerUid, token, "operations.students");
-
-  const ref = db.doc(`academies/${academyId}/students/${studentId}`);
-  const snap = await ref.get();
-  if (!snap.exists) {
-    throw new HttpsError("not-found", "학생 정보를 찾을 수 없습니다.");
-  }
-
-  await deleteStudentDocs(db, academyId, [studentId]);
   return { ok: true };
 });

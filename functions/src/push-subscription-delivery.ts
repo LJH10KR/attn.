@@ -104,13 +104,13 @@ function graceDeadlineMs(userLastSyncedAt: Timestamp | undefined, bucket: PushTo
  */
 export async function applyMulticastDeliveryResults(params: {
   db: admin.firestore.Firestore;
-  parentUserId: string;
+  recipientUid: string;
   userLastSyncedAt?: Timestamp;
   buckets: PushTokenBucket[];
   responses: admin.messaging.SendResponse[];
   logContext: string;
 }): Promise<{ removedCount: number; skippedGraceCount: number }> {
-  const { db, parentUserId, userLastSyncedAt, buckets, responses, logContext } = params;
+  const { db, recipientUid, userLastSyncedAt, buckets, responses, logContext } = params;
   const now = Date.now();
   const toDelete: DocumentReference[] = [];
   const toUpdate: { ref: DocumentReference; data: Record<string, unknown> }[] = [];
@@ -138,7 +138,7 @@ export async function applyMulticastDeliveryResults(params: {
     if (FCM_NEVER_DELETE_SUBSCRIPTION_CODES.has(code) || !FCM_TOKEN_INVALID_CODES.has(code)) {
       if (code) {
         logger.warn(`${logContext} push delivery non-fatal error`, {
-          parentUserId,
+          recipientUid,
           errorCode: code,
           tokenPrefix: fcmTokenPrefix(bucket.token),
         });
@@ -149,7 +149,7 @@ export async function applyMulticastDeliveryResults(params: {
     if (now < graceDeadlineMs(userLastSyncedAt, bucket)) {
       skippedGraceCount += bucket.refs.length;
       logger.warn(`${logContext} skipped invalid-token cleanup (grace period)`, {
-        parentUserId,
+        recipientUid,
         errorCode: code,
         tokenPrefix: fcmTokenPrefix(bucket.token),
       });
@@ -163,7 +163,7 @@ export async function applyMulticastDeliveryResults(params: {
       if (next >= PUSH_INVALID_FAILURES_BEFORE_DELETE) {
         toDelete.push(ref);
         logger.warn(`${logContext} removing stale push subscription`, {
-          parentUserId,
+          recipientUid,
           errorCode: code,
           tokenPrefix: fcmTokenPrefix(bucket.token),
           invalidDeliveryCount: next,
@@ -178,7 +178,7 @@ export async function applyMulticastDeliveryResults(params: {
           },
         });
         logger.warn(`${logContext} invalid token delivery (subscription kept)`, {
-          parentUserId,
+          recipientUid,
           errorCode: code,
           tokenPrefix: fcmTokenPrefix(bucket.token),
           invalidDeliveryCount: next,
@@ -212,7 +212,7 @@ export async function applyMulticastDeliveryResults(params: {
 
   if (toDelete.length > 0) {
     logger.warn(`${logContext} removed stale push subscriptions`, {
-      parentUserId,
+      recipientUid,
       removedCount: toDelete.length,
       skippedGraceCount,
     });

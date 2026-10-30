@@ -1,6 +1,7 @@
 import * as admin from "firebase-admin";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import * as logger from "firebase-functions/logger";
+import { resolveParentRecipients } from "./lib/parent-recipients";
 import { applyMulticastDeliveryResults, buildTokenBuckets } from "./push-subscription-delivery";
 
 const REGION = "asia-northeast3";
@@ -10,6 +11,7 @@ const REGION = "asia-northeast3";
  * 브라우저로 튕겨 복귀 못 하는 경우 등) /api/payment/verify 또는 웹훅 안전망 중 어느 쪽이
  * 결제를 완결하든, 결제 문서가 처음 생성되는 이 순간에만 한 번 발송된다(생성 시에만 실행되는
  * onDocumentCreated이므로 재시도로 인한 중복 발송 걱정이 없음).
+ * 수신자는 결제 문서 `parentUids` 중 활성 학부모 계정 전부.
  */
 export const sendPaymentCompletedPush = onDocumentCreated(
   {
@@ -22,8 +24,10 @@ export const sendPaymentCompletedPush = onDocumentCreated(
     if (!data) return;
     if (data.status !== "PAID") return;
 
-    const parentUserId = typeof data.parentUserId === "string" ? data.parentUserId : "";
-    if (!parentUserId) return;
+    const db = admin.firestore();
+    const academyId = event.params.academyId;
+    const recipients = await resolveParentRecipients(db, academyId, data.parentUids);
+    if (recipients.length === 0) return;
 
     const studentName =
       typeof data.studentName === "string" && data.studentName ? data.studentName : "학생";
@@ -31,61 +35,63 @@ export const sendPaymentCompletedPush = onDocumentCreated(
     const sessionCount =
       typeof data.sessionCount === "number" && data.sessionCount > 0 ? data.sessionCount : null;
     const amount = typeof data.amount === "number" ? data.amount : null;
-
-    const db = admin.firestore();
-    const parentUserRef = db.doc(`users/${parentUserId}`);
-    const userSnap = await parentUserRef.get();
-    if (!userSnap.exists || userSnap.get("pushNotificationsEnabled") !== true) {
-      logger.info("sendPaymentCompletedPush: parent push disabled, skipping", { parentUserId });
-      return;
-    }
-
-    const subsSnap = await parentUserRef.collection("pushSubscriptions").get();
-    const buckets = buildTokenBuckets(subsSnap);
-    const tokens = buckets.map((b) => b.token);
-    if (tokens.length === 0) {
-      logger.info("sendPaymentCompletedPush: no FCM tokens, skipping", { parentUserId });
-      return;
-    }
-
-    const userData = userSnap.data();
-    const userLastSyncedAt =
-      (userData?.pushLastSyncServerAt as admin.firestore.Timestamp | undefined) ??
-      (userData?.pushSubscriptionLastSyncedAt as admin.firestore.Timestamp | undefined);
-
     const body =
       paymentType === "session_based"
         ? `${studentName} 학생의 회차 결제(${sessionCount ?? "?"}회)가 완료됐습니다.`
         : `${studentName} 학생의 원비 결제가 완료됐습니다.`;
 
-    const dataPayload: Record<string, string> = {
-      title: "attn.",
-      body,
-      type: "payment_completed",
-      url: "/parent",
-      academyId: event.params.academyId,
-      studentId: typeof data.studentId === "string" ? data.studentId : "",
-      parentUserId,
-    };
-    if (amount != null) dataPayload.amount = String(amount);
+    await Promise.all(
+      recipients.map(async (recipientUid) => {
+        const userRef = db.doc(`users/${recipientUid}`);
+        const userSnap = await userRef.get();
+        if (!userSnap.exists || userSnap.get("pushNotificationsEnabled") !== true) {
+          logger.info("sendPaymentCompletedPush: parent push disabled, skipping", { recipientUid });
+          return;
+        }
 
-    const resp = await admin.messaging().sendEachForMulticast({ tokens, data: dataPayload });
+        const subsSnap = await userRef.collection("pushSubscriptions").get();
+        const buckets = buildTokenBuckets(subsSnap);
+        const tokens = buckets.map((b) => b.token);
+        if (tokens.length === 0) {
+          logger.info("sendPaymentCompletedPush: no FCM tokens, skipping", { recipientUid });
+          return;
+        }
 
-    if (resp.failureCount > 0) {
-      logger.warn("sendPaymentCompletedPush: FCM partial failure", {
-        parentUserId,
-        successCount: resp.successCount,
-        failureCount: resp.failureCount,
-      });
-    }
+        const userData = userSnap.data();
+        const userLastSyncedAt =
+          (userData?.pushLastSyncServerAt as admin.firestore.Timestamp | undefined) ??
+          (userData?.pushSubscriptionLastSyncedAt as admin.firestore.Timestamp | undefined);
 
-    await applyMulticastDeliveryResults({
-      db,
-      parentUserId,
-      userLastSyncedAt,
-      buckets,
-      responses: resp.responses,
-      logContext: "sendPaymentCompletedPush",
-    });
+        const dataPayload: Record<string, string> = {
+          title: "attn.",
+          body,
+          type: "payment_completed",
+          url: "/parent",
+          academyId,
+          studentId: typeof data.studentId === "string" ? data.studentId : "",
+          recipientUid,
+        };
+        if (amount != null) dataPayload.amount = String(amount);
+
+        const resp = await admin.messaging().sendEachForMulticast({ tokens, data: dataPayload });
+
+        if (resp.failureCount > 0) {
+          logger.warn("sendPaymentCompletedPush: FCM partial failure", {
+            recipientUid,
+            successCount: resp.successCount,
+            failureCount: resp.failureCount,
+          });
+        }
+
+        await applyMulticastDeliveryResults({
+          db,
+          recipientUid,
+          userLastSyncedAt,
+          buckets,
+          responses: resp.responses,
+          logContext: "sendPaymentCompletedPush",
+        });
+      }),
+    );
   },
 );

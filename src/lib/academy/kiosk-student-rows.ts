@@ -1,23 +1,26 @@
-import { collection, getDocs } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
 import type { KioskStudentRow } from "@/components/academy/academy-kiosk-panel";
+import { academyOptionsPath, type StudentGuardian } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
 import { maskKrPhoneForKiosk, phoneLast4Digits } from "@/lib/phone/kr-phone";
 
+/**
+ * 키오스크 학생 목록 — 재원 원생만. 보호자 이름은 원생 문서의 대표 보호자(이름, 없으면 관계 라벨)에서 읽고
+ * 학부모 계정 목록(`parents`)은 읽지 않는다. 번호 뒷자리는 학생 번호, 없으면 대표 보호자 번호(3단계 출첵번호 전까지).
+ */
 export async function loadKioskStudentRows(academyId: string): Promise<KioskStudentRow[]> {
   const db = getFirebaseDb();
-  // 보호자 이름은 보조 정보 — 학부모 목록 권한이 없는 출결 담당 직원이면 이름 없이 학생만
-  const [studentsSnap, parentsSnap] = await Promise.all([
-    getDocs(collection(db, "academies", academyId, "students")),
-    getDocs(collection(db, "academies", academyId, "parents")).catch(() => null),
+  const [studentsSnap, optionsSnap] = await Promise.all([
+    getDocs(query(collection(db, "academies", academyId, "students"), where("status", "==", "enrolled"))),
+    // 관계 라벨은 보조 정보 — 못 읽어도 학생 목록은 보여 준다
+    getDoc(doc(db, academyOptionsPath(academyId))).catch(() => null),
   ]);
 
-  const parentNameByUid = new Map<string, string>();
-  for (const d of parentsSnap?.docs ?? []) {
-    const authUid = d.get("authUid");
-    const uid = typeof authUid === "string" && authUid ? authUid : d.id;
-    const name = d.get("displayName");
-    if (typeof name === "string" && name) {
-      parentNameByUid.set(uid, name);
+  const relationLabelById = new Map<string, string>();
+  const relations: unknown = optionsSnap?.get("guardianRelations");
+  if (Array.isArray(relations)) {
+    for (const r of relations as { id?: unknown; label?: unknown }[]) {
+      if (typeof r?.id === "string" && typeof r.label === "string") relationLabelById.set(r.id, r.label);
     }
   }
 
@@ -25,14 +28,19 @@ export async function loadKioskStudentRows(academyId: string): Promise<KioskStud
   for (const d of studentsSnap.docs) {
     const name = d.get("name");
     if (typeof name !== "string" || !name.trim()) continue;
-    const parentUserId = d.get("parentUserId");
+    const guardians: unknown = d.get("guardians");
+    const list = Array.isArray(guardians) ? (guardians as StudentGuardian[]) : [];
+    const primary = list.find((g) => g?.isPrimary) ?? list[0];
     const parentName =
-      typeof parentUserId === "string"
-        ? parentNameByUid.get(parentUserId) ?? ""
-        : "";
-    const phoneRaw = d.get("phone");
+      (typeof primary?.name === "string" && primary.name) ||
+      (primary?.relationId ? relationLabelById.get(primary.relationId) ?? "" : "");
+    const studentPhone = d.get("phone");
     const phone =
-      typeof phoneRaw === "string" && phoneRaw.trim() ? phoneRaw.trim() : null;
+      typeof studentPhone === "string" && studentPhone.trim()
+        ? studentPhone.trim()
+        : typeof primary?.phone === "string" && primary.phone
+          ? primary.phone
+          : null;
     rows.push({
       studentId: d.id,
       name: name.trim(),

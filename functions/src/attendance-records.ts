@@ -3,6 +3,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { assertPermission, type AcademyActor } from "./lib/academy-access";
+import { isActiveStudent } from "./lib/student-profile";
 import {
   sendStudentAttendanceNotificationCore,
   type AttendanceSender,
@@ -238,11 +239,12 @@ export const recordStudentAbsences = onCall(async (request) => {
     });
   });
 
-  if (!notifyParent) {
+  const studentData = studentSnap.data() as Record<string, unknown>;
+  // 퇴원·휴원·미등록은 기록만 남기고 알림은 보내지 않는다
+  if (!notifyParent || !isActiveStudent(studentData)) {
     return { ok: true as const, recordedCount: dates.length, notification: null };
   }
 
-  const studentData = studentSnap.data() as Record<string, unknown>;
   const studentName =
     typeof studentData.name === "string" && studentData.name ? studentData.name : "학생";
   const dateLabel =

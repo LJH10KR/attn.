@@ -43,7 +43,6 @@ import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
 import { FirebaseError } from "firebase/app";
-import { formatKrPhoneDisplay } from "@/lib/phone/kr-phone";
 
 const glassCard = "glass-card";
 
@@ -65,11 +64,11 @@ function isRetryableCallableAuthError(err: unknown): boolean {
 
 type CallableStudentPayload = {
   id: string;
-  parentUserId?: string;
   name?: string;
-  age?: number;
+  gradeLabel?: string;
+  status?: string;
+  billable?: boolean;
   phone?: string;
-  emergencyContact?: string;
   assignedTeacherUids?: string[];
   assignedTeacherUid?: string | null;
   createdAtMillis?: number | null;
@@ -86,6 +85,8 @@ type CallableStudentPayload = {
 
 type ParentStudentRow = StudentRowVM & {
   hasCheckInPin?: boolean;
+  /** 청구 대상(재원) — 휴원 자녀는 결제 카드를 숨김 */
+  billable?: boolean;
   tuitionDueDayOfMonth?: number | null;
   tuitionAmount?: number | null;
   tuitionInvoice?: TuitionInvoiceSummary | null;
@@ -117,11 +118,9 @@ function studentRowFromCallablePayload(
       ? Timestamp.fromMillis(s.createdAtMillis)
       : undefined;
   return docToStudentRow(s.id, {
-    parentUserId: s.parentUserId ?? "",
     name: s.name ?? "",
-    age: s.age ?? 0,
+    gradeLabel: s.gradeLabel ?? "",
     phone: s.phone ?? "",
-    emergencyContact: s.emergencyContact ?? "",
     assignedTeacherUids: s.assignedTeacherUids ?? [],
     ...(s.assignedTeacherUid
       ? { assignedTeacherUid: s.assignedTeacherUid }
@@ -289,6 +288,7 @@ export default function ParentDashboardPage() {
           const list = rawList.map((s) => ({
             ...studentRowFromCallablePayload(s),
             hasCheckInPin: s.hasCheckInPin === true,
+            billable: s.billable !== false,
             tuitionDueDayOfMonth: s.tuitionDueDayOfMonth ?? null,
             tuitionAmount: typeof s.tuitionAmount === "number" ? s.tuitionAmount : null,
             tuitionInvoice: s.tuitionInvoice ?? null,
@@ -450,6 +450,7 @@ export default function ParentDashboardPage() {
       const list = rawList.map((s) => ({
         ...studentRowFromCallablePayload(s),
         hasCheckInPin: s.hasCheckInPin === true,
+        billable: s.billable !== false,
         tuitionDueDayOfMonth: s.tuitionDueDayOfMonth ?? null,
         tuitionAmount: typeof s.tuitionAmount === "number" ? s.tuitionAmount : null,
         tuitionInvoice: s.tuitionInvoice ?? null,
@@ -671,19 +672,7 @@ export default function ParentDashboardPage() {
                   {s.name}
                   <span className="font-normal text-neutral-500">
                     {" "}
-                    · 만 {s.age}세
-                  </span>
-                </p>
-                <p className="mt-2 text-[11px] text-neutral-600">
-                  연락{" "}
-                  <span className="text-foreground">
-                    {formatKrPhoneDisplay(s.phone) || "—"}
-                  </span>
-                </p>
-                <p className="mt-0.5 text-[11px] text-neutral-600">
-                  비상 연락{" "}
-                  <span className="text-foreground">
-                    {formatKrPhoneDisplay(s.emergencyContact) || "—"}
+                    · {s.gradeLabel || "학년 미입력"}
                   </span>
                 </p>
                 {kioskRequirePin ? (
@@ -693,7 +682,7 @@ export default function ParentDashboardPage() {
                     onUpdatedAction={() => void refreshChildrenList()}
                   />
                 ) : null}
-                {s.tuitionDueDayOfMonth ? (
+                {!s.billable ? null : s.tuitionDueDayOfMonth ? (
                   <ParentTuitionReminderCard
                     studentId={s.id}
                     studentName={s.name}

@@ -54,11 +54,11 @@ function isRetryableCallableAuthError(err: unknown): boolean {
 
 type CallableStudentPayload = {
   id: string;
-  parentUserId?: string;
   name?: string;
-  age?: number;
+  gradeLabel?: string;
+  status?: string;
+  billable?: boolean;
   phone?: string;
-  emergencyContact?: string;
   assignedTeacherUids?: string[];
   assignedTeacherUid?: string | null;
   createdAtMillis?: number | null;
@@ -72,11 +72,9 @@ function studentRowFromCallablePayload(
       ? Timestamp.fromMillis(s.createdAtMillis)
       : undefined;
   return docToStudentRow(s.id, {
-    parentUserId: s.parentUserId ?? "",
     name: s.name ?? "",
-    age: s.age ?? 0,
+    gradeLabel: s.gradeLabel ?? "",
     phone: s.phone ?? "",
-    emergencyContact: s.emergencyContact ?? "",
     assignedTeacherUids: s.assignedTeacherUids ?? [],
     ...(s.assignedTeacherUid
       ? { assignedTeacherUid: s.assignedTeacherUid }
@@ -508,19 +506,13 @@ export default function TeacherDashboardPage() {
                   {s.name}
                   <span className="font-normal text-neutral-500">
                     {" "}
-                    · 만 {s.age}세
+                    · {s.gradeLabel || "학년 미입력"}
                   </span>
                 </p>
                 <p className="mt-2 text-[11px] text-neutral-600">
                   연락{" "}
                   <span className="text-foreground">
                     {formatKrPhoneDisplay(s.phone) || "—"}
-                  </span>
-                </p>
-                <p className="mt-0.5 text-[11px] text-neutral-600">
-                  비상 연락{" "}
-                  <span className="text-foreground">
-                    {formatKrPhoneDisplay(s.emergencyContact) || "—"}
                   </span>
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">

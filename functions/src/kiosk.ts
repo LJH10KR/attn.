@@ -7,6 +7,8 @@ import { countUserDashboardBellItems } from "./app-badge-count";
 import { sendStudentAttendanceNotificationCore } from "./attendance-send-core";
 import { upsertTodayAttendanceRecord } from "./attendance-records";
 import { actorHasPermission, assertPermission, resolveAcademyActor } from "./lib/academy-access";
+import { readUidList, resolveParentRecipients } from "./lib/parent-recipients";
+import { isActiveStudent } from "./lib/student-profile";
 
 const KIOSK_SETTINGS_DOC_ID = "kioskSettings";
 const MAX_PIN_ATTEMPTS = 5;
@@ -236,6 +238,9 @@ export const submitKioskCheckIn = onCall(async (request) => {
     throw new HttpsError("not-found", "학생을 찾을 수 없습니다.");
   }
   const studentData = studentSnap.data() as Record<string, unknown>;
+  if (!isActiveStudent(studentData)) {
+    throw new HttpsError("failed-precondition", "재원 중인 원생만 출석할 수 있습니다. 학원에 문의해 주세요.");
+  }
   const requirePin = await getRequireStudentCheckInPin(db, academyId);
 
   const secretRef = studentCheckInSecretRef(db, academyId, studentId);
@@ -250,10 +255,10 @@ export const submitKioskCheckIn = onCall(async (request) => {
     }
     const pinHash = secretSnap.get("pinHash") as string | undefined;
     if (!pinHash) {
-      const parentUserId = studentData.parentUserId;
-      if (typeof parentUserId === "string" && parentUserId) {
-        await maybeSendPinSetupReminder(db, academyId, parentUserId, studentId, studentData);
-      }
+      const recipients = await resolveParentRecipients(db, academyId, studentData.parentUids);
+      await Promise.all(
+        recipients.map((uid) => maybeSendPinSetupReminder(db, academyId, uid, studentId, studentData)),
+      );
       throw new HttpsError(
         "failed-precondition",
         "출석 PIN이 설정되지 않았습니다. 학부모에게 PIN 설정 안내가 전송됩니다.",
@@ -316,19 +321,19 @@ export const submitKioskCheckIn = onCall(async (request) => {
 async function maybeSendPinSetupReminder(
   db: admin.firestore.Firestore,
   academyId: string,
-  parentUserId: string,
+  recipientUid: string,
   studentId: string,
   studentData: Record<string, unknown>,
 ): Promise<void> {
   const dayKey = new Date().toISOString().slice(0, 10);
   const rateRef = db.doc(
-    `_pushRateLimits/pin_setup_reminder_${academyId}_${parentUserId}_${dayKey}`,
+    `_pushRateLimits/pin_setup_reminder_${academyId}_${recipientUid}_${dayKey}`,
   );
   const claimed = await db.runTransaction(async (tx) => {
     const snap = await tx.get(rateRef);
     if (snap.exists) return false;
     tx.set(rateRef, {
-      parentUserId,
+      recipientUid,
       academyId,
       dayKey,
       sentAt: FieldValue.serverTimestamp(),
@@ -341,7 +346,7 @@ async function maybeSendPinSetupReminder(
     typeof studentData.name === "string" && studentData.name ? studentData.name : "자녀";
   const body = `${studentName} 학생의 출석 PIN을 attn. 학부모 앱에서 설정해 주세요.`;
 
-  const parentRef = db.doc(`users/${parentUserId}`);
+  const parentRef = db.doc(`users/${recipientUid}`);
   await parentRef.collection("dashboardBellItems").add({
     kind: "system_notice",
     academyId,
@@ -371,7 +376,7 @@ async function maybeSendPinSetupReminder(
   }
   if (tokens.length === 0) return;
 
-  const appBadgeCount = await countUserDashboardBellItems(db, parentUserId);
+  const appBadgeCount = await countUserDashboardBellItems(db, recipientUid);
 
   try {
     await admin.messaging().sendEachForMulticast({
@@ -382,12 +387,12 @@ async function maybeSendPinSetupReminder(
         type: "pin_setup_reminder",
         academyId,
         studentId,
-        parentUserId,
+        recipientUid,
         appBadgeCount: String(appBadgeCount),
       },
     });
   } catch (e) {
-    logger.warn("maybeSendPinSetupReminder push failed", { parentUserId, e });
+    logger.warn("maybeSendPinSetupReminder push failed", { recipientUid, e });
   }
 }
 
@@ -416,7 +421,7 @@ export const setStudentCheckInPin = onCall(async (request) => {
   if (!studentSnap.exists) {
     throw new HttpsError("not-found", "학생을 찾을 수 없습니다.");
   }
-  if (studentSnap.get("parentUserId") !== uid) {
+  if (!readUidList(studentSnap.get("parentUids")).includes(uid)) {
     throw new HttpsError("permission-denied", "본인 자녀만 출석 PIN을 설정할 수 있습니다.");
   }
 

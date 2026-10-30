@@ -65,7 +65,7 @@ function attnApplyAppBadge(count) {
 }
 
 async function attnResolveBadgeFromPushData(data) {
-  const uid = typeof data.parentUserId === "string" ? data.parentUserId : "";
+  const uid = typeof data.recipientUid === "string" ? data.recipientUid : "";
   let count = null;
   if (data.appBadgeCount !== undefined && data.appBadgeCount !== "") {
     const parsed = parseInt(String(data.appBadgeCount), 10);
@@ -86,7 +86,7 @@ async function attnResolveBadgeFromPushData(data) {
 self.addEventListener("message", (event) => {
   const msg = event.data;
   if (!msg || msg.type !== "ATTN_BADGE_SYNC") return;
-  const uid = typeof msg.parentUserId === "string" ? msg.parentUserId : "";
+  const uid = typeof msg.recipientUid === "string" ? msg.recipientUid : "";
   const raw = msg.count;
   const parsed = typeof raw === "number" ? raw : parseInt(String(raw || 0), 10);
   const n = Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;

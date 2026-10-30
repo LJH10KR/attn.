@@ -95,10 +95,10 @@ export {
   removeTuitionInvoiceAdjustment,
   setTuitionInvoiceManualPaid,
 } from "./tuition-invoices";
+export { deleteAcademyStudent, saveStudent } from "./students";
 export {
   activateParent,
   deactivateParent,
-  deleteAcademyStudent,
   deleteParentInvite,
   finalizeParentOnboarding,
   getParentActivationState,

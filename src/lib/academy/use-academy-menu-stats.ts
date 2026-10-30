@@ -12,10 +12,15 @@ import { academyMenu } from "@/lib/academy/academy-routes";
 import type { AcademyNavTab, AcademyPermission } from "@/lib/academy/permissions";
 import { kstMonthBounds, nowKST } from "@/lib/academy/kst-month";
 import { docToStaffRow } from "@/lib/academy/staff-row";
+import {
+  STUDENT_STATUSES,
+  STUDENT_STATUS_LABELS,
+  type StudentStatus,
+} from "@/lib/academy/student-profile";
 import { academyPaymentsPath, academyStaffPath, COLLECTIONS } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
 
-export type AcademyMenuStat = { summary?: string; badge?: number };
+export type AcademyMenuStat = { summary?: string; detail?: string; badge?: number };
 export type AcademyMenuStats = Partial<Record<AcademyPermission, AcademyMenuStat>>;
 
 type Loader = (academyId: string) => Promise<AcademyMenuStats>;
@@ -32,11 +37,22 @@ const LOADERS: Partial<Record<AcademyPermission, Loader>> = {
       "operations.parents": { summary: `${all.data().count}명`, badge: pending.data().count },
     };
   },
+  // 숫자는 재원 기준, 휴원·미등록·퇴원은 보조 줄에 따로(0이면 생략)
   "operations.students": async (academyId) => {
-    const snap = await getCountFromServer(
-      collection(getFirebaseDb(), COLLECTIONS.academies, academyId, "students"),
+    const students = collection(getFirebaseDb(), COLLECTIONS.academies, academyId, "students");
+    const counts = await Promise.all(
+      STUDENT_STATUSES.map(async (status) => {
+        const snap = await getCountFromServer(query(students, where("status", "==", status)));
+        return [status, snap.data().count] as const;
+      }),
     );
-    return { "operations.students": { summary: `${snap.data().count}명` } };
+    const byStatus = Object.fromEntries(counts) as Record<StudentStatus, number>;
+    const detail = STUDENT_STATUSES.filter((s) => s !== "enrolled" && byStatus[s] > 0)
+      .map((s) => `${STUDENT_STATUS_LABELS[s]} ${byStatus[s]}`)
+      .join(" · ");
+    return {
+      "operations.students": { summary: `재원 ${byStatus.enrolled}명`, ...(detail ? { detail } : {}) },
+    };
   },
   "billing.payments": async (academyId) => {
     const { year, month } = nowKST();

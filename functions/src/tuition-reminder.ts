@@ -7,6 +7,8 @@ import {
   type PushTokenBucket,
 } from "./push-subscription-delivery";
 import { buildInvoiceSummary } from "./tuition-invoices";
+import { resolveParentRecipients } from "./lib/parent-recipients";
+import { isBillableStudent } from "./lib/student-profile";
 
 const REGION = "asia-northeast3";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -96,13 +98,14 @@ function buildTokenBuckets(
   return buckets;
 }
 
-async function sendReminderToParent(
+/** 보호자 1명에게 발송 — 보낸 기기 수(성공) */
+async function sendReminderToRecipient(
   db: admin.firestore.Firestore,
   params: {
     academyId: string;
     studentId: string;
     studentName: string;
-    parentUserId: string;
+    recipientUid: string;
     /** 조정이 반영된 이번 청구 금액 */
     tuitionAmount: number | undefined;
     dueDateLabel: string;
@@ -110,12 +113,12 @@ async function sendReminderToParent(
     diffDays: 1 | 0;
     settings: TuitionSettings;
   },
-): Promise<void> {
+): Promise<number> {
   const {
     academyId,
     studentId,
     studentName,
-    parentUserId,
+    recipientUid,
     tuitionAmount,
     dueDateLabel,
     reminderKey,
@@ -123,15 +126,15 @@ async function sendReminderToParent(
     settings,
   } = params;
 
-  const parentUserRef = db.doc(`users/${parentUserId}`);
+  const parentUserRef = db.doc(`users/${recipientUid}`);
   const userSnap = await parentUserRef.get();
 
   if (!userSnap.exists || userSnap.get("pushNotificationsEnabled") !== true) {
     logger.info("tuitionReminder: parent push disabled, skipping", {
       studentId,
-      parentUserId,
+      recipientUid,
     });
-    return;
+    return 0;
   }
 
   const userData = userSnap.data();
@@ -146,9 +149,9 @@ async function sendReminderToParent(
   if (tokens.length === 0) {
     logger.info("tuitionReminder: no FCM tokens, skipping", {
       studentId,
-      parentUserId,
+      recipientUid,
     });
-    return;
+    return 0;
   }
 
   const body =
@@ -164,7 +167,7 @@ async function sendReminderToParent(
     studentId,
     studentName,
     academyId,
-    parentUserId,
+    recipientUid,
   };
 
   if (tuitionAmount !== undefined) {
@@ -184,7 +187,7 @@ async function sendReminderToParent(
   if (resp.failureCount > 0) {
     logger.warn("tuitionReminder: FCM partial failure", {
       studentId,
-      parentUserId,
+      recipientUid,
       successCount: resp.successCount,
       failureCount: resp.failureCount,
     });
@@ -192,7 +195,7 @@ async function sendReminderToParent(
 
   await applyMulticastDeliveryResults({
     db,
-    parentUserId,
+    recipientUid,
     userLastSyncedAt,
     buckets,
     responses: resp.responses,
@@ -200,18 +203,36 @@ async function sendReminderToParent(
   });
 
   if (resp.successCount > 0) {
-    await db
-      .doc(`academies/${academyId}/students/${studentId}`)
-      .update({ sentTuitionReminders: FieldValue.arrayUnion(reminderKey) });
-
     logger.info("tuitionReminder: sent successfully", {
       studentId,
-      parentUserId,
+      recipientUid,
       reminderKey,
       successCount: resp.successCount,
     });
   }
+  return resp.successCount;
 }
+
+/** 학생의 활성 보호자 전원에게 발송 — 한 명이라도 받으면 이번 안내를 발송한 것으로 기록 */
+async function sendReminderToParents(
+  db: admin.firestore.Firestore,
+  params: Omit<Parameters<typeof sendReminderToRecipient>[1], "recipientUid"> & {
+    parentUids: unknown;
+  },
+): Promise<void> {
+  const { parentUids, ...rest } = params;
+  const recipients = await resolveParentRecipients(db, rest.academyId, parentUids);
+  const sent = await Promise.all(
+    recipients.map((recipientUid) => sendReminderToRecipient(db, { ...rest, recipientUid })),
+  );
+  if (sent.some((n) => n > 0)) {
+    await db
+      .doc(`academies/${rest.academyId}/students/${rest.studentId}`)
+      .update({ sentTuitionReminders: FieldValue.arrayUnion(rest.reminderKey) });
+  }
+}
+
+
 
 /**
  * 매일 서울 기준 오전 9시에 실행되는 원비 납부 알림 스케줄러.
@@ -288,9 +309,8 @@ export const sendTuitionReminders = onSchedule(
             : null;
         if (!dueDayOfMonth) continue;
 
-        const parentUserId =
-          typeof data.parentUserId === "string" ? data.parentUserId : "";
-        if (!parentUserId) continue;
+        // 퇴원·휴원·미등록은 청구 대상이 아니므로 안내하지 않는다
+        if (!isBillableStudent(data)) continue;
 
         const nextDueMs = getNextDueDateMs(dueDayOfMonth, todayMidnightMs);
         const diffDays = Math.round((nextDueMs - todayMidnightMs) / DAY_MS);
@@ -353,11 +373,11 @@ export const sendTuitionReminders = onSchedule(
         });
 
         try {
-          await sendReminderToParent(db, {
+          await sendReminderToParents(db, {
             academyId,
             studentId,
             studentName,
-            parentUserId,
+            parentUids: data.parentUids,
             tuitionAmount,
             dueDateLabel,
             reminderKey,

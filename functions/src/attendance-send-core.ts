@@ -6,6 +6,7 @@ import {
   createAttendancePushDeliveryDoc,
   deliverAttendancePushOnce,
 } from "./attendance-push-delivery";
+import { resolveParentRecipients } from "./lib/parent-recipients";
 
 export const ATTENDANCE_COOLDOWN_MS = 60_000;
 
@@ -59,12 +60,11 @@ export async function sendStudentAttendanceNotificationCore(
 > {
   const { academyId, studentId, kind, sender, studentData, reason } = params;
 
-  const parentUserId = studentData.parentUserId;
-  if (typeof parentUserId !== "string" || !parentUserId) {
+  const recipients = await resolveParentRecipients(db, academyId, studentData.parentUids);
+  if (recipients.length === 0) {
     return { ok: true as const, sent: 0, reason: "no_parent" as const };
   }
 
-  const parentUserRef = db.doc(`users/${parentUserId}`);
   const rateRef = db.doc(`_pushRateLimits/attendance_${academyId}_${studentId}`);
   const dayKey = utcDayKey();
   const cooldownBypassRef =
@@ -136,64 +136,75 @@ export async function sendStudentAttendanceNotificationCore(
       ? `'${studentName}' 학생이 안전하게 등원 했습니다. (등원 시간: ${timeLabel})`
       : `'${studentName}' 학생이 결석 처리되었습니다. (${timeLabel})`);
 
-  await parentUserRef.collection("dashboardBellItems").add({
-    kind: kind === "present" ? "attendance_present" : "attendance_absent",
-    academyId,
-    studentId,
-    studentName,
-    body,
-    ...(reason ? { reason } : {}),
-    senderRole: sender.role,
-    senderUid: sender.actorUid,
-    source: sender.source,
-    createdAt: FieldValue.serverTimestamp(),
-  });
-
   const notifRef = await db.collection(`academies/${academyId}/attendanceNotifications`).add({
     kind,
     ...(reason ? { reason } : {}),
     academyId,
     studentId,
     studentName,
-    parentUserId,
+    parentUids: recipients,
     senderRole: sender.role,
     senderUid: sender.actorUid,
     source: sender.source,
     createdAt: FieldValue.serverTimestamp(),
   });
 
-  const userSnap = await parentUserRef.get();
-  if (!userSnap.exists || userSnap.get("pushNotificationsEnabled") !== true) {
-    return { ok: true as const, sent: 0, reason: "parent_opt_out" as const };
-  }
+  // 연결된 활성 보호자마다 벨 + 푸시(전달 문서는 수신자별 — 재시도도 수신자별)
+  const outcomes = await Promise.all(
+    recipients.map(async (recipientUid) => {
+      const userRef = db.doc(`users/${recipientUid}`);
+      await userRef.collection("dashboardBellItems").add({
+        kind: kind === "present" ? "attendance_present" : "attendance_absent",
+        academyId,
+        studentId,
+        studentName,
+        body,
+        ...(reason ? { reason } : {}),
+        senderRole: sender.role,
+        senderUid: sender.actorUid,
+        source: sender.source,
+        createdAt: FieldValue.serverTimestamp(),
+      });
 
-  const subsSnap = await parentUserRef.collection("pushSubscriptions").get();
-  const hasToken = subsSnap.docs.some((d) => {
-    const t = d.get("token");
-    return typeof t === "string" && t.length > 20;
-  });
-  if (!hasToken) {
-    return { ok: true as const, sent: 0, reason: "no_token" as const };
-  }
+      const userSnap = await userRef.get();
+      if (!userSnap.exists || userSnap.get("pushNotificationsEnabled") !== true) {
+        return { sent: 0, failureCount: 0, skip: "parent_opt_out" as const };
+      }
+      const subsSnap = await userRef.collection("pushSubscriptions").get();
+      const hasToken = subsSnap.docs.some((d) => {
+        const t = d.get("token");
+        return typeof t === "string" && t.length > 20;
+      });
+      if (!hasToken) {
+        return { sent: 0, failureCount: 0, skip: "no_token" as const };
+      }
 
-  const deliveryId = notifRef.id;
-  await createAttendancePushDeliveryDoc(db, {
-    deliveryId,
-    academyId,
-    studentId,
-    parentUserId,
-    kind,
-    studentName,
-    body,
-  });
-
-  try {
-    const { sent, failureCount } = await deliverAttendancePushOnce(db, deliveryId, {
-      allowScheduleRetries: true,
-    });
-    return { ok: true as const, sent, failureCount };
-  } catch (e) {
+      const deliveryId = `${notifRef.id}_${recipientUid}`;
+      await createAttendancePushDeliveryDoc(db, {
+        deliveryId,
+        academyId,
+        studentId,
+        recipientUid,
+        kind,
+        studentName,
+        body,
+      });
+      const result = await deliverAttendancePushOnce(db, deliveryId, {
+        allowScheduleRetries: true,
+      });
+      return { ...result, skip: null };
+    }),
+  ).catch((e) => {
     logger.error("sendStudentAttendanceNotificationCore", e);
     throw new HttpsError("internal", "알림 전송에 실패했습니다.");
+  });
+
+  const sent = outcomes.reduce((n, o) => n + o.sent, 0);
+  const failureCount = outcomes.reduce((n, o) => n + o.failureCount, 0);
+  if (sent === 0 && failureCount === 0) {
+    // 아무에게도 보내지 못함 — 한 명이라도 기기가 없으면 no_token, 모두 꺼 두었으면 parent_opt_out
+    const reasonOut = outcomes.some((o) => o.skip === "no_token") ? "no_token" : "parent_opt_out";
+    return { ok: true as const, sent: 0, reason: reasonOut };
   }
+  return { ok: true as const, sent, failureCount };
 }

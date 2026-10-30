@@ -9,7 +9,8 @@ export const OWNER_ATTN_ID_RE = new RegExp(`^o${SEQ}$`);
 export const ACADEMY_ATTN_ID_RE = new RegExp(`^o${SEQ}_a${SEQ}$`);
 export const TEACHER_ATTN_ID_RE = new RegExp(`^o${SEQ}_a${SEQ}_t${SEQ}$`);
 export const PARENT_ATTN_ID_RE = new RegExp(`^o${SEQ}_a${SEQ}_p${SEQ}$`);
-export const STUDENT_ATTN_ID_RE = new RegExp(`^o${SEQ}_a${SEQ}_p${SEQ}_s${SEQ}$`);
+/** 학생 — 학원 바로 아래 번호(학부모 번호와 분리, 2단계) */
+export const STUDENT_ATTN_ID_RE = new RegExp(`^o${SEQ}_a${SEQ}_s${SEQ}$`);
 
 export function isAttnIdLike(value: string): boolean {
   const v = value.trim();

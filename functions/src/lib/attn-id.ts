@@ -18,7 +18,8 @@ export const OWNER_ATTN_ID_RE = new RegExp(`^o${SEQ}$`);
 export const ACADEMY_ATTN_ID_RE = new RegExp(`^o${SEQ}_a${SEQ}$`);
 export const TEACHER_ATTN_ID_RE = new RegExp(`^o${SEQ}_a${SEQ}_t${SEQ}$`);
 export const PARENT_ATTN_ID_RE = new RegExp(`^o${SEQ}_a${SEQ}_p${SEQ}$`);
-export const STUDENT_ATTN_ID_RE = new RegExp(`^o${SEQ}_a${SEQ}_p${SEQ}_s${SEQ}$`);
+/** 학생 — 학원 바로 아래 번호(학부모 번호와 분리, 2단계) */
+export const STUDENT_ATTN_ID_RE = new RegExp(`^o${SEQ}_a${SEQ}_s${SEQ}$`);
 
 function formatSeq(n: number): string {
   if (!Number.isInteger(n) || n < 1) {
@@ -43,8 +44,9 @@ export function formatParentAttnId(academyAttnId: string, parentSeq: number): st
   return `${academyAttnId}_${ATTN_ROLE_PREFIX.parent}${formatSeq(parentSeq)}`;
 }
 
-export function formatStudentAttnId(parentAttnId: string, studentSeq: number): string {
-  return `${parentAttnId}_${ATTN_ROLE_PREFIX.student}${formatSeq(studentSeq)}`;
+/** 학생 attnId — `{academyId}_s{n}`, 번호는 `meta/seq.nextStudentSeq` */
+export function formatStudentAttnId(academyAttnId: string, studentSeq: number): string {
+  return `${academyAttnId}_${ATTN_ROLE_PREFIX.student}${formatSeq(studentSeq)}`;
 }
 
 export function isAttnIdLike(value: string): boolean {

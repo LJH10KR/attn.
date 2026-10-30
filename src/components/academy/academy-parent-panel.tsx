@@ -363,7 +363,7 @@ function ParentRowActions({
       const db = getFirebaseDb();
       const qy = query(
         collection(db, "academies", academyId, "students"),
-        where("parentUserId", "==", row.id),
+        where("parentUids", "array-contains", row.id),
       );
       const agg = await getCountFromServer(qy);
       setChildStudentCount(agg.data().count);
@@ -952,7 +952,7 @@ export function AcademyParentPanel({ academyId }: { academyId: string }) {
                   >
                     <AcademyParentStudentList
                       academyId={academyId}
-                      parentUserId={t.id}
+                      parentUid={t.id}
                       setNoticeAction={setNotice}
                     />
                     <div className="mb-3 space-y-1 text-[11px] text-neutral-600">

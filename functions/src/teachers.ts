@@ -6,6 +6,7 @@ import { reconcileUserActivationMirror } from "./user-activation-mirror";
 import { detachStaffAccount } from "./lib/staff-account";
 import { assertPermission, type AcademyActor } from "./lib/academy-access";
 import { normalizePermissionList } from "./lib/permissions";
+import { displayGrade, gradeLabel, normalizeStudentStatus } from "./lib/student-profile";
 import { staffAccountChangeViolation } from "./lib/role-policy";
 import {
   deleteAttnLoginIndexForMember,
@@ -135,11 +136,10 @@ export const listTeacherAssignedStudents = onCall(
       const legacyUid = data.assignedTeacherUid;
       return {
         id: d.id,
-        parentUserId: typeof data.parentUserId === "string" ? data.parentUserId : "",
         name: typeof data.name === "string" ? data.name : "",
-        age: typeof data.age === "number" && Number.isFinite(data.age) ? Math.floor(data.age) : 0,
+        gradeLabel: gradeLabel(displayGrade(data.grade, data.gradeYear)),
+        status: normalizeStudentStatus(data.status),
         phone: typeof data.phone === "string" ? data.phone : "",
-        emergencyContact: typeof data.emergencyContact === "string" ? data.emergencyContact : "",
         assignedTeacherUids,
         assignedTeacherUid:
           typeof legacyUid === "string" && legacyUid.length > 0 ? legacyUid : null,

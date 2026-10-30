@@ -39,6 +39,27 @@ export type CompletePaymentResult =
   | { ok: true; alreadyProcessed: boolean }
   | { ok: false; error: string; status: number };
 
+/** 문서의 uid 배열 필드 — 문자열만, 중복 제거 */
+function readUidList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.filter((x): x is string => typeof x === "string" && x.length > 0))];
+}
+
+/**
+ * 결제한 앱 계정 — 학부모 앱이 결제 요청 customData에 넣은 `payerUid`(클라이언트 값).
+ * 결제 시점 학생의 연결 보호자(`parentUids`)에 있을 때만 기록하고, 아니면 null. 표시용이며 검증된 신원이 아니다.
+ */
+function resolvePayerUid(customData: unknown, parentUids: string[]): string | null {
+  if (typeof customData !== "string" || !customData) return null;
+  try {
+    const parsed = JSON.parse(customData) as { payerUid?: unknown };
+    const uid = parsed?.payerUid;
+    return typeof uid === "string" && parentUids.includes(uid) ? uid : null;
+  } catch {
+    return null;
+  }
+}
+
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
@@ -90,7 +111,8 @@ export async function completePayment(
 
   const student = studentSnap.data() ?? {};
   const studentName = typeof student.name === "string" ? student.name : "";
-  const parentUserId = typeof student.parentUserId === "string" ? student.parentUserId : "";
+  // 결제 기록의 학부모 읽기 기준 — 이후 보호자 연결·해제 때 서버가 갱신한다
+  const parentUids = readUidList(student.parentUids);
 
   // 결제 유형별로 "실제 결제해야 할 금액"을 서버 측 값만으로 계산 — 클라이언트/커스텀데이터가
   // 보낸 금액은 신뢰하지 않는다(금액 위변조 방지). 월 원비는 청구서 조정 항목이 반영되므로
@@ -140,6 +162,7 @@ export async function completePayment(
       status: 400,
     };
   }
+  const payerUid = resolvePayerUid(payment.customData, parentUids);
 
   if (paymentType === "monthly_fixed") {
     return completeMonthlyPayment(portone, {
@@ -147,7 +170,8 @@ export async function completePayment(
       studentId,
       academyId,
       studentName,
-      parentUserId,
+      parentUids,
+      payerUid,
       invoicePeriod: invoicePeriod!,
       dueDayOfMonth,
       paidAmount: payment.amount.total,
@@ -188,7 +212,8 @@ export async function completePayment(
       paymentId,
       studentId,
       studentName,
-      parentUserId,
+      parentUids,
+      payerUid,
       amount: expectedAmount,
       status: "PAID",
       paymentType: "session_based",
@@ -215,8 +240,8 @@ export async function completePayment(
     const inboxDoc: AcademyAdminInboxDoc = {
       schemaVersion: ACADEMY_ADMIN_INBOX_SCHEMA_VERSION,
       kind: "session_payment_received",
-      entityType: "parent",
-      entityId: parentUserId,
+      entityType: "student",
+      entityId: studentId,
       displayName: studentName,
       email: "",
       studentName,
@@ -248,14 +273,15 @@ async function completeMonthlyPayment(
     studentId: string;
     academyId: string;
     studentName: string;
-    parentUserId: string;
+    parentUids: string[];
+    payerUid: string | null;
     invoicePeriod: string;
     dueDayOfMonth: number;
     paidAmount: number;
     transactionId: string;
   },
 ): Promise<CompletePaymentResult> {
-  const { paymentId, studentId, academyId, studentName, parentUserId, invoicePeriod } = params;
+  const { paymentId, studentId, academyId, studentName, parentUids, payerUid, invoicePeriod } = params;
   const paymentRef = adminDb.doc(academyPaymentPath(academyId, paymentId));
   const studentRef = adminDb.doc(`${academyStudentsPath(academyId)}/${studentId}`);
   const invoiceRef = adminDb.doc(
@@ -286,7 +312,8 @@ async function completeMonthlyPayment(
       paymentId,
       studentId,
       studentName,
-      parentUserId,
+      parentUids,
+      payerUid,
       amount: finalAmount,
       status: "PAID",
       paymentType: "monthly_fixed",

@@ -323,7 +323,7 @@ export function AcademyShell({ children }: { children: ReactNode }) {
     if (missingKind === "offline") {
       return (
         <CenterMessage>
-          <p className="max-w-xs text-center text-sm text-neutral-600">
+          <p className="max-w-xs text-center text-sm text-neutral-600 break-keep">
             학원 정보를 불러오지 못했습니다. 연결을 확인해 주세요.
           </p>
           <button
@@ -338,7 +338,7 @@ export function AcademyShell({ children }: { children: ReactNode }) {
     }
     return (
       <CenterMessage>
-        <p className="max-w-xs text-center text-sm text-neutral-600">
+        <p className="max-w-xs text-center text-sm text-neutral-600 break-keep">
           이 학원에 접근할 권한이 없거나 주소가 올바르지 않습니다.
         </p>
         <Link
@@ -426,7 +426,7 @@ export function AcademyShell({ children }: { children: ReactNode }) {
             children
           ) : (
             <div className="glass-card px-4 py-12 text-center">
-              <p className="text-sm text-neutral-600">이 화면을 볼 권한이 없습니다.</p>
+              <p className="text-sm text-neutral-600 break-keep">이 화면을 볼 권한이 없습니다.</p>
               <Link
                 href={academyPath(academyId, forbiddenBackToTab ? (route?.backSub ?? "") : "")}
                 className="mt-3 inline-block text-sm underline"

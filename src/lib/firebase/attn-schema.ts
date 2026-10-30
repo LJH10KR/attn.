@@ -1,5 +1,6 @@
 import type { Timestamp } from "firebase/firestore";
 import type { AcademyPermission, RoleTemplateKey } from "@/lib/academy/permissions";
+import type { GradeCode, StudentStatus } from "@/lib/academy/student-profile";
 
 /**
  * attn. Firestore 데이터 모델 — 사용자·학원 계층
@@ -84,7 +85,8 @@ export type AcademyAdminInboxKind =
 export type AcademyAdminInboxDoc = {
   schemaVersion: typeof ACADEMY_ADMIN_INBOX_SCHEMA_VERSION;
   kind: AcademyAdminInboxKind;
-  entityType: "teacher" | "parent";
+  /** 회차 결제 알림은 학생 단위(`student`, entityId = studentId) */
+  entityType: "teacher" | "parent" | "student";
   entityId: string;
   displayName: string;
   email: string;
@@ -262,7 +264,7 @@ export type AcademyStaff = {
 /** `academies/{academyId}/meta/options` — 종류별 선택지 `{id, label}[]`(쓰기는 `saveAcademyOptionList`만) */
 export const ACADEMY_OPTIONS_DOC_ID = "options" as const;
 
-export type AcademyOptionListKind = "jobTitles";
+export type AcademyOptionListKind = "jobTitles" | "guardianRelations";
 
 export type AcademyOptionItem = { id: string; label: string };
 
@@ -319,15 +321,44 @@ export const MAX_ASSIGNED_TEACHERS_PER_STUDENT = 20;
 /** 원비 납부 방식 */
 export type TuitionType = "monthly_fixed" | "session_based";
 
-/** 학생 — 부모와 연결, Auth 없을 수 있음 */
+/** 원생 보호자 연락처 — 보호자 정보의 원본(`functions/src/lib/student-guardians.ts`) */
+export type StudentGuardian = {
+  id: string;
+  /** `meta/options.guardianRelations` 선택지 id */
+  relationId: string | null;
+  name: string | null;
+  phone: string;
+  isPrimary: boolean;
+  /** 연결된 학부모 앱 계정 — 서버 연결 함수만 씀 */
+  linkedParentUid: string | null;
+};
+
+/**
+ * 원생 — 학부모 계정 없이 먼저 존재(원생 중심 모델). 생성·원생 정보 수정은 서버(`saveStudent`)만.
+ * 학원 내부 메모는 `studentNotes/{studentId}`(학부모가 읽지 못함).
+ */
 export type AcademyStudent = {
+  /** `{academyId}_s{n}` — 학부모 번호와 분리 */
   attnId?: string;
-  parentUserId: string;
   name: string;
-  /** 만 나이 등 정수(0~120) */
-  age: number;
+  grade?: GradeCode;
+  /** grade를 저장한 해(서울) — 표시 학년은 `displayGrade` */
+  gradeYear?: number;
+  school?: string | null;
+  /** 학생 본인 번호(선택) */
   phone?: string | null;
-  emergencyContact?: string | null;
+  status?: StudentStatus;
+  statusChangedAt?: Timestamp;
+  firstAttendedOn?: string | null;
+  guardians?: StudentGuardian[];
+  /** 보호자 번호(숫자만) — 서버 파생, 번호 매칭 쿼리용 */
+  guardianPhones?: string[];
+  /** 연결된 보호자 계정 — 서버 파생, 학부모 읽기 규칙·푸시 대상 */
+  parentUids?: string[];
+  /** 배정된 반 — 반 배정 함수만 */
+  classIds?: string[];
+  /** 반 담당 선생님 — 서버 파생(2-D) */
+  teacherUids?: string[];
   /**
    * 전담 선생님 Auth uid 목록 — 과목별로 동일 학생이 여러 선생님에게 전담될 수 있음.
    * 활성 선생만 허용(규칙), 최대 `MAX_ASSIGNED_TEACHERS_PER_STUDENT`명.
@@ -540,7 +571,10 @@ export type AcademyPaymentDoc = {
   paymentId: string;
   studentId: string;
   studentName: string;
-  parentUserId: string;
+  /** 결제 때 학생의 연결 보호자 — 이후 연결·해제 때 서버가 갱신(학부모 결제 내역 읽기 기준) */
+  parentUids: string[];
+  /** 결제한 앱 계정(결제 요청 customData, 결제 시점 `parentUids`에 있을 때만) — 표시용, 검증된 신원 아님 */
+  payerUid?: string | null;
   amount: number;
   status: AcademyPaymentStatus;
   /** 결제 종류 — 미설정 시 기존 데이터와의 호환을 위해 "monthly_fixed"로 취급 */

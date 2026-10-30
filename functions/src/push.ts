@@ -6,6 +6,8 @@ import { sendStudentAttendanceNotificationCore } from "./attendance-send-core";
 import { upsertTodayAttendanceRecord } from "./attendance-records";
 import { pruneStalePushSubscriptions } from "./push-subscription-delivery";
 import { actorHasPermission, resolveAcademyActor } from "./lib/academy-access";
+import { readUidList } from "./lib/parent-recipients";
+import { isActiveStudent } from "./lib/student-profile";
 
 function studentAssignedToTeacher(data: Record<string, unknown>, teacherUid: string): boolean {
   const raw = data.assignedTeacherUids;
@@ -163,6 +165,9 @@ export const sendStudentAttendanceNotification = onCall(async (request) => {
     throw new HttpsError("not-found", "학생을 찾을 수 없습니다.");
   }
   const studentData = studentSnap.data() as Record<string, unknown>;
+  if (!isActiveStudent(studentData)) {
+    throw new HttpsError("failed-precondition", "재원 중인 원생에게만 출결 알림을 보낼 수 있습니다.");
+  }
   const sender = await resolveAttendanceSender({
     db,
     academyId,
@@ -256,7 +261,7 @@ export const listAttendanceNotifications = onCall(async (request) => {
       reason?: unknown;
       studentId?: unknown;
       studentName?: unknown;
-      parentUserId?: unknown;
+      parentUids?: unknown;
       senderRole?: unknown;
       senderUid?: unknown;
       source?: unknown;
@@ -269,7 +274,7 @@ export const listAttendanceNotifications = onCall(async (request) => {
       reason: typeof x.reason === "string" ? x.reason : null,
       studentId: typeof x.studentId === "string" ? x.studentId : "",
       studentName: typeof x.studentName === "string" ? x.studentName : "",
-      parentUserId: typeof x.parentUserId === "string" ? x.parentUserId : "",
+      parentUids: readUidList(x.parentUids),
       senderRole: typeof x.senderRole === "string" ? x.senderRole : "",
       senderUid: typeof x.senderUid === "string" ? x.senderUid : "",
       source: typeof x.source === "string" ? x.source : "",
@@ -304,11 +309,11 @@ export const listAttendanceNotifications = onCall(async (request) => {
         }
       }
     }
-    if (item.parentUserId && item.academyId) {
-      const key = `${item.academyId}:${item.parentUserId}`;
+    for (const parentUid of item.academyId ? item.parentUids : []) {
+      const key = `${item.academyId}:${parentUid}`;
       if (!parentKeySet.has(key)) {
         parentKeySet.add(key);
-        parentKeys.push({ academyId: item.academyId, uid: item.parentUserId });
+        parentKeys.push({ academyId: item.academyId, uid: parentUid });
       }
     }
   }
@@ -349,8 +354,11 @@ export const listAttendanceNotifications = onCall(async (request) => {
     } else {
       senderDisplayName = item.senderRole || "알 수 없음";
     }
+    // 받은 보호자 이름들(여러 명이면 쉼표로)
     const parentDisplayName =
-      parentNameMap.get(`${item.academyId}:${item.parentUserId}`) ?? "학부모";
+      item.parentUids
+        .map((uid) => parentNameMap.get(`${item.academyId}:${uid}`) ?? "학부모")
+        .join(", ") || "학부모";
     return { ...item, senderDisplayName, parentDisplayName };
   });
 

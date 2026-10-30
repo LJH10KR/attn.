@@ -13,11 +13,22 @@ import type { AcademyPermission } from "./lib/permissions";
  */
 export const OPTION_LIST_KINDS = {
   jobTitles: { permission: "settings.staff", maxItems: 30 },
+  /** 원생 보호자 관계 — 원생 추가·수정 시트에서 편집 */
+  guardianRelations: { permission: "operations.students", maxItems: 20 },
 } as const satisfies Record<string, { permission: AcademyPermission; maxItems: number }>;
 
 export type OptionListKind = keyof typeof OPTION_LIST_KINDS;
 
 export type OptionItem = { id: string; label: string };
+
+/** 학원을 만들 때 넣는 보호자 관계 기본값 — 학원이 이름 변경·삭제 가능 */
+export const DEFAULT_GUARDIAN_RELATIONS: readonly OptionItem[] = [
+  { id: "mother", label: "어머니" },
+  { id: "father", label: "아버지" },
+  { id: "grandparent", label: "조부모" },
+  { id: "self", label: "본인" },
+  { id: "other", label: "기타" },
+];
 
 const MAX_LABEL_LENGTH = 20;
 const OPTION_ID_RE = /^[A-Za-z0-9_-]{1,40}$/;

@@ -10,6 +10,7 @@ import {
 } from "./lib/attn-id";
 import { assertPermission } from "./lib/academy-access";
 import { ensureAcademyRoleTemplates } from "./roles";
+import { academyOptionsRef, DEFAULT_GUARDIAN_RELATIONS } from "./academy-options";
 import {
   provisionMemberAccount,
   provisionTemplateStudentsForParent,
@@ -106,6 +107,11 @@ export const createAcademyEasy = onCall(async (request) => {
   await db.doc(academySeqMetaPath(academyId)).set({
     nextTeacherSeq: 1,
     nextParentSeq: 1,
+    nextStudentSeq: 1,
+  });
+  await academyOptionsRef(db, academyId).set({
+    guardianRelations: DEFAULT_GUARDIAN_RELATIONS,
+    updatedAt: FieldValue.serverTimestamp(),
   });
   await ensureAcademyRoleTemplates(db, academyId);
 

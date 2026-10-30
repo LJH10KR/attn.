@@ -250,12 +250,9 @@ export async function deleteAcademyFirestoreCascade(
       db.doc(`academies/${academyId}/parents/${p.docId}/secrets/login`),
     );
   }
-  for (const s of studentsSnap.docs) {
-    deleteOps.push(s.ref);
-    deleteOps.push(
-      db.doc(`academies/${academyId}/students/${s.id}/serverSecrets/checkIn`),
-    );
-  }
+  // 학생 문서와 하위 기록·메모(남은 메모 문서까지)
+  await deleteStudentDocs(db, academyId, studentsSnap.docs.map((s) => s.id));
+  await deleteCollectionDocs(db, `academies/${academyId}/studentNotes`);
 
   const metaSnap = await db.collection(`academies/${academyId}/meta`).get();
   metaSnap.docs.forEach((d) => deleteOps.push(d.ref));
@@ -320,7 +317,10 @@ export async function stripTeacherFromStudents(
   }
 }
 
-/** 학생 문서 + serverSecrets + attendanceRecords + tuitionInvoices 삭제 */
+/** 학생 하위 기록 컬렉션 — 학생·학원 삭제 때 함께 지운다 */
+const STUDENT_SUBCOLLECTIONS = ["attendanceRecords", "tuitionInvoices", "sessionLogs"] as const;
+
+/** 학생 문서 + serverSecrets + 하위 기록 + 학원 메모(studentNotes) 삭제 */
 export async function deleteStudentDocs(
   db: admin.firestore.Firestore,
   academyId: string,
@@ -328,7 +328,8 @@ export async function deleteStudentDocs(
 ): Promise<void> {
   const refs: DocumentReference[] = [];
   for (const studentId of studentIds) {
-    for (const sub of ["attendanceRecords", "tuitionInvoices"]) {
+    refs.push(db.doc(`academies/${academyId}/studentNotes/${studentId}`));
+    for (const sub of STUDENT_SUBCOLLECTIONS) {
       const subSnap = await db
         .collection(`academies/${academyId}/students/${studentId}/${sub}`)
         .get();

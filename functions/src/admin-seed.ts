@@ -5,7 +5,18 @@ import { FieldValue } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { DEFAULT_STAFF_ROLE_ID } from "./lib/permissions";
+import { academySeqMetaPath, formatStudentAttnId } from "./lib/attn-id";
+import { deleteCollectionDocs, deleteStudentDocs } from "./lib/firestore-cleanup";
+import { deriveGuardianFields, type Guardian } from "./lib/student-guardians";
+import { kstYear, type GradeCode, type StudentStatus } from "./lib/student-profile";
+import { academyOptionsRef, DEFAULT_GUARDIAN_RELATIONS } from "./academy-options";
 import { ensureAcademyRoleTemplates } from "./roles";
+
+const SEED_GRADES: readonly GradeCode[] = ["e1", "e3", "e5", "m2", "h1", "preschool"];
+/** 재원 위주 + 휴원·미등록·퇴원 하나씩 — 상태 제외 확인용 */
+const SEED_STATUSES: readonly StudentStatus[] = [
+  "enrolled", "enrolled", "on_leave", "enrolled", "prospect", "enrolled", "withdrawn",
+];
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -324,17 +335,18 @@ export const createSeedBatch = onCall(async (request) => {
     data: Record<string, unknown>;
   }> = [];
 
+  let studentSeq = 0;
   for (let p = 0; p < parentAuths.length; p++) {
     const parent = parentAuths[p]!;
 
+    // 보호자 번호 — 원생 guardians와 같은 번호로 연결(형제는 같은 보호자)
+    const parentPhone = `010-9${String(p + 1).padStart(3, "0")}-${String(parentNos[p]! % 10000).padStart(4, "0")}`;
     writes.push({
       ref: db.doc(`academies/${academyId}/parents/${parent.uid}`),
       data: {
         email: parent.email,
         displayName: parent.displayName,
-        phone: null,
-        emergencyContact: null,
-        childrenCount: studentsPerParent,
+        phone: parentPhone,
         academyId,
         status: "active",
         authUid: parent.uid,
@@ -352,19 +364,55 @@ export const createSeedBatch = onCall(async (request) => {
         assigned.push(teacherAuths[tidx]!.uid);
       }
 
+      // 상태·학년을 섞어 둔다(재원 위주) — 두 번째 보호자는 앱 계정 없이 연락처만
+      const guardians: Guardian[] = [
+        {
+          id: `g_seed${p + 1}a`,
+          relationId: "mother",
+          name: parent.displayName,
+          phone: parentPhone,
+          isPrimary: true,
+          linkedParentUid: parent.uid,
+        },
+        ...(s === 0
+          ? [{
+            id: `g_seed${p + 1}b`,
+            relationId: "father",
+            name: null,
+            phone: `010-8${String(p + 1).padStart(3, "0")}-${String(parentNos[p]! % 10000).padStart(4, "0")}`,
+            isPrimary: false,
+            linkedParentUid: null,
+          }]
+          : []),
+      ];
+      studentSeq += 1;
       parentStudentDocs.push({
         ref: db.doc(`academies/${academyId}/students/${studentId}`),
         data: {
-          parentUserId: parent.uid,
+          attnId: formatStudentAttnId(academyId, studentSeq),
           name: `${parent.displayName} 자녀 ${s + 1}`,
-          age: 7 + ((s + p) % 10),
-          phone: "",
-          emergencyContact: "",
+          grade: SEED_GRADES[(p + s) % SEED_GRADES.length],
+          gradeYear: kstYear(),
+          school: null,
+          phone: null,
+          status: SEED_STATUSES[(p * studentsPerParent + s) % SEED_STATUSES.length],
+          statusChangedAt: FieldValue.serverTimestamp(),
+          firstAttendedOn: null,
+          guardians,
+          ...deriveGuardianFields(guardians),
+          classIds: [],
+          teacherUids: [],
           assignedTeacherUids: assigned,
           createdAt: FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp(),
         },
       });
+      if (s === 0) {
+        parentStudentDocs.push({
+          ref: db.doc(`academies/${academyId}/studentNotes/${studentId}`),
+          data: { memo: "시드 메모 — 학원 내부용", updatedByUid: createdByUid, updatedAt: FieldValue.serverTimestamp() },
+        });
+      }
     }
   }
 
@@ -373,6 +421,17 @@ export const createSeedBatch = onCall(async (request) => {
       ref: d.ref,
       data: d.data,
     })),
+  );
+
+  writes.push(
+    {
+      ref: db.doc(academySeqMetaPath(academyId)),
+      data: { nextTeacherSeq: 1, nextParentSeq: 1, nextStudentSeq: studentSeq + 1 },
+    },
+    {
+      ref: academyOptionsRef(db, academyId),
+      data: { guardianRelations: DEFAULT_GUARDIAN_RELATIONS, updatedAt: FieldValue.serverTimestamp() },
+    },
   );
 
   // seedBatch metadata
@@ -487,11 +546,16 @@ export const deleteSeedBatch = onCall(async (request) => {
     secretsLoginRef.get(),
   ]);
 
+  // 학생 문서·하위 기록·학원 메모
+  await deleteStudentDocs(db, academyId, studentsSnap.docs.map((d) => d.id));
+  await deleteCollectionDocs(db, `academies/${academyId}/studentNotes`);
+
   const deleteOps: DocumentReference[] = [];
   teachersSnap.docs.forEach((d) => deleteOps.push(d.ref));
   parentsSnap.docs.forEach((d) => deleteOps.push(d.ref));
-  studentsSnap.docs.forEach((d) => deleteOps.push(d.ref));
   rolesSnap.docs.forEach((d) => deleteOps.push(d.ref));
+  const metaSnap = await db.collection(`academies/${academyId}/meta`).get();
+  metaSnap.docs.forEach((d) => deleteOps.push(d.ref));
   if (secretsSnap.exists) deleteOps.push(secretsLoginRef);
   deleteOps.push(academyRef);
 

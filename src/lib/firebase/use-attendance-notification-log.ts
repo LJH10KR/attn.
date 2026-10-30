@@ -14,7 +14,8 @@ export type AttendanceLogItem = {
   reason?: string | null;
   studentId: string;
   studentName: string;
-  parentUserId: string;
+  /** 알림을 받은 보호자 계정들 */
+  parentUids: string[];
   senderRole: string;
   senderUid: string;
   senderDisplayName: string;

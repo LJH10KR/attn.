@@ -29,7 +29,7 @@
       "collectionGroup": "payments",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "parentUserId", "order": "ASCENDING" },
+        { "fieldPath": "parentUids", "arrayConfig": "CONTAINS" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     }
