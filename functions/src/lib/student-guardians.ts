@@ -74,6 +74,7 @@ export const LINKED_GUARDIAN_REMOVE_MSG =
  * 앱 계정이 연결된 항목은 지울 수 없다(연결 해제는 학부모 관리 권한의 `unlinkParentFromStudent`만).
  * 수정 때 목록을 보내지 않은 요청은 호출 측(`saveStudent`)이 보호자를 바꾸지 않으므로 여기 오지 않는다.
  * 연결된 항목의 번호·이름·관계 수정은 허용한다.
+ * 관계 id는 기존 항목과 같으면 다시 검사하지 않는다(선택지를 지운 뒤에도 그 원생의 다른 필드를 저장할 수 있게).
  * 대표는 정확히 1명(지정이 없으면 첫 번째), 같은 학생 안에서 번호 중복 불가.
  */
 export function parseGuardiansInput(
@@ -101,10 +102,18 @@ export function parseGuardiansInput(
     }
     seenPhones.add(key);
 
+    const prev =
+      typeof g.id === "string" && GUARDIAN_ID_RE.test(g.id) && !seenIds.has(g.id)
+        ? existingById.get(g.id)
+        : undefined;
+    const id = prev ? prev.id : newGuardianId();
+    seenIds.add(id);
+
+    // 지운 관계 선택지는 새로 고른 값만 거부 — 기존 항목의 관계가 그대로면 통과(화면은 "관계 미지정")
     const relationRaw = g.relationId;
     let relationId: string | null = null;
     if (typeof relationRaw === "string" && relationRaw) {
-      if (!relationIds.has(relationRaw)) {
+      if (!relationIds.has(relationRaw) && prev?.relationId !== relationRaw) {
         throw new HttpsError("failed-precondition", "선택한 보호자 관계가 삭제되었습니다. 다시 선택해 주세요.");
       }
       relationId = relationRaw;
@@ -114,13 +123,6 @@ export function parseGuardiansInput(
     if (name.length > MAX_GUARDIAN_NAME_LENGTH) {
       throw new HttpsError("invalid-argument", `보호자 이름은 ${MAX_GUARDIAN_NAME_LENGTH}자 이하로 입력해 주세요.`);
     }
-
-    const prev =
-      typeof g.id === "string" && GUARDIAN_ID_RE.test(g.id) && !seenIds.has(g.id)
-        ? existingById.get(g.id)
-        : undefined;
-    const id = prev ? prev.id : newGuardianId();
-    seenIds.add(id);
 
     return {
       id,

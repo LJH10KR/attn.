@@ -1,9 +1,10 @@
-"use client";
-
-import { useAcademyShell } from "@/components/academy/academy-shell";
-import { AcademyStudentPanel } from "@/components/academy/academy-student-panel";
+import { Suspense } from "react";
+import { AcademyStudentsScreen } from "@/components/academy/students/academy-students-screen";
 
 export default function AcademyStudentsPage() {
-  const { academyId } = useAcademyShell();
-  return <AcademyStudentPanel academyId={academyId} />;
+  return (
+    <Suspense fallback={<p className="py-12 text-center text-sm text-neutral-500">불러오는 중…</p>}>
+      <AcademyStudentsScreen />
+    </Suspense>
+  );
 }

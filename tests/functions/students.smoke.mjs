@@ -1,6 +1,7 @@
 /**
  * 원생 Callable 통합 스모크 — `npm run test:functions` (Auth·Firestore·Functions 에뮬레이터)
- * saveStudent(생성·수정·검증·학년 유지·상태 시각·attnId·메모·보호자 연결 보존·보호자 생략 시 변경 없음), deleteAcademyStudent,
+ * saveStudent(생성·수정·검증·학년 유지·상태 시각·attnId·메모·보호자 연결 보존·보호자 생략 시 변경 없음·
+ * 지운 관계 선택지는 새로 고른 값만 거부), deleteAcademyStudent,
  * 권한 거부, 상태 제외(출결 알림·키오스크), 출결 알림 수신자(활성 보호자만)를 확인한다.
  */
 import assert from "node:assert/strict";
@@ -150,6 +151,30 @@ s1 = await studentDoc(created.studentId);
 assert.deepEqual(s1.parentUids, ["p-inactive"]);
 assert.equal(s1.guardians[0].isPrimary, true);
 await call("unlinkParentFromStudent", { academyId: A, parentUid: "p-inactive", studentId: created.studentId });
+
+// --- 지운 관계 선택지: 기존 항목의 관계 id가 그대로면 통과, 새로 고른 값만 거부 ---
+await db.doc(`academies/${A}/meta/options`).set({ guardianRelations: [{ id: "mother", label: "어머니" }] });
+const fatherOnly = { id: gFather.id, relationId: "father", name: "아빠", phone: "010-3333-4444" };
+await call("saveStudent", { ...saveBase, name: "김하나(수정)", guardians: [fatherOnly] });
+s1 = await studentDoc(created.studentId);
+assert.equal(s1.name, "김하나(수정)", "관계 선택지가 지워져도 다른 필드 저장");
+assert.equal(s1.guardians[0].relationId, "father", "바뀌지 않은 관계 id는 그대로 남김");
+assert.equal(s1.guardians[0].name, "아빠");
+await assert.rejects(
+  call("saveStudent", { ...saveBase, guardians: [fatherOnly, { relationId: "father", phone: "010-4444-5555" }] }),
+  /관계가 삭제/,
+  "새 항목에 지운 관계는 거부",
+);
+await call("saveStudent", { ...saveBase, guardians: [{ ...fatherOnly, relationId: "mother" }] });
+await assert.rejects(
+  call("saveStudent", { ...saveBase, guardians: [{ ...fatherOnly, relationId: "father" }] }),
+  /관계가 삭제/,
+  "기존 항목이라도 지운 관계로 바꾸면 거부",
+);
+assert.equal((await studentDoc(created.studentId)).guardians[0].relationId, "mother");
+await db.doc(`academies/${A}/meta/options`).set({
+  guardianRelations: [{ id: "mother", label: "어머니" }, { id: "father", label: "아버지" }],
+});
 
 // --- 학년: 화면이 보낸 "지금 학년"이 저장 값의 표시 학년과 같으면 기준 연도 유지 ---
 await db.doc(`academies/${A}/students/${created.studentId}`).update({ gradeYear: thisYear - 1 });
