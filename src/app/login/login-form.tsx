@@ -43,9 +43,9 @@ function authErrorMessage(code: string, role: LoginRole): string {
       if (role === "teacher") {
         return "사용할 수 없는 계정입니다. 학원에 문의해 주세요.";
       }
-      // 학부모는 예전 이메일 초청 가입의 승인 대기도 Auth가 꺼져 있음(`finalizeParentOnboarding`)
+      // 학부모도 비활성일 때만 Auth가 꺼짐(승인 대기는 켜진 채 연결 대기 화면으로 감)
       if (role === "parent") {
-        return "사용할 수 없는 계정입니다. 가입 승인 전이거나 사용이 중지된 계정이면 학원에 문의해 주세요.";
+        return "사용이 중지된 계정입니다. 학원에 문의해 주세요.";
       }
       return "이 계정은 현재 로그인할 수 없습니다. 학원에서 승인·활성 처리가 끝난 뒤 다시 시도하거나 문의해 주세요.";
     case "auth/user-not-found":
@@ -210,16 +210,11 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
       const state = data?.primaryStatus ?? "unknown";
       const aid = data?.primaryAcademyId ?? "";
 
+      // 승인 대기·연결 대기 — 학부모 홈(연결 대기 화면)으로
+      if (state === "pending_approval") return true;
+
       if (state === "pending_setup") {
         router.replace("/parent/setup");
-        return false;
-      }
-
-      if (state === "invitation_sent") {
-        const p = new URLSearchParams();
-        if (aid) p.set("academyId", aid);
-        const qs = p.toString();
-        router.replace(`/parent/complete${qs ? `?${qs}` : ""}`);
         return false;
       }
 

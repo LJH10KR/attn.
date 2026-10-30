@@ -61,13 +61,18 @@ export function deriveGuardianFields(guardians: readonly Guardian[]): {
   return { guardianPhones: [...phones].sort(), parentUids: [...uids].sort() };
 }
 
-function newGuardianId(): string {
+export function newGuardianId(): string {
   return `g_${crypto.randomBytes(6).toString("base64url")}`;
 }
+
+export const LINKED_GUARDIAN_REMOVE_MSG =
+  "앱에 연결된 보호자입니다. 학부모 관리에서 연결을 해제한 뒤 삭제해 주세요.";
 
 /**
  * 화면이 보낸 보호자 목록 검증. `existing`(트랜잭션 안에서 읽은 저장 값)과 id가 같은 항목만
  * `linkedParentUid`를 이어받는다 — 해제된 연결이 저장 경합으로 되살아나지 않게.
+ * 앱 계정이 연결된 항목은 지울 수 없다(연결 해제는 학부모 관리 권한의 `unlinkParentFromStudent`만).
+ * 연결된 항목의 번호·이름·관계 수정은 허용한다.
  * 대표는 정확히 1명(지정이 없으면 첫 번째), 같은 학생 안에서 번호 중복 불가.
  */
 export function parseGuardiansInput(
@@ -75,7 +80,7 @@ export function parseGuardiansInput(
   existing: readonly Guardian[],
   relationIds: ReadonlySet<string>,
 ): Guardian[] {
-  if (raw === undefined || raw === null) return [];
+  if (raw === undefined || raw === null) raw = [];
   if (!Array.isArray(raw)) {
     throw new HttpsError("invalid-argument", "보호자 목록이 올바르지 않습니다.");
   }
@@ -125,6 +130,10 @@ export function parseGuardiansInput(
       linkedParentUid: prev?.linkedParentUid ?? null,
     };
   });
+
+  if (existing.some((g) => g.linkedParentUid && !seenIds.has(g.id))) {
+    throw new HttpsError("failed-precondition", LINKED_GUARDIAN_REMOVE_MSG);
+  }
 
   const primaryCount = parsed.filter((g) => g.isPrimary).length;
   if (primaryCount > 1) {

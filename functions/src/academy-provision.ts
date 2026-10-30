@@ -6,16 +6,9 @@ import {
   academySeqMetaPath,
   formatAcademyAttnId,
   formatOwnerAttnId,
-  formatParentAttnId,
 } from "./lib/attn-id";
-import { assertPermission } from "./lib/academy-access";
 import { ensureAcademyRoleTemplates } from "./roles";
 import { academyOptionsRef, DEFAULT_GUARDIAN_RELATIONS } from "./academy-options";
-import {
-  provisionMemberAccount,
-  provisionTemplateStudentsForParent,
-} from "./lib/member-credentials";
-import { pickTemplateDisplayNameUnique } from "./lib/korean-template-names";
 
 async function ensureOwnerAttnSeq(
   db: admin.firestore.Firestore,
@@ -66,14 +59,6 @@ async function allocateAcademyAttnId(
   });
 }
 
-function clampCount(raw: unknown, max: number, label: string): number {
-  const n = typeof raw === "number" ? raw : Number(raw);
-  if (!Number.isFinite(n) || n < 0 || n > max) {
-    throw new HttpsError("invalid-argument", `${label}은(는) 0~${max} 사이여야 합니다.`);
-  }
-  return Math.floor(n);
-}
-
 /** 오너 — 학원 1개 생성(이름만). 원장·직원은 각자 계정으로 로그인(학원 공용 로그인 없음) */
 export const createAcademyEasy = onCall(async (request) => {
   const uid = request.auth?.uid;
@@ -120,128 +105,4 @@ export const createAcademyEasy = onCall(async (request) => {
     attnId: academyId,
     name,
   };
-});
-
-/** 오너/학원 — 템플릿 학부모 N명 + 부모당 자녀 2명 */
-async function runProvisionTemplateParents(request: {
-  auth?: { uid?: string; token?: Record<string, unknown> };
-  data?: Record<string, unknown>;
-}) {
-  if (!request.auth?.uid) {
-    throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
-  }
-  const { uid, token } = request.auth;
-  const academyId =
-    typeof request.data?.academyId === "string" ? request.data.academyId.trim() : "";
-  const count = clampCount(request.data?.count, 50, "학부모 수");
-  const childrenPerParent = clampCount(
-    request.data?.childrenPerParent ?? 2,
-    10,
-    "자녀 수",
-  );
-  if (!academyId) {
-    throw new HttpsError("invalid-argument", "학원 ID가 필요합니다.");
-  }
-
-  const db = admin.firestore();
-  await assertPermission(db, academyId, uid, token as admin.auth.DecodedIdToken, "operations.parents");
-
-  const usedNames = new Set<string>();
-  const parentAttnIds: string[] = [];
-
-  await db.runTransaction(async (tx) => {
-    const seqRef = db.doc(academySeqMetaPath(academyId));
-    const seqSnap = await tx.get(seqRef);
-    let nextParentSeq = (seqSnap.get("nextParentSeq") as number) || 1;
-
-    for (let i = 0; i < count; i++) {
-      const parentSeq = nextParentSeq;
-      nextParentSeq += 1;
-      parentAttnIds.push(formatParentAttnId(academyId, parentSeq));
-    }
-
-    tx.set(seqRef, { nextParentSeq }, { merge: true });
-  });
-
-  const parents: Array<{
-    attnId: string;
-    displayName: string;
-    tempPassword: string;
-    authUid: string;
-    children: Array<{ attnId: string; name: string }>;
-  }> = [];
-
-  for (const attnId of parentAttnIds) {
-    const displayName = pickTemplateDisplayNameUnique(usedNames);
-    const member = await provisionMemberAccount({
-      db,
-      academyId,
-      attnId,
-      role: "parent",
-      displayName,
-    });
-    const children = await provisionTemplateStudentsForParent({
-      db,
-      academyId,
-      parentAuthUid: member.authUid,
-      parentAttnId: attnId,
-      count: childrenPerParent,
-    });
-    parents.push({
-      attnId: member.attnId,
-      displayName: member.displayName,
-      tempPassword: member.tempPassword,
-      authUid: member.authUid,
-      children: children.map((c) => ({ attnId: c.attnId, name: c.name })),
-    });
-  }
-
-  return { parents };
-}
-
-export const provisionTemplateParents = onCall(async (request) =>
-  runProvisionTemplateParents(request),
-);
-
-/** 학원 — 학부모 추가 발급 (대시보드) */
-export const provisionParentsBatch = onCall(async (request) =>
-  runProvisionTemplateParents(request),
-);
-
-/** 학원 — 특정 학부모에게 자녀 N명 */
-export const provisionStudentsBatch = onCall(async (request) => {
-  if (!request.auth?.uid) {
-    throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
-  }
-  const { uid, token } = request.auth;
-  const academyId =
-    typeof request.data?.academyId === "string" ? request.data.academyId.trim() : "";
-  const parentAuthUid =
-    typeof request.data?.parentAuthUid === "string" ? request.data.parentAuthUid.trim() : "";
-  const count = clampCount(request.data?.count, 20, "자녀 수");
-  if (!academyId || !parentAuthUid) {
-    throw new HttpsError("invalid-argument", "요청이 올바르지 않습니다.");
-  }
-
-  const db = admin.firestore();
-  await assertPermission(db, academyId, uid, token as admin.auth.DecodedIdToken, "operations.students");
-
-  const parentSnap = await db.doc(`academies/${academyId}/parents/${parentAuthUid}`).get();
-  if (!parentSnap.exists) {
-    throw new HttpsError("not-found", "학부모를 찾을 수 없습니다.");
-  }
-  const parentAttnId = parentSnap.get("attnId");
-  if (typeof parentAttnId !== "string") {
-    throw new HttpsError("failed-precondition", "학부모 attnId가 없습니다.");
-  }
-
-  const children = await provisionTemplateStudentsForParent({
-    db,
-    academyId,
-    parentAuthUid,
-    parentAttnId,
-    count,
-  });
-
-  return { students: children };
 });

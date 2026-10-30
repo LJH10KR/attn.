@@ -350,10 +350,18 @@ export const createSeedBatch = onCall(async (request) => {
         academyId,
         status: "active",
         authUid: parent.uid,
+        linkedStudentIds: Array.from({ length: studentsPerParent }, (_, s) => `student_${p + 1}_${s + 1}`).sort(),
+        approvedAt: FieldValue.serverTimestamp(),
+        approvedByUid: createdByUid,
         activatedAt: FieldValue.serverTimestamp(),
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       },
+    });
+    // 연결된 계정의 번호 색인(같은 학원 번호 1개 = 연결 계정 1개)
+    writes.push({
+      ref: db.doc(`academies/${academyId}/parentPhones/${parentPhone.replace(/\D/g, "")}`),
+      data: { parentUid: parent.uid, createdAt: FieldValue.serverTimestamp() },
     });
 
     for (let s = 0; s < studentsPerParent; s++) {
@@ -416,6 +424,35 @@ export const createSeedBatch = onCall(async (request) => {
     }
   }
 
+  // 승인 대기 학부모 2명 — 번호가 맞는 원생이 있는 계정(첫 학부모 첫 자녀의 연락처 전용 보호자 번호)과 매칭 없는 계정
+  const pendingParents: Array<{ uid: string; email: string; password: string; phone: string; displayName: string }> = [];
+  const pendingNos = await reserveSeedNumberRange(db, "parent", 2);
+  for (let i = 0; i < 2; i++) {
+    const a = await createAuthUser({ db, kind: "parent", seqNo: pendingNos[i]!, displayIdx: parentsCount + i });
+    const phone =
+      i === 0
+        ? `010-8001-${String(parentNos[0]! % 10000).padStart(4, "0")}`
+        : `010-7${String(i).padStart(3, "0")}-${String(pendingNos[i]! % 10000).padStart(4, "0")}`;
+    pendingParents.push({ ...a, phone });
+    writes.push({
+      ref: db.doc(`academies/${academyId}/parents/${a.uid}`),
+      data: {
+        email: a.email,
+        displayName: a.displayName,
+        phone,
+        academyId,
+        status: "pending_approval",
+        authUid: a.uid,
+        linkedStudentIds: [],
+        approvedAt: null,
+        approvedByUid: null,
+        signupSource: "parent_link",
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+    });
+  }
+
   writes.push(
     ...parentStudentDocs.map((d) => ({
       ref: d.ref,
@@ -445,7 +482,7 @@ export const createSeedBatch = onCall(async (request) => {
       academyId,
       ownerUid: ownerAuth.uid,
       teacherUids: teacherAuths.map((x) => x.uid),
-      parentUids: parentAuths.map((x) => x.uid),
+      parentUids: [...parentAuths, ...pendingParents].map((x) => x.uid),
       counts: { teachersCount, parentsCount, studentsPerParent, teachersPerStudent },
       deletedAt: null,
     },
@@ -478,6 +515,7 @@ export const createSeedBatch = onCall(async (request) => {
       owner: { email: ownerAuth.email, password: ownerAuth.password },
       teachers: teacherAuths.map((t) => ({ email: t.email, password: t.password })),
       parents: parentAuths.map((p) => ({ email: p.email, password: p.password })),
+      pendingParents: pendingParents.map((p) => ({ email: p.email, password: p.password, phone: p.phone })),
     },
     hint: {
       ownerLoginUrl: "/login/owner",
@@ -549,6 +587,7 @@ export const deleteSeedBatch = onCall(async (request) => {
   // 학생 문서·하위 기록·학원 메모
   await deleteStudentDocs(db, academyId, studentsSnap.docs.map((d) => d.id));
   await deleteCollectionDocs(db, `academies/${academyId}/studentNotes`);
+  await deleteCollectionDocs(db, `academies/${academyId}/parentPhones`);
 
   const deleteOps: DocumentReference[] = [];
   teachersSnap.docs.forEach((d) => deleteOps.push(d.ref));

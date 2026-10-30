@@ -95,18 +95,23 @@ export {
   removeTuitionInvoiceAdjustment,
   setTuitionInvoiceManualPaid,
 } from "./tuition-invoices";
-export { deleteAcademyStudent, saveStudent } from "./students";
+export {
+  deleteAcademyStudent,
+  onAcademyStudentParentLinksWritten,
+  saveStudent,
+} from "./students";
 export {
   activateParent,
   deactivateParent,
-  deleteParentInvite,
-  finalizeParentOnboarding,
+  deleteParentAccount,
   getParentActivationState,
   listParentChildrenStudents,
-  registerParentInvite,
-  sendParentInvitation,
-  updateParentInvite,
 } from "./parents";
+export {
+  createParentAccount,
+  linkParentToStudents,
+  unlinkParentFromStudent,
+} from "./parent-links";
 export { deleteStaffMember, saveStaffMember } from "./staff";
 export { saveAcademyOptionList } from "./academy-options";
 export {
@@ -156,15 +161,9 @@ export {
   submitKioskCheckIn,
   setStudentCheckInPin,
 } from "./kiosk";
-export { openShortAuthLink } from "./auth-short-links";
 export { sendOwnerSignupVerificationEmail } from "./owner-auth-mail";
 export { issueEmailVerificationOtp, verifyEmailVerificationOtp } from "./email-verification-otp";
-export {
-  createAcademyEasy,
-  provisionTemplateParents,
-  provisionParentsBatch,
-  provisionStudentsBatch,
-} from "./academy-provision";
+export { createAcademyEasy } from "./academy-provision";
 export {
   signInTeacher,
   signInTeacherGoogle,

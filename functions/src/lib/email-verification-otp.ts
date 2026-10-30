@@ -4,6 +4,7 @@ import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import * as nodemailer from "nodemailer";
+import { parentStatusFromLinks, readLinkedStudentIdsInTx } from "./parent-links";
 
 export type EmailVerificationPurpose = "owner" | "parent";
 
@@ -208,16 +209,27 @@ export async function verifyEmailVerificationOtpForUid(params: {
     if (!academyId) {
       throw new HttpsError("failed-precondition", "학원 정보를 찾을 수 없습니다.");
     }
-    await memberDoc.ref.update({
-      status: "active",
-      contactEmailVerified: true,
-      activatedAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
+    // 인증을 마치면 연결 수로 — 0명이면 승인 대기, 그 사이 학원이 연결했으면 사용 중
+    const status = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(memberDoc.ref);
+      if (snap.get("status") !== "pending_email_verification") {
+        throw new HttpsError("failed-precondition", "이메일 인증이 필요한 학부모 계정을 찾을 수 없습니다.");
+      }
+      const linkedStudentIds = await readLinkedStudentIdsInTx(tx, db, academyId, memberDoc.id);
+      const next = parentStatusFromLinks(linkedStudentIds.length);
+      tx.update(memberDoc.ref, {
+        status: next,
+        contactEmailVerified: true,
+        linkedStudentIds,
+        ...(next === "active" ? { activatedAt: FieldValue.serverTimestamp() } : {}),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return next;
     });
     await admin.auth().setCustomUserClaims(params.uid, {
       role: "parent",
       academyId,
-      membershipStatus: "active",
+      membershipStatus: status,
     });
   }
 

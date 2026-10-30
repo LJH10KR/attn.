@@ -42,9 +42,8 @@ type AcademyHeatmapCounts = {
   teachersPending: number;
   teachersInviteNeeded: number;
   teachersInviteSent: number;
+  /** 학부모 가입 승인 대기(`pending_approval` && `approvedAt == null`) */
   parentsPending: number;
-  parentsInviteNeeded: number;
-  parentsInviteSent: number;
 };
 
 function buildAcademyHeatmapItems(
@@ -90,28 +89,10 @@ function buildAcademyHeatmapItems(
   if (c.parentsPending > 0) {
     items.push({
       id: "parents-pending",
-      label: "등록 대기 중 학부모",
+      label: "가입 승인 대기 학부모",
       value: c.parentsPending,
       metric: `${c.parentsPending}명`,
       score: cautionScore(c.parentsPending),
-    });
-  }
-  if (c.parentsInviteNeeded > 0) {
-    items.push({
-      id: "parents-invite",
-      label: "초청 필요 학부모",
-      value: c.parentsInviteNeeded,
-      metric: `${c.parentsInviteNeeded}명`,
-      score: cautionScore(c.parentsInviteNeeded + 1),
-    });
-  }
-  if (c.parentsInviteSent > 0) {
-    items.push({
-      id: "parents-invite-sent",
-      label: "가입 대기 학부모",
-      value: c.parentsInviteSent,
-      metric: `${c.parentsInviteSent}명`,
-      score: mildConcernScore(c.parentsInviteSent),
     });
   }
   if (items.length === 0) {
@@ -220,7 +201,17 @@ export function AcademyHome() {
       );
     };
     try {
-      const [teachers, parents, students, tp, tiNeed, tiSent, pp, piNeed, piSent] =
+      const parentsAwaitingApproval = () =>
+        readable.parents
+          ? getCountFromServer(
+              query(
+                collection(db, COLLECTIONS.academies, academyId, "parents"),
+                where("status", "==", "pending_approval"),
+                where("approvedAt", "==", null),
+              ),
+            ).then((s) => s.data().count)
+          : Promise.resolve(0);
+      const [teachers, parents, students, tp, tiNeed, tiSent, pp] =
         await Promise.all([
           count("staff"),
           count("parents"),
@@ -228,9 +219,7 @@ export function AcademyHome() {
           count("staff", "pending_registration"),
           count("staff", "invitation_needed"),
           count("staff", "invitation_sent"),
-          count("parents", "pending_registration"),
-          count("parents", "invitation_needed"),
-          count("parents", "invitation_sent"),
+          parentsAwaitingApproval(),
         ]);
       const heatmap: AcademyHeatmapCounts = {
         students,
@@ -238,8 +227,6 @@ export function AcademyHome() {
         teachersInviteNeeded: tiNeed,
         teachersInviteSent: tiSent,
         parentsPending: pp,
-        parentsInviteNeeded: piNeed,
-        parentsInviteSent: piSent,
       };
       setSummaryCounts({ teachers, parents, students });
       setSummaryCountsError(null);
@@ -256,8 +243,6 @@ export function AcademyHome() {
           teachersInviteNeeded: 0,
           teachersInviteSent: 0,
           parentsPending: 0,
-          parentsInviteNeeded: 0,
-          parentsInviteSent: 0,
         }),
       );
     }
@@ -283,8 +268,6 @@ export function AcademyHome() {
           teachersInviteNeeded: (data.teachersInviteNeeded as number) ?? 0,
           teachersInviteSent: (data.teachersInviteSent as number) ?? 0,
           parentsPending: (data.parentsPending as number) ?? 0,
-          parentsInviteNeeded: (data.parentsInviteNeeded as number) ?? 0,
-          parentsInviteSent: (data.parentsInviteSent as number) ?? 0,
         };
         setSummaryCounts({
           teachers: data.teachers as number,

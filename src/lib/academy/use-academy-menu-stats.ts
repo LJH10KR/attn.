@@ -27,14 +27,17 @@ type Loader = (academyId: string) => Promise<AcademyMenuStats>;
 
 /** 메뉴별 요약 숫자 — 권한이 있는 메뉴만 읽는다(규칙과 같은 권한) */
 const LOADERS: Partial<Record<AcademyPermission, Loader>> = {
+  // 요약 = 자녀가 연결된 계정 수, 배지 = 가입 승인 대기(연결된 적 없는 계정 — 연결 해제로 돌아온 계정은 제외)
   "operations.parents": async (academyId) => {
     const parents = collection(getFirebaseDb(), COLLECTIONS.academies, academyId, "parents");
-    const [all, pending] = await Promise.all([
-      getCountFromServer(parents),
-      getCountFromServer(query(parents, where("status", "==", "pending_registration"))),
+    const [linked, pending] = await Promise.all([
+      getCountFromServer(query(parents, where("status", "==", "active"))),
+      getCountFromServer(
+        query(parents, where("status", "==", "pending_approval"), where("approvedAt", "==", null)),
+      ),
     ]);
     return {
-      "operations.parents": { summary: `${all.data().count}명`, badge: pending.data().count },
+      "operations.parents": { summary: `연결 ${linked.data().count}명`, badge: pending.data().count },
     };
   },
   // 숫자는 재원 기준, 휴원·미등록·퇴원은 보조 줄에 따로(0이면 생략)

@@ -17,18 +17,12 @@ export default function ParentSessionPage() {
 
   const message = useMemo(() => {
     switch (state) {
-      case "pending_registration":
-        return "현재 학부모 등록 대기(pending) 상태라 로그인할 수 없습니다. 학원에서 활성 처리 후 다시 시도해 주세요.";
-      case "invitation_sent":
-        return "현재 학부모는 초청 진행 단계입니다. 이메일 인증과 등록 완료 처리를 먼저 진행해 주세요.";
       case "inactive":
         return "현재 학부모 계정은 비활성 상태입니다. 학원에 문의해 주세요.";
-      case "invitation_needed":
-        return "현재 상태에서는 로그인할 수 없습니다. 학원에서 초청을 다시 진행해 주세요.";
       case "pending_email_verification":
         return "이메일 인증이 필요합니다. 로그인 화면에서 인증 코드를 입력해 주세요.";
       default:
-        return "현재 상태에서는 로그인할 수 없습니다. 학원 승인 절차가 완료된 뒤 다시 시도해 주세요.";
+        return "현재 상태에서는 로그인할 수 없습니다. 학원에 문의해 주세요.";
     }
   }, [state]);
 

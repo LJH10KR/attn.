@@ -6,7 +6,6 @@ import type { DashboardNotificationRow } from "@/components/dashboard/dashboard-
 import {
   ACADEMY_ADMIN_INBOX_SCHEMA_VERSION,
   academyAdminInboxCollectionPath,
-  PARENT_INVITE_TTL_MS,
   TEACHER_INVITE_TTL_MS,
   type AcademyAdminInboxDoc,
 } from "@/lib/firebase/attn-schema";
@@ -44,8 +43,22 @@ function mapInboxDoc(id: string, data: Record<string, unknown>, now: number): Da
   const email = typeof data.email === "string" ? data.email : "";
   const invitedAt = readTs(data.invitedAt);
   const invitationExpiresAt = readTs(data.invitationExpiresAt);
-  const ttlMs = entityType === "teacher" ? TEACHER_INVITE_TTL_MS : PARENT_INVITE_TTL_MS;
   const roleLabel = entityType === "teacher" ? "선생님" : "학부모";
+
+  if (kind === "parent_pending_approval") {
+    return [
+      {
+        id,
+        title: `학부모 가입 승인 대기: ${name}`,
+        detail: "학부모 관리에서 자녀를 연결해 주세요.",
+      },
+    ];
+  }
+
+  // 아래 두 종류는 직원 계정(학부모 이메일 초청은 2-C에서 폐지 — 남은 학부모 항목은 표시하지 않음)
+  if (entityType !== "teacher" && (kind === "pending_registration" || kind === "invitation_sent")) {
+    return [];
+  }
 
   if (kind === "pending_registration") {
     return [
@@ -58,7 +71,7 @@ function mapInboxDoc(id: string, data: Record<string, unknown>, now: number): Da
   }
 
   if (kind === "invitation_sent") {
-    if (inviteExpired(invitedAt, invitationExpiresAt, ttlMs, now)) {
+    if (inviteExpired(invitedAt, invitationExpiresAt, TEACHER_INVITE_TTL_MS, now)) {
       return [
         {
           id,
@@ -121,7 +134,7 @@ function saveDismissed(academyId: string, set: Set<string>): void {
   }
 }
 
-/** 초청 만료 판정용 클라이언트 시계 — inbox `invitation_sent` 항목 표시용 */
+/** 초청 만료 판정용 클라이언트 시계 — 직원 inbox `invitation_sent` 항목 표시용 */
 const BELL_EXPIRY_TICK_MS = 60_000;
 
 /**

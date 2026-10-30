@@ -115,14 +115,32 @@ assert.deepEqual(notifSnap.docs[0].get("parentUids"), ["p-active"]);
 assert.equal((await db.collection("users/p-active/dashboardBellItems").get()).size, 1);
 assert.equal((await db.collection("users/p-inactive/dashboardBellItems").get()).size, 0);
 
-// 보호자를 지우면 연결도 끊긴다
+// 앱에 연결된 보호자 항목은 지울 수 없다(연결 해제는 학부모 관리 권한의 unlinkParentFromStudent만)
+const saveBase = { academyId: A, studentId: created.studentId, name: "김하나", grade: "e3", status: "enrolled" };
+await assert.rejects(
+  call("saveStudent", { ...saveBase, guardians: [{ id: gFather.id, relationId: "father", phone: "010-3333-4444" }] }),
+  /앱에 연결된 보호자입니다/,
+);
+await assert.rejects(call("saveStudent", saveBase), /앱에 연결된 보호자입니다/, "보호자 목록을 빼고 보내도 거부");
+// 연결된 항목의 번호·이름 수정은 허용(연결 유지)
 await call("saveStudent", {
-  academyId: A, studentId: created.studentId, name: "김하나", grade: "e3", status: "enrolled",
-  guardians: [{ id: gFather.id, relationId: "father", phone: "010-3333-4444" }],
+  ...saveBase,
+  guardians: [
+    { id: gMother.id, relationId: "mother", name: "엄마", phone: "010-1111-9999" },
+    { id: gFather.id, relationId: "father", phone: "010-3333-4444" },
+  ],
 });
+s1 = await studentDoc(created.studentId);
+assert.equal(s1.guardians[0].phone, "010-1111-9999");
+assert.equal(s1.guardians[0].linkedParentUid, "p-active");
+assert.equal(s1.guardians.length, 2, "연결 안 된 항목은 지울 수 있다");
+// 연결을 해제한 뒤에는 지울 수 있다
+await call("unlinkParentFromStudent", { academyId: A, parentUid: "p-active", studentId: created.studentId });
+await call("saveStudent", { ...saveBase, guardians: [{ id: gFather.id, relationId: "father", phone: "010-3333-4444" }] });
 s1 = await studentDoc(created.studentId);
 assert.deepEqual(s1.parentUids, ["p-inactive"]);
 assert.equal(s1.guardians[0].isPrimary, true);
+await call("unlinkParentFromStudent", { academyId: A, parentUid: "p-inactive", studentId: created.studentId });
 
 // --- 학년: 화면이 보낸 "지금 학년"이 저장 값의 표시 학년과 같으면 기준 연도 유지 ---
 await db.doc(`academies/${A}/students/${created.studentId}`).update({ gradeYear: thisYear - 1 });

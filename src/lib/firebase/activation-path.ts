@@ -21,11 +21,9 @@ export function activationPathFromState(
   if (state.primaryStatus === "pending_setup") {
     return `/${role}/setup`;
   }
-  if (state.primaryStatus === "invitation_sent") {
-    const p = new URLSearchParams();
-    if (state.primaryAcademyId) p.set("academyId", state.primaryAcademyId);
-    const qs = p.toString();
-    return `/${role}/complete${qs ? `?${qs}` : ""}`;
+  // 학부모 승인 대기·연결 대기 — 학부모 홈이 연결 대기 화면을 보여 준다(Auth는 켜져 있음)
+  if (role === "parent" && state.primaryStatus === "pending_approval") {
+    return "/parent";
   }
   if (state.primaryStatus === "pending_email_verification") {
     return `/login/${role}`;

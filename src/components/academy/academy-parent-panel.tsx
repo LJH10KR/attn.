@@ -12,11 +12,7 @@ import {
 import { httpsCallable } from "firebase/functions";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import {
-  MAX_STUDENTS_PER_PARENT,
-  PARENT_INVITE_TTL_MS,
-  type ParentRegistrationStatus,
-} from "@/lib/firebase/attn-schema";
+import { MAX_STUDENTS_PER_PARENT } from "@/lib/firebase/attn-schema";
 import { useAcademyShell } from "@/components/academy/academy-shell";
 import { AcademyParentStudentList } from "@/components/academy/academy-student-panel";
 import { compareAttnIdAsc } from "@/lib/attn-id-sort";
@@ -30,6 +26,13 @@ import {
   AcademyMemberProvisionModal,
 } from "@/components/academy/academy-member-provision";
 import { formatKrPhoneDisplay, phoneMatchesSearch } from "@/lib/phone/kr-phone";
+
+/**
+ * 예전 이메일 초청 시절 학부모 패널 — 2-G 학부모 관리 화면으로 교체(삭제)될 때까지 컴파일만 유지.
+ * 초청 상태 값(invitation_*)과 초청 함수는 2-C에서 서버에서 없어졌다.
+ */
+type ParentRegistrationStatus = string;
+const PARENT_INVITE_TTL_MS = 24 * 60 * 60 * 1000;
 
 const glassCard = "glass-card";
 
@@ -437,8 +440,8 @@ function ParentRowActions({
     setBusyKey(k("del"));
     void (async () => {
       try {
-        const del = httpsCallable(fn, "deleteParentInvite");
-        await del({ academyId, parentId: row.id });
+        const del = httpsCallable(fn, "deleteParentAccount");
+        await del({ academyId, parentUid: row.id });
         setNotice("삭제 처리되었습니다.");
         setDeleteConfirmOpen(false);
         onListRefresh();

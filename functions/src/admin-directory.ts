@@ -6,10 +6,10 @@ import {
   deleteAcademyFirestoreCascade,
   deleteAttnLoginIndexForMember,
   deleteMemberLoginSecrets,
-  deleteStudentDocs,
   purgeUserFirestoreData,
   stripTeacherFromStudents,
 } from "./lib/firestore-cleanup";
+import { deleteParentAccountData } from "./lib/parent-links";
 import { reconcileUserActivationMirror } from "./user-activation-mirror";
 
 function assertAdmin(request: {
@@ -227,7 +227,7 @@ export const adminDeleteAcademyCascade = onCall(async (request) => {
 
 /**
  * 관리자용 — 선생님 또는 학부모 멤버 1명과(가능하면) 해당 Auth 계정을 삭제합니다.
- * 학부모인 경우 자녀 학생 문서도 함께 삭제합니다.
+ * 학부모인 경우 원생은 남기고 보호자 연결만 해제합니다.
  */
 export const adminDeleteMemberUser = onCall(async (request) => {
   assertAdmin(request as unknown as { auth?: { uid: string; token?: Record<string, unknown> } | null });
@@ -262,19 +262,8 @@ export const adminDeleteMemberUser = onCall(async (request) => {
       await purgeUserFirestoreData(db, authUid);
     }
   } else {
-    const studentsSnap = await db.collection(`academies/${academyId}/students`).get();
-    const studentIds = studentsSnap.docs
-      .filter((s) => {
-        const pid = s.get("parentUserId");
-        return pid === memberDocId || pid === authUid;
-      })
-      .map((s) => s.id);
-    if (studentIds.length > 0) {
-      await deleteStudentDocs(db, academyId, studentIds);
-    }
-    await deleteMemberLoginSecrets(db, academyId, "parent", memberDocId);
-    await deleteAttnLoginIndexForMember(db, data, authUid);
-    await ref.delete();
+    // 원생은 그대로 두고 연결만 해제(결제 parentUids는 학생 트리거가 정리), 번호 색인·로그인 정보 삭제
+    await deleteParentAccountData(db, academyId, memberDocId);
     await safeDeleteAuthUser(authUid, "adminDeleteMemberUser parent");
     if (!(await authUserHasAdminClaim(authUid))) {
       await purgeUserFirestoreData(db, authUid);

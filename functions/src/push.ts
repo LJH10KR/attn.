@@ -104,6 +104,7 @@ export const syncParentPushSubscription = onCall(async (request) => {
       { merge: true },
     );
     await batch.commit();
+    await syncParentPushSummary(db, uid, false, 0);
     return { ok: true as const, pushNotificationsEnabled: false };
   }
 
@@ -134,9 +135,34 @@ export const syncParentPushSubscription = onCall(async (request) => {
   );
   await batch.commit();
   await pruneStalePushSubscriptions(userRef, subId);
+  const tokenCount = (await userRef.collection("pushSubscriptions").count().get()).data().count;
+  await syncParentPushSummary(db, uid, true, tokenCount);
 
   return { ok: true as const, pushNotificationsEnabled: true };
 });
+
+/**
+ * 학부모 관리 화면용 푸시 수신 상태 — 소속 학원의 `parents/{uid}` 문서에 요약을 남긴다
+ * (학원 직원은 학부모의 `users` 문서를 읽을 수 없음). 학부모 문서가 없으면(직원 계정 등) 아무것도 안 함.
+ */
+async function syncParentPushSummary(
+  db: FirebaseFirestore.Firestore,
+  uid: string,
+  enabled: boolean,
+  tokenCount: number,
+): Promise<void> {
+  const snaps = await db.collectionGroup("parents").where("authUid", "==", uid).limit(10).get();
+  if (snaps.empty) return;
+  const batch = db.batch();
+  for (const d of snaps.docs) {
+    batch.update(d.ref, {
+      pushEnabled: enabled,
+      pushTokenCount: tokenCount,
+      pushSyncedAt: FieldValue.serverTimestamp(),
+    });
+  }
+  await batch.commit();
+}
 
 /**
  * 전담 선생님·학원이 오늘자 출결을 기록하고 학부모에게 출석/결석 알림(FCM data 메시지)을 보냅니다.

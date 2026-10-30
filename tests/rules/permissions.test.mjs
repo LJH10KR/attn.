@@ -44,6 +44,7 @@ const OTHER_STUDENT = "student-3";
 /** 직원 uid → [상태, 권한] */
 const STAFF = {
   "staff-students": ["active", ["operations.students"]],
+  "staff-parents": ["active", ["operations.parents"]],
   "staff-classes": ["active", ["operations.classes"]],
   "staff-billing": ["active", ["billing.invoices"]],
   "staff-attendance": ["active", ["lessons.attendance"]],
@@ -479,5 +480,42 @@ describe("학부모 — 결제 내역(payments.parentUids)", () => {
     const db = dbAs(PARENT_INACTIVE);
     await assertFails(getDocs(paymentsQuery(db, PARENT_INACTIVE)));
     await assertFails(getDoc(doc(db, academyPath("payments", "pay-1"))));
+  });
+});
+
+describe("학부모 — 승인 대기 계정·번호 색인(2-C)", () => {
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, academyPath("meta", "tuitionSettings")), { bankName: "은행", accountNumber: "123" });
+      await setDoc(doc(db, academyPath("parentPhones", "01012345678")), { parentUid: PARENT });
+    });
+  });
+
+  it("승인 대기 학부모는 본인 계정 문서·학원 문서를 읽고, 납부 계좌(tuitionSettings)는 못 읽는다", async () => {
+    const db = dbAs(PARENT_PENDING);
+    await assertSucceeds(getDoc(doc(db, academyPath("parents", PARENT_PENDING))));
+    await assertSucceeds(getDoc(doc(db, academyPath())));
+    await assertFails(getDoc(doc(db, academyPath("meta", "tuitionSettings"))));
+    await assertFails(getDoc(doc(db, academyPath("parents", PARENT))));
+    await assertFails(updateDoc(doc(db, academyPath("parents", PARENT_PENDING)), { status: "active" }));
+    // 연결된 활성 학부모는 납부 계좌를 읽는다
+    await assertSucceeds(getDoc(doc(dbAs(PARENT), academyPath("meta", "tuitionSettings"))));
+  });
+
+  it("번호 색인(parentPhones)은 원장·학부모 관리 직원·학부모 누구도 읽거나 쓰지 못한다", async () => {
+    for (const uid of [OWNER, "staff-parents", PARENT, PARENT_PENDING]) {
+      const db = dbAs(uid);
+      await assertFails(getDoc(doc(db, academyPath("parentPhones", "01012345678"))));
+      await assertFails(getDocs(collection(db, academyPath("parentPhones"))));
+      await assertFails(setDoc(doc(db, academyPath("parentPhones", "01099998888")), { parentUid: uid }));
+      await assertFails(deleteDoc(doc(db, academyPath("parentPhones", "01012345678"))));
+    }
+  });
+
+  it("학부모 관리 직원은 학부모 계정 문서를 읽지만 쓰지 못한다", async () => {
+    const db = dbAs("staff-parents");
+    await assertSucceeds(getDocs(collection(db, academyPath("parents"))));
+    await assertFails(updateDoc(doc(db, academyPath("parents", PARENT_PENDING)), { status: "active" }));
   });
 });

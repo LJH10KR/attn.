@@ -230,6 +230,14 @@ describe("memberPasswordResetViolation", () => {
     }
     assert.equal(memberPasswordResetViolation(owner, teacher()), null);
     assert.equal(memberPasswordResetViolation(owner, parent()), null);
+    for (const status of ["pending_email_verification"]) {
+      assert.notEqual(memberPasswordResetViolation(owner, parent({ status })), null, status);
+    }
+  });
+
+  it("학부모 연결 대기(pending_approval)는 초기화 가능, 직원에게는 없는 상태라 거부", () => {
+    assert.equal(memberPasswordResetViolation(owner, parent({ status: "pending_approval" })), null);
+    assert.notEqual(memberPasswordResetViolation(owner, teacher({ status: "pending_approval" })), null);
   });
 
   it("로그인 ID 비밀번호가 없는(Google 전용) 계정은 거부", () => {

@@ -3,7 +3,7 @@ import * as admin from "firebase-admin";
 import { FieldValue, Timestamp, type DocumentReference } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
-import { getAppOrigin } from "./auth-short-links";
+import { getAppOrigin } from "./lib/app-origin";
 import { assertPermission, type AcademyActor } from "./lib/academy-access";
 import { assertMemberLoginIdAvailable } from "./lib/member-login-id";
 import { DEFAULT_STAFF_ROLE_ID, type AcademyPermission } from "./lib/permissions";

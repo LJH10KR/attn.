@@ -253,6 +253,7 @@ export async function deleteAcademyFirestoreCascade(
   // 학생 문서와 하위 기록·메모(남은 메모 문서까지)
   await deleteStudentDocs(db, academyId, studentsSnap.docs.map((s) => s.id));
   await deleteCollectionDocs(db, `academies/${academyId}/studentNotes`);
+  await deleteCollectionDocs(db, `academies/${academyId}/parentPhones`);
 
   const metaSnap = await db.collection(`academies/${academyId}/meta`).get();
   metaSnap.docs.forEach((d) => deleteOps.push(d.ref));

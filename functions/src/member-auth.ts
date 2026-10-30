@@ -23,6 +23,7 @@ import {
   verifyLoginPasswordThrottled,
 } from "./lib/login-throttle";
 import { normalizePermissionList } from "./lib/permissions";
+import { parentStatusFromLinks, readLinkedStudentIdsInTx } from "./lib/parent-links";
 import { memberPasswordResetViolation, staffAccountChangeViolation } from "./lib/role-policy";
 
 /** 로그인 실패 응답 — 없는 ID·다른 역할의 ID·비밀번호 없음·틀린 비밀번호 모두 같은 코드·문구(계정 존재 여부를 알 수 없게) */
@@ -58,6 +59,21 @@ async function verifyMemberPassword(
         : undefined
       : undefined;
   return { status, contactEmail };
+}
+
+/**
+ * 로그인 ID 로그인용 커스텀 토큰. 커스텀 토큰에 넣은 클레임(developer claims)은 그 세션 내내 토큰 갱신 뒤에도 남아
+ * `setCustomUserClaims`로 바꾼 값을 덮는다. 학부모는 세션 중 상태가 바뀌므로(이메일 인증 → 승인 대기, 연결 → 사용 중)
+ * 토큰에 클레임을 넣지 않고 서버에 저장된 클레임(직전에 `setCustomUserClaims`)만 따르게 한다. 직원 흐름은 그대로.
+ */
+function createMemberCustomToken(
+  uid: string,
+  role: MemberKind,
+  academyId: string,
+  status: string,
+): Promise<string> {
+  if (role === "parent") return admin.auth().createCustomToken(uid);
+  return admin.auth().createCustomToken(uid, { role, academyId, membershipStatus: status });
 }
 
 async function resolveParentLoginIndex(loginKey: string) {
@@ -146,11 +162,7 @@ async function signInMember(loginKey: string, password: string, role: MemberKind
     membershipStatus: status,
   });
 
-  const customToken = await admin.auth().createCustomToken(authUid, {
-    role,
-    academyId,
-    membershipStatus: status,
-  });
+  const customToken = await createMemberCustomToken(authUid, role, academyId, status);
 
   return {
     customToken,
@@ -200,11 +212,7 @@ export const reauthenticateMember = onCall(async (request) => {
     password,
     "비밀번호가 올바르지 않습니다.",
   );
-  const customToken = await admin.auth().createCustomToken(uid, {
-    role,
-    academyId,
-    membershipStatus: status,
-  });
+  const customToken = await createMemberCustomToken(uid, role, academyId, status);
   return { ok: true as const, customToken };
 });
 
@@ -275,7 +283,7 @@ export const signInParent = onCall(async (request) => {
   return signInMember(loginId, password, "parent");
 });
 
-/** 최초 비밀번호 변경 + active 전환 */
+/** 최초 비밀번호 변경 + 사용 가능 상태로(직원 active, 학부모는 연결 수로) */
 export const completeMemberFirstLogin = onCall(async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
@@ -306,23 +314,36 @@ export const completeMemberFirstLogin = onCall(async (request) => {
   }
 
   await admin.auth().updateUser(uid, { password: randomAuthPassword() });
-  await memberRef.update({
-    status: "active",
-    activatedAt: FieldValue.serverTimestamp(),
-    updatedAt: FieldValue.serverTimestamp(),
-  });
   await memberRef
     .collection("secrets")
     .doc("login")
     .set(await passwordSecretFields(newPassword), { merge: true });
+  // 직원은 사용 중, 학부모는 연결 수로(0명이면 연결 대기)
+  const db = admin.firestore();
+  const membershipStatus = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(memberRef);
+    if (snap.get("status") !== "pending_setup") {
+      throw new HttpsError("failed-precondition", "첫 로그인 비밀번호 설정이 필요한 계정이 아닙니다.");
+    }
+    const linkedStudentIds =
+      role === "parent" ? await readLinkedStudentIdsInTx(tx, db, academyId, uid) : null;
+    const next = linkedStudentIds ? parentStatusFromLinks(linkedStudentIds.length) : "active";
+    tx.update(memberRef, {
+      status: next,
+      ...(linkedStudentIds ? { linkedStudentIds } : {}),
+      ...(next === "active" ? { activatedAt: FieldValue.serverTimestamp() } : {}),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return next;
+  });
 
   await admin.auth().setCustomUserClaims(uid, {
     role,
     academyId,
-    membershipStatus: "active",
+    membershipStatus,
   });
 
-  return { ok: true, membershipStatus: "active" as const };
+  return { ok: true, membershipStatus };
 });
 
 /** 오너/학원 — 임시 비밀번호 재발급 (1회 표시) */

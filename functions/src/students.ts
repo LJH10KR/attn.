@@ -1,11 +1,15 @@
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
+import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
+import * as logger from "firebase-functions/logger";
 import { academyOptionsRef, readOptionItems } from "./academy-options";
 import { assertPermission } from "./lib/academy-access";
 import { academySeqMetaPath, formatStudentAttnId } from "./lib/attn-id";
 import { deleteStudentDocs } from "./lib/firestore-cleanup";
 import { parseOptionalKrPhone } from "./lib/kr-phone";
+import { refreshParentLinkSummary, syncStudentPaymentParents } from "./lib/parent-links";
+import { readUidList } from "./lib/parent-recipients";
 import {
   deriveGuardianFields,
   parseGuardiansInput,
@@ -220,3 +224,56 @@ export const deleteAcademyStudent = onCall(async (request) => {
   await deleteStudentDocs(db, academyId, [studentId]);
   return { ok: true };
 });
+
+/** 일시 오류(다시 하면 될 수 있음)만 재시도 — 그 밖의 오류는 로그만 남기고 끝낸다(무한 재시도 방지) */
+const RETRIABLE_CODES = new Set<unknown>([
+  4, 8, 10, 13, 14,
+  "deadline-exceeded", "resource-exhausted", "aborted", "internal", "unavailable",
+]);
+const MAX_TRIGGER_RETRY_AGE_MS = 24 * 60 * 60 * 1000;
+
+function isRetriableError(e: unknown): boolean {
+  return RETRIABLE_CODES.has((e as { code?: unknown } | null)?.code);
+}
+
+/**
+ * 보호자 연결이 바뀐 학생 — `parentUids`가 바뀐 계정마다 학부모 요약(`linkedStudentIds`·`pending_approval ↔ active`)을,
+ * 학생 결제 문서의 `parentUids`를 현재 값에 맞춘다. 연결·해제·계정 삭제·원생 저장 등 모든 경로가 여기를 거친다.
+ * 두 작업 모두 "현재 값에 맞추기"라 같은 이벤트가 재시도로 여러 번 와도 결과가 같다.
+ * 학생이 삭제되면 결제는 그대로 둔다(실제로 낸 납부 기록이라 학부모 앱 결제 내역에 남김).
+ */
+export const onAcademyStudentParentLinksWritten = onDocumentWritten(
+  { document: "academies/{academyId}/students/{studentId}", region: "asia-northeast3", retry: true },
+  async (event) => {
+    const before = readUidList(event.data?.before?.get("parentUids"));
+    const after = readUidList(event.data?.after?.get("parentUids"));
+    const changed = [
+      ...before.filter((uid) => !after.includes(uid)),
+      ...after.filter((uid) => !before.includes(uid)),
+    ];
+    if (changed.length === 0) return;
+
+    const { academyId, studentId } = event.params;
+    const eventAgeMs = Date.now() - Date.parse(event.time);
+    if (eventAgeMs > MAX_TRIGGER_RETRY_AGE_MS) {
+      logger.error("onAcademyStudentParentLinksWritten: 오래된 이벤트 — 처리하지 않음", { academyId, studentId, eventAgeMs });
+      return;
+    }
+
+    const db = admin.firestore();
+    try {
+      for (const uid of changed) {
+        await refreshParentLinkSummary(db, academyId, uid);
+      }
+      if (event.data?.after?.exists) {
+        await syncStudentPaymentParents(db, academyId, studentId);
+      }
+    } catch (e) {
+      if (isRetriableError(e)) {
+        logger.warn("onAcademyStudentParentLinksWritten: 일시 오류 — 재시도", { academyId, studentId, e });
+        throw e;
+      }
+      logger.error("onAcademyStudentParentLinksWritten: 처리 실패(재시도 안 함)", { academyId, studentId, e });
+    }
+  },
+);

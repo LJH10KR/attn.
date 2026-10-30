@@ -374,7 +374,7 @@ function ParentJoinForm() {
       <SignupCompleteModal
         open={signupCompleteOpen}
         title="회원가입 완료!"
-        description="회원님의 이메일 주소로 인증 코드를 발송했어요! 다음 로그인 시 인증 코드를 입력해 주세요."
+        description="회원님의 이메일 주소로 인증 코드를 발송했어요! 다음 로그인 시 인증 코드를 입력해 주세요. 학원 승인 후 자녀가 연결됩니다."
         onConfirmAction={() => {
           setSignupCompleteOpen(false);
           const id = doneLoginId ?? normalizeParentLoginId(loginId);
@@ -418,6 +418,9 @@ function ParentJoinForm() {
           {copied ? (
             <p className="text-xs text-emerald-600">클립보드에 복사했습니다.</p>
           ) : null}
+          <p className="break-keep text-xs leading-relaxed text-neutral-500">
+            학원 승인 후 자녀가 연결됩니다. 연결 전에는 학부모 홈에 연결 대기 안내가 보입니다.
+          </p>
           <button
             type="button"
             onClick={() => router.replace("/parent")}

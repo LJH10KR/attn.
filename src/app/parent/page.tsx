@@ -106,6 +106,8 @@ type TuitionSettingsState = {
 } | null;
 
 type ParentListPayload = {
+  /** 서버가 읽은 계정 상태 — `pending_approval`이면 연결 대기 화면(토큰 클레임이 예전 값이어도) */
+  accountStatus?: "active" | "pending_approval";
   students?: CallableStudentPayload[];
   kiosk?: { requireStudentCheckInPin?: boolean };
 };
@@ -153,6 +155,8 @@ export default function ParentDashboardPage() {
   const [iosAutoModalOpen, setIosAutoModalOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [listInitialLoading, setListInitialLoading] = useState(false);
+  /** 승인 대기·연결 대기(연결된 자녀 0명) — 자녀 목록 대신 안내 화면 */
+  const [linkWaiting, setLinkWaiting] = useState(false);
   const [kioskRequirePin, setKioskRequirePin] = useState(false);
   const [studentsWithPinMeta, setStudentsWithPinMeta] = useState<
     ParentStudentRow[]
@@ -245,7 +249,8 @@ export default function ParentDashboardPage() {
         ) {
           return;
         }
-        if (!data?.anyActive || !data.primaryAcademyId) {
+        const waiting = !data?.anyActive && data?.primaryStatus === "pending_approval";
+        if ((!data?.anyActive && !waiting) || !data.primaryAcademyId) {
           const q = new URLSearchParams();
           q.set("state", data?.primaryStatus ?? "unknown");
           if (data?.primaryAcademyId) q.set("academyId", data.primaryAcademyId);
@@ -256,8 +261,13 @@ export default function ParentDashboardPage() {
         const aid = data.primaryAcademyId;
         setAcademyId(aid);
         setInitError(null);
+        setLinkWaiting(waiting);
         setReady(true);
         setLastDashboardRoleHint("parent");
+        if (waiting) {
+          parentListLoadedUidRef.current = uid;
+          return;
+        }
         setListInitialLoading(true);
 
         try {
@@ -299,6 +309,7 @@ export default function ParentDashboardPage() {
             hasPendingPaymentReminder: s.hasPendingPaymentReminder === true,
           }));
           list.sort(sortByName);
+          setLinkWaiting(payload?.accountStatus === "pending_approval");
           setStudents(list);
           setStudentsWithPinMeta(list);
           setKioskRequirePin(payload?.kiosk?.requireStudentCheckInPin === true);
@@ -460,6 +471,7 @@ export default function ParentDashboardPage() {
         extraSessionDates: Array.isArray(s.extraSessionDates) ? s.extraSessionDates : [],
       }));
       list.sort(sortByName);
+      setLinkWaiting(payload?.accountStatus === "pending_approval");
       setStudents(list);
       setStudentsWithPinMeta(list);
       setKioskRequirePin(payload?.kiosk?.requireStudentCheckInPin === true);
@@ -634,6 +646,28 @@ export default function ParentDashboardPage() {
           연결된 자녀 학생 정보를 확인할 수 있습니다.
         </p> */}
 
+        {linkWaiting ? (
+          <div className={`mt-[26px] px-5 py-10 text-center ${glassCard}`}>
+            <p className="break-keep text-base font-semibold text-foreground">
+              {academyName ?? "학원"} 연결 대기 중
+            </p>
+            <p className="mt-2 break-keep text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">
+              학원에서 연결을 확인하면 자녀가 표시됩니다.
+            </p>
+            {listError ? (
+              <p className="mt-4 break-keep text-xs text-red-700">{listError}</p>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => void refreshChildrenList()}
+              disabled={listRefreshBusy || !academyId}
+              className="mt-6 rounded-[8px] border border-neutral-300/80 bg-white/70 px-4 py-2.5 text-xs font-medium text-neutral-800 hover:bg-white disabled:opacity-50"
+            >
+              {listRefreshBusy ? "확인 중…" : "새로고침"}
+            </button>
+          </div>
+        ) : (
+        <>
         <div className="mt-[26px] mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-foreground">자녀 학생</h2>
           <button
@@ -662,8 +696,7 @@ export default function ParentDashboardPage() {
             <p
               className={`py-12 text-center text-sm text-neutral-500 ${glassCard}`}
             >
-              등록된 자녀 학생이 없습니다. 학원에서 자녀를 연결하면 여기에
-              표시됩니다.
+              지금 표시할 자녀가 없습니다. 자세한 내용은 학원에 문의해 주세요.
             </p>
           ) : (
             studentsWithPinMeta.map((s) => (
@@ -712,6 +745,8 @@ export default function ParentDashboardPage() {
         </div>
 
         <ParentPaymentHistory academyId={academyId} parentUid={authUid} />
+        </>
+        )}
 
         <IosPwaHintModal
           open={iosAutoModalOpen}

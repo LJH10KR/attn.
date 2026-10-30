@@ -51,9 +51,8 @@ export type AcademyDashboardStatsDoc = {
   teachersPending: number;
   teachersInviteNeeded: number;
   teachersInviteSent: number;
+  /** 학부모 가입 승인 대기(`pending_approval` && `approvedAt == null`) */
   parentsPending: number;
-  parentsInviteNeeded: number;
-  parentsInviteSent: number;
   updatedAt: Timestamp;
 };
 
@@ -78,8 +77,12 @@ export function academyKioskSettingsPath(academyId: string): string {
 export const ACADEMY_ADMIN_INBOX_SCHEMA_VERSION = 1 as const;
 
 export type AcademyAdminInboxKind =
+  /** 직원 초대 링크 가입 승인 대기·첫 로그인 전 */
   | "pending_registration"
+  /** 예전 직원 초청 메일(폐지) — 남은 항목 표시용 */
   | "invitation_sent"
+  /** 학부모 가입 승인 대기(연결 해제로 돌아온 계정은 만들지 않음) */
+  | "parent_pending_approval"
   | "session_payment_received";
 
 export type AcademyAdminInboxDoc = {
@@ -188,11 +191,16 @@ export type TeacherRegistrationStatus =
 /** 초청 메일 발송 시점부터 학원이 안내하는 유효 창 (밀리초) — Functions·UI에서 동일 값 사용 */
 export const TEACHER_INVITE_TTL_MS = 24 * 60 * 60 * 1000;
 
-/** 학부모 초청 — 선생님과 동일 24h */
-export const PARENT_INVITE_TTL_MS = TEACHER_INVITE_TTL_MS;
-
-/** 학부모 등록 단계 — 선생님과 동일 상태 값 */
-export type ParentRegistrationStatus = TeacherRegistrationStatus;
+/**
+ * 학부모 앱 계정 상태(`functions/src/lib/parent-links.ts` `ParentAccountStatus`와 같게).
+ * 승인 대기·연결 대기(`pending_approval`)는 Auth를 끄지 않고 앱의 연결 대기 화면으로 간다. 비활성만 Auth off.
+ */
+export type ParentAccountStatus =
+  | "pending_email_verification"
+  | "pending_setup"
+  | "pending_approval"
+  | "active"
+  | "inactive";
 
 /**
  * 직원 계정 상태 — 계정 없이 인사 정보만 등록한 직원은 "no_account",
@@ -290,26 +298,32 @@ export type AcademyRoleDoc = {
 };
 
 /**
- * 학원 학부모 — 초청 전 임의 문서 ID, 초청 발송 후 authUid 부여 및 문서 ID를 Auth uid로 이전.
- * 생성·수정·삭제는 Cloud Functions만 수행.
+ * 학원 학부모 앱 계정 — 문서 ID = Auth uid. 생성·수정·삭제는 Cloud Functions만 수행.
+ * 자녀 연결의 원본은 학생 `guardians[].linkedParentUid`이고 `linkedStudentIds`는 서버 트리거가 맞추는 요약.
  */
 export type AcademyParent = {
   attnId?: string;
+  loginId?: string;
   /** 인증 코드 수신용 연락 이메일 (자가 가입) */
   contactEmail?: string;
   contactEmailVerified?: boolean;
   email: string;
   displayName: string;
-  nextStudentSeq?: number;
   phone?: string | null;
-  emergencyContact?: string | null;
-  childrenCount: number;
   academyId: string;
-  status: ParentRegistrationStatus;
+  status: ParentAccountStatus;
   authUid?: string | null;
-  invitedAt?: Timestamp | null;
-  invitationExpiresAt?: Timestamp | null;
-  onboardingCompleteAt?: Timestamp | null;
+  authProvider?: "password" | "google";
+  signupSource?: "parent_link" | "parent_link_google" | "academy_created";
+  /** 연결 자녀 id(서버 트리거) */
+  linkedStudentIds?: string[];
+  /** 첫 연결(승인) 시각 — 생성 때 null. `pending_approval`인데 값이 있으면 "연결 해제됨" */
+  approvedAt?: Timestamp | null;
+  approvedByUid?: string | null;
+  /** 푸시 수신 상태 요약(`syncParentPushSubscription`) */
+  pushEnabled?: boolean;
+  pushTokenCount?: number;
+  pushSyncedAt?: Timestamp;
   activatedAt?: Timestamp | null;
   createdAt: Timestamp;
   updatedAt?: Timestamp;

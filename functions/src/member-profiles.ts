@@ -7,7 +7,12 @@ import {
   normalizeMemberLoginId,
   validateMemberLoginIdFormat,
 } from "./lib/member-login-id";
-import { parseOptionalKrPhone } from "./lib/kr-phone";
+import { digitsOnlyKrPhone, parseOptionalKrPhone } from "./lib/kr-phone";
+import {
+  claimParentPhoneIndexInTx,
+  parentHoldsPhoneIndex,
+  parentPhoneIndexRef,
+} from "./lib/parent-links";
 import { verifyLoginPasswordThrottled } from "./lib/login-throttle";
 import { randomAuthPassword } from "./lib/member-credentials";
 import { hasLoginSecret, passwordSecretFields } from "./lib/password-hash";
@@ -144,7 +149,7 @@ export const updateTeacherProfile = onCall(async (request) => {
   };
 });
 
-/** 학부모 — 본인 표시 이름 변경 */
+/** 학부모 — 본인 표시 이름·휴대폰 번호 변경(학원에 연결된 계정은 번호 색인도 함께 옮김) */
 export const updateParentProfile = onCall(async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
@@ -175,13 +180,33 @@ export const updateParentProfile = onCall(async (request) => {
   if (phone !== undefined) {
     patch.phone = phone;
   }
-  await ref.update(patch);
+  const db = admin.firestore();
+  const oldPhone = snap.get("phone");
+  const phoneChanged =
+    phone !== undefined &&
+    digitsOnlyKrPhone(phone ?? "") !== digitsOnlyKrPhone(typeof oldPhone === "string" ? oldPhone : "");
+  if (phoneChanged && (await parentHoldsPhoneIndex(db, academyId, oldPhone, uid))) {
+    // 연결된 적 있는 계정(번호 색인 보유) — 색인을 새 번호로 옮긴다. 새 번호를 다른 계정이 잡고 있으면 거부
+    if (!phone) {
+      throw new HttpsError("invalid-argument", "학원에 연결된 계정은 휴대폰 번호를 비울 수 없습니다.");
+    }
+    const oldIndexRef = parentPhoneIndexRef(db, academyId, oldPhone as string);
+    await db.runTransaction(async (tx) => {
+      const [oldIdx, current] = await Promise.all([tx.get(oldIndexRef), tx.get(ref)]);
+      const writeIndex = await claimParentPhoneIndexInTx(tx, db, academyId, phone, uid);
+      writeIndex();
+      if (oldIdx.exists && oldIdx.get("parentUid") === uid) tx.delete(oldIndexRef);
+      if (current.exists) tx.update(ref, patch);
+    });
+  } else {
+    await ref.update(patch);
+  }
   try {
     await admin.auth().updateUser(uid, { displayName });
   } catch {
     /* optional */
   }
-  await syncUserAdminProfile(admin.firestore(), uid);
+  await syncUserAdminProfile(db, uid);
 
   return {
     ok: true,

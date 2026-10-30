@@ -12,9 +12,13 @@ type TeacherStatus =
   | "active"
   | "inactive";
 
+/** 학부모 계정 상태(`lib/parent-links.ts` `ParentAccountStatus`) — 이메일 초청 상태는 2-C에서 폐지 */
 type ParentStatus =
-  | TeacherStatus
-  | "pending_email_verification";
+  | "pending_email_verification"
+  | "pending_setup"
+  | "pending_approval"
+  | "active"
+  | "inactive";
 
 const TEACHER_STATUS_PRIORITY: TeacherStatus[] = [
   "pending_setup",
@@ -27,10 +31,8 @@ const TEACHER_STATUS_PRIORITY: TeacherStatus[] = [
 const PARENT_STATUS_PRIORITY: ParentStatus[] = [
   "pending_email_verification",
   "pending_setup",
-  "pending_registration",
-  "invitation_sent",
+  "pending_approval",
   "inactive",
-  "invitation_needed",
 ];
 
 function teacherDocAcademyId(ref: admin.firestore.DocumentReference): string | null {
@@ -249,9 +251,22 @@ export const onTeacherMembershipWritten = onDocumentWritten(
   },
 );
 
+/**
+ * 학부모 문서 생성·삭제·상태(status)·authUid 변경 때만 미러·클레임을 다시 계산한다
+ * (연결 목록·푸시 수신 상태 갱신마다 클레임을 다시 쓰지 않게).
+ */
+function parentMembershipChanged(
+  before: admin.firestore.DocumentSnapshot | undefined,
+  after: admin.firestore.DocumentSnapshot | undefined,
+): boolean {
+  if (!before?.exists || !after?.exists) return Boolean(before?.exists || after?.exists);
+  return before.get("status") !== after.get("status") || before.get("authUid") !== after.get("authUid");
+}
+
 export const onParentMembershipWritten = onDocumentWritten(
   { document: "academies/{academyId}/parents/{parentId}", ...firestoreTriggerOpts },
   async (event) => {
+    if (!parentMembershipChanged(event.data?.before, event.data?.after)) return;
     const uids = authUidsFromMembershipChange(event.data?.before, event.data?.after);
     if (uids.length === 0) return;
 
