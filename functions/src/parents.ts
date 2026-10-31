@@ -106,6 +106,76 @@ function serializeStudentDocForCallable(
   };
 }
 
+/** 학부모 앱에 내려주는 반 정보 — 이름·수업 시간만(선생님·강의실·정원·반 id 없음) */
+type ParentClassSlot = { weekday: number; start: string; end: string };
+type ParentChildClass = { name: string; schedule: ParentClassSlot[] };
+
+const CLASS_TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function readParentClassSchedule(raw: unknown): ParentClassSlot[] {
+  if (!Array.isArray(raw)) return [];
+  const slots = raw.flatMap((x): ParentClassSlot[] => {
+    const s = x as Record<string, unknown> | null;
+    if (!s) return [];
+    const { weekday, start, end } = s;
+    if (
+      typeof weekday !== "number" || !Number.isInteger(weekday) || weekday < 1 || weekday > 7 ||
+      typeof start !== "string" || !CLASS_TIME_RE.test(start) ||
+      typeof end !== "string" || !CLASS_TIME_RE.test(end) ||
+      start >= end
+    ) {
+      return [];
+    }
+    return [{ weekday, start, end }];
+  });
+  return slots.sort((a, b) => a.weekday - b.weekday || a.start.localeCompare(b.start) || a.end.localeCompare(b.end));
+}
+
+function studentClassIds(d: QueryDocumentSnapshot): string[] {
+  const raw = d.get("classIds");
+  if (!Array.isArray(raw)) return [];
+  return (raw as unknown[]).filter((x): x is string => typeof x === "string" && x.length > 0 && !x.includes("/"));
+}
+
+/**
+ * 표시 자녀의 반(종강·없는 반 제외) — 반 문서는 한 번씩만 읽는다(반 id가 없으면 읽지 않음).
+ * 반 순서는 반 관리의 `sortOrder` → 이름.
+ */
+async function loadParentChildClasses(
+  db: admin.firestore.Firestore,
+  academyId: string,
+  docs: QueryDocumentSnapshot[],
+): Promise<Map<string, ParentChildClass[]>> {
+  const classIds = [...new Set(docs.flatMap(studentClassIds))];
+  const byClassId = new Map<string, { name: string; sortOrder: number; schedule: ParentClassSlot[] }>();
+  if (classIds.length) {
+    const snaps = await db.getAll(...classIds.map((id) => db.doc(`academies/${academyId}/classes/${id}`)));
+    for (const snap of snaps) {
+      if (!snap.exists || snap.get("status") === "ended") continue;
+      const name = typeof snap.get("name") === "string" ? (snap.get("name") as string).trim() : "";
+      if (!name) continue;
+      const order = snap.get("sortOrder");
+      byClassId.set(snap.id, {
+        name,
+        sortOrder: typeof order === "number" && Number.isFinite(order) ? order : Number.MAX_SAFE_INTEGER,
+        schedule: readParentClassSchedule(snap.get("schedule")),
+      });
+    }
+  }
+  const out = new Map<string, ParentChildClass[]>();
+  for (const d of docs) {
+    const list = studentClassIds(d)
+      .flatMap((id) => {
+        const c = byClassId.get(id);
+        return c ? [c] : [];
+      })
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, "ko"))
+      .map((c) => ({ name: c.name, schedule: c.schedule }));
+    out.set(d.id, list);
+  }
+  return out;
+}
+
 const enforceAppCheckOnParentState = process.env.ENFORCE_APP_CHECK === "1";
 
 export const getParentActivationState = onCall(
@@ -177,13 +247,14 @@ export const listParentChildrenStudents = onCall(
       return status === "enrolled" || status === "on_leave";
     });
     const pinRefs = visibleDocs.map((d) => db.doc(studentCheckInSecretPath(academyId, d.id)));
-    const [pinSnaps, invoiceSummaries] = await Promise.all([
+    const [pinSnaps, invoiceSummaries, childClasses] = await Promise.all([
       pinRefs.length ? db.getAll(...pinRefs) : Promise.resolve([]),
       loadNextDueInvoiceSummaries(
         db,
         academyId,
         visibleDocs.filter((d) => isBillableStudent(d.data())).map((d) => ({ id: d.id, data: d.data() })),
       ),
+      loadParentChildClasses(db, academyId, visibleDocs),
     ]);
     const students = visibleDocs.map((d, i) => {
       const pinSnap = pinSnaps[i];
@@ -193,6 +264,8 @@ export const listParentChildrenStudents = onCall(
         ...serializeStudentDocForCallable(d, { hasCheckInPin }),
         // 매월 지정일 납부 학생의 다음 납부 청구서(조정 반영 금액·납부 여부)
         tuitionInvoice: invoiceSummaries.get(d.id) ?? null,
+        // 다니는 반(종강 제외) — 이름·수업 시간만
+        classes: childClasses.get(d.id) ?? [],
       };
     });
 

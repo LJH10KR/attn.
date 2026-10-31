@@ -20,7 +20,13 @@ import {
 import { academyPaymentsPath, academyStaffPath, COLLECTIONS } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
 
-export type AcademyMenuStat = { summary?: string; detail?: string; badge?: number };
+export type AcademyMenuStat = {
+  summary?: string;
+  detail?: string;
+  badge?: number;
+  /** 메뉴 주소 뒤에 붙일 쿼리(예: 승인 대기가 있으면 `view=pending`) */
+  query?: string;
+};
 export type AcademyMenuStats = Partial<Record<AcademyPermission, AcademyMenuStat>>;
 
 type Loader = (academyId: string) => Promise<AcademyMenuStats>;
@@ -36,8 +42,14 @@ const LOADERS: Partial<Record<AcademyPermission, Loader>> = {
         query(parents, where("status", "==", "pending_approval"), where("approvedAt", "==", null)),
       ),
     ]);
+    const badge = pending.data().count;
     return {
-      "operations.parents": { summary: `연결 ${linked.data().count}명`, badge: pending.data().count },
+      // 승인 대기가 있으면 학부모 관리의 승인 대기 탭으로 바로 들어간다
+      "operations.parents": {
+        summary: `연결 ${linked.data().count}명`,
+        badge,
+        ...(badge > 0 ? { query: "view=pending" } : {}),
+      },
     };
   },
   // 숫자는 재원 기준, 휴원·미등록·퇴원은 보조 줄에 따로(0이면 생략)

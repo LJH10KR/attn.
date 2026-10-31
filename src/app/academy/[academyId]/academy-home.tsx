@@ -22,7 +22,7 @@ import {
   where,
 } from "firebase/firestore";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { academyMenuPath } from "@/lib/academy/academy-routes";
 import type { AcademyPermission } from "@/lib/academy/permissions";
 import { SlideSwitch } from "@/components/ui/slide-switch";
@@ -173,6 +173,20 @@ export function AcademyHome() {
     null,
   );
   const [heatmapError, setHeatmapError] = useState<string | null>(null);
+  // "가입 승인 대기 학부모" 칸은 학부모 관리 권한이 있을 때만 승인 대기 목록으로 이어진다(2-G 보강 B5) —
+  // 이 숫자는 원생 권한만 가진 역할에게도 보이므로 링크를 늘 걸면 "권한 없음"으로 간다
+  const canParents = can("operations.parents");
+  const heatmapLinked = useMemo(
+    () =>
+      heatmapItems && canParents
+        ? heatmapItems.map((item) =>
+            item.id === "parents-pending"
+              ? { ...item, href: `${academyMenuPath(academyId, "operations.parents")}?view=pending` }
+              : item,
+          )
+        : null,
+    [heatmapItems, canParents, academyId],
+  );
 
   const showBack = searchParams.get("from") === "owner";
 
@@ -393,7 +407,7 @@ export function AcademyHome() {
                     {heatmapError}
                   </p>
                 ) : null}
-                <AcademyTreemap items={heatmapItems} embedded footerOutside />
+                <AcademyTreemap items={heatmapLinked ?? heatmapItems} embedded footerOutside />
               </>
             )}
           </div>

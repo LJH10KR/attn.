@@ -19,6 +19,13 @@ import {
   type StudentPaymentRow,
   type StudentSessionLogRow,
 } from "@/lib/academy/student-detail/billing-source";
+import {
+  INVOICE_DUE_STATE_BADGE_CLASS,
+  INVOICE_DUE_STATE_LABELS,
+  invoiceAmount,
+  invoiceDueState,
+} from "@/lib/academy/student-detail/invoice-due-state";
+import { seoulDateString } from "@/lib/academy/attendance-records";
 import type { StudentVM } from "@/lib/academy/student-row";
 import type { StudentAccess } from "@/lib/academy/use-student-access";
 import type { AcademyPaymentStatus } from "@/lib/firebase/attn-schema";
@@ -245,19 +252,22 @@ export function StudentBillingTab({
             value={invoices}
             empty="청구서 기록이 없습니다."
             render={(r) => {
-              const amount =
-                r.finalAmount ?? (student.tuitionAmount != null ? student.tuitionAmount + r.adjustmentTotal : null);
+              const amount = invoiceAmount(r, student.tuitionAmount);
+              // 미납부는 납부일이 지났으면 "미납", 당일·전이면 "납부 예정"(보호자 상세 합산과 같은 판단)
+              const due = invoiceDueState(r, seoulDateString());
               return (
                 <li key={r.period} className="flex items-center justify-between gap-2 py-1.5 text-xs">
                   <span className="text-foreground">{formatInvoicePeriod(r.period)}</span>
                   <span className="flex items-center gap-2">
                     {amount != null ? <span className="text-neutral-700">{won(amount)}</span> : null}
                     <span
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                        r.status === "paid" ? "bg-emerald-500/15 text-emerald-900" : "bg-amber-500/20 text-amber-950"
-                      }`}
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${INVOICE_DUE_STATE_BADGE_CLASS[due]}`}
                     >
-                      {r.status === "paid" ? (r.paidMethod === "card" ? "카드 납부" : "납부 완료") : "미납"}
+                      {due === "paid"
+                        ? r.paidMethod === "card"
+                          ? "카드 납부"
+                          : "납부 완료"
+                        : INVOICE_DUE_STATE_LABELS[due]}
                     </span>
                   </span>
                 </li>

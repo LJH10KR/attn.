@@ -4,7 +4,7 @@
  * 연결 → active·parentUids·approvedAt·결제 parentUids, 해제 → pending_approval(approvedAt 유지)·결제에서 빠짐,
  * 직접 만들기 → 첫 로그인 → active, 연결 대기 비밀번호 초기화, 비활성 계정 푸시 제외·자동 전환과 겹쳐도 inactive 유지,
  * 이메일 인증 전·비활성 계정 연결 거부, 연결된 보호자 항목 삭제 거부, 계정 삭제(원생 유지·색인 해제),
- * 학생 삭제 시 결제 parentUids 유지, 권한 없는 직원 거부,
+ * 학생 삭제 시 결제 parentUids 유지, 권한 없는 직원 거부, 학부모 앱 자녀 반 정보(이름·시간만, 종강 제외),
  * 연결 전부 실패 시 새로 잡은 색인 되돌림(기존 색인·동시 연결 성공 시 유지), 원생 저장 시 보호자 생략 = 변경 없음을 확인한다.
  */
 import assert from "node:assert/strict";
@@ -180,11 +180,29 @@ await call("saveStudent", s3Base);
 assert.deepEqual((await studentDoc(s3)).guardians, st3.guardians, "guardians 생략 = 변경 없음");
 assert.deepEqual((await studentDoc(s3)).parentUids, [mom.uid]);
 
-// 연결된 학부모 앱에서 자녀 목록
+// 반 준비: 운영중 A반(시간 2칸, 순서 뒤)·준비중 B반(순서 앞)·종강 C반 — 형은 셋 다, 동생은 없음
+const clsA = (await call("saveClass", {
+  academyId: A, name: "A반", status: "active",
+  schedule: [{ weekday: 3, start: "16:00", end: "17:00" }, { weekday: 1, start: "16:00", end: "17:00" }],
+})).classId;
+const clsB = (await call("saveClass", { academyId: A, name: "B반", status: "preparing" })).classId;
+const clsC = (await call("saveClass", { academyId: A, name: "C반", status: "active" })).classId;
+for (const c of [clsA, clsB, clsC]) await call("setClassStudents", { academyId: A, classId: c, add: [s1] });
+await call("saveClass", { academyId: A, classId: clsC, status: "ended" });
+await call("reorderClasses", { academyId: A, orderedIds: [clsB, clsA, clsC] });
+
+// 연결된 학부모 앱에서 자녀 목록 — 반 이름·수업 시간만(종강 반 제외, 반 순서대로)
 await asParent("momseven", "pw123456");
 const momList = await call("listParentChildrenStudents", { academyId: A });
 assert.equal(momList.accountStatus, "active");
 assert.equal(momList.students.length, 3);
+const listedS1 = momList.students.find((s) => s.id === s1);
+assert.deepEqual(listedS1.classes, [
+  { name: "B반", schedule: [] },
+  { name: "A반", schedule: [{ weekday: 1, start: "16:00", end: "17:00" }, { weekday: 3, start: "16:00", end: "17:00" }] },
+], "종강 반 제외·반 순서·요일 순");
+for (const c of listedS1.classes) assert.deepEqual(Object.keys(c).sort(), ["name", "schedule"], "반 id·선생님·강의실·정원 없음");
+assert.deepEqual(momList.students.find((s) => s.id === s2).classes, [], "반 없는 자녀는 빈 목록");
 
 // --- 해제: 연결만 지우고 계정·보호자 연락처는 남김, 결제 parentUids에서 빠짐 ---
 await asOwner();

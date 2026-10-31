@@ -388,6 +388,7 @@ export function AcademyClassesScreen() {
           onSaveRoomsAction={saveRooms}
           roomUsage={roomUsage}
           candidates={teachers.candidates}
+          candidatesLoading={teachers.loading}
           candidatesError={teachers.error}
           onReloadCandidatesAction={teachers.reload}
           escapeBlocked={studentOpen}

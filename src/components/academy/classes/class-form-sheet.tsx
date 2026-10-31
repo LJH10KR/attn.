@@ -54,6 +54,8 @@ type ClassFormSheetProps = {
   /** 강의실 삭제 확인에 쓰는 사용 반 수 */
   roomUsage: Record<string, number>;
   candidates: ClassTeacherCandidate[];
+  /** 후보를 읽는 중 — 그동안은 "알 수 없는 계정" 줄을 만들지 않는다 */
+  candidatesLoading: boolean;
   candidatesError: string | null;
   onReloadCandidatesAction: () => void;
   /** 학생 상세 시트가 위에 열려 있으면 Esc 무시 */
@@ -74,6 +76,7 @@ export function ClassFormSheet({
   onSaveRoomsAction,
   roomUsage,
   candidates,
+  candidatesLoading,
   candidatesError,
   onReloadCandidatesAction,
   escapeBlocked = false,
@@ -108,8 +111,12 @@ export function ClassFormSheet({
   const roomMissing = Boolean(roomId && !roomIds.has(roomId));
   const baseTeachers = useMemo(() => new Set(base?.teacherUids ?? []), [base]);
   const candidateUids = useMemo(() => new Set(candidates.map((c) => c.uid)), [candidates]);
-  /** 반에 있지만 후보에 없는 uid(지운 계정 등) — 뺄 수만 있음 */
-  const unknownUids = (base?.teacherUids ?? []).filter((u) => !candidateUids.has(u));
+  /**
+   * 반에 있지만 후보에 없는 uid(지운 계정 등) — 뺄 수만 있음.
+   * 후보를 읽는 중·읽기 실패 때는 판단할 수 없으므로 만들지 않는다(기존 선생님이 잠깐 "알 수 없는 계정"으로 보이지 않게).
+   */
+  const candidatesReady = !candidatesLoading && !candidatesError;
+  const unknownUids = candidatesReady ? (base?.teacherUids ?? []).filter((u) => !candidateUids.has(u)) : [];
 
   const toggleTeacher = (uid: string) => {
     setTeacherUids((prev) => (prev.includes(uid) ? prev.filter((u) => u !== uid) : [...prev, uid]));
@@ -280,6 +287,10 @@ export function ClassFormSheet({
                     다시 시도
                   </button>
                 </div>
+              ) : candidatesLoading ? (
+                <p className="rounded-2xl border border-neutral-200/80 bg-white/35 px-3 py-2.5 text-xs text-neutral-500">
+                  선생님 목록을 불러오는 중…
+                </p>
               ) : null}
               <ul className="space-y-1.5">
                 {candidates.map((c) => {

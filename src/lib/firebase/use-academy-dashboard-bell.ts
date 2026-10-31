@@ -31,7 +31,17 @@ function inviteExpired(
   return exp.toMillis() <= now;
 }
 
-function mapInboxDoc(id: string, data: Record<string, unknown>, now: number): DashboardNotificationRow[] {
+type BellLinks = {
+  /** 학부모 승인 대기 바로 가기(학부모 관리 `?view=pending`) — `operations.parents` 권한이 있을 때만 */
+  parentsPendingHref?: string | null;
+};
+
+function mapInboxDoc(
+  id: string,
+  data: Record<string, unknown>,
+  now: number,
+  links: BellLinks,
+): DashboardNotificationRow[] {
   if (data.schemaVersion !== ACADEMY_ADMIN_INBOX_SCHEMA_VERSION) return [];
 
   const kind = data.kind as AcademyAdminInboxDoc["kind"];
@@ -51,6 +61,7 @@ function mapInboxDoc(id: string, data: Record<string, unknown>, now: number): Da
         id,
         title: `학부모 가입 승인 대기: ${name}`,
         detail: "학부모 관리에서 자녀를 연결해 주세요.",
+        ...(links.parentsPendingHref ? { href: links.parentsPendingHref, hrefLabel: "승인하러 가기" } : {}),
       },
     ];
   }
@@ -141,7 +152,8 @@ const BELL_EXPIRY_TICK_MS = 60_000;
  * 학원 대시보드 알림벨 — `adminInbox` (Functions 유지) 기반.
  * Firestore는 마운트·탭 복귀·`refresh()`(모달 열기 등) 시에만 조회합니다.
  */
-export function useAcademyDashboardBell(academyId: string | null) {
+export function useAcademyDashboardBell(academyId: string | null, links: BellLinks = {}) {
+  const parentsPendingHref = links.parentsPendingHref ?? null;
   const [inboxDocs, setInboxDocs] = useState<{ id: string; data: Record<string, unknown> }[]>(
     [],
   );
@@ -199,11 +211,11 @@ export function useAcademyDashboardBell(academyId: string | null) {
     const now = nowMs;
     const out: DashboardNotificationRow[] = [];
     for (const d of inboxDocs) {
-      out.push(...mapInboxDoc(d.id, d.data, now));
+      out.push(...mapInboxDoc(d.id, d.data, now, { parentsPendingHref }));
     }
     out.sort((a, b) => a.title.localeCompare(b.title, "ko"));
     return out;
-  }, [inboxDocs, nowMs]);
+  }, [inboxDocs, nowMs, parentsPendingHref]);
 
   rawItemsRef.current = rawItems;
 

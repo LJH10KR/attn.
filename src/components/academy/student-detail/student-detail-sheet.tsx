@@ -43,7 +43,18 @@ export const STUDENT_STATUS_BADGE_CLASS: Record<StudentStatus, string> = {
   withdrawn: "bg-neutral-500/15 text-neutral-700",
 };
 
-type StudentLoad = { state: "loading" } | { state: "ok"; student: StudentVM } | { state: "missing" };
+type StudentLoad =
+  | { state: "loading" }
+  | { state: "ok"; student: StudentVM }
+  /** 문서 없음·읽기 권한 없음 — 존재 여부를 드러내지 않는 같은 문구 */
+  | { state: "missing" }
+  /** 네트워크 등 그 밖의 읽기 오류 — 다시 시도 */
+  | { state: "error" };
+
+/** 권한 거부·문서 없음은 "missing", 그 밖의 오류는 "error"(다시 시도) */
+function loadFailureState(e: unknown): "missing" | "error" {
+  return e && typeof e === "object" && "code" in e && e.code === "permission-denied" ? "missing" : "error";
+}
 
 export type StudentDetailSheetProps = {
   academyId: string;
@@ -76,6 +87,8 @@ export function StudentDetailSheet({
   useBodyScrollLock(true);
   const access = useStudentAccess(permissions);
   const [load, setLoad] = useState<StudentLoad>({ state: "loading" });
+  /** 읽기 오류 뒤 "다시 시도" */
+  const [loadKey, setLoadKey] = useState(0);
   const [note, setNote] = useState<StudentNoteState | "loading">("loading");
   const [noteKey, setNoteKey] = useState(0);
   const [visited, setVisited] = useState<Set<StudentDetailTab>>(() => new Set(["info"]));
@@ -106,17 +119,17 @@ export function StudentDetailSheet({
         if (cancelled) return;
         apply(snap);
         if (!snap.exists()) return;
-        unsubscribe = onSnapshot(ref, apply, () => setLoad({ state: "missing" }));
+        unsubscribe = onSnapshot(ref, apply, (e) => setLoad({ state: loadFailureState(e) }));
       },
-      () => {
-        if (!cancelled) setLoad({ state: "missing" });
+      (e: unknown) => {
+        if (!cancelled) setLoad({ state: loadFailureState(e) });
       },
     );
     return () => {
       cancelled = true;
       unsubscribe?.();
     };
-  }, [academyId, studentId]);
+  }, [academyId, studentId, loadKey]);
 
   const { readNotes } = access;
   useEffect(() => {
@@ -346,6 +359,26 @@ export function StudentDetailSheet({
             ) : null}
             {load.state === "loading" ? (
               <p className="py-12 text-center text-sm text-neutral-400">불러오는 중…</p>
+            ) : load.state === "error" ? (
+              <div className="py-12 text-center">
+                <p className="break-keep text-sm text-red-800">원생 정보를 불러오지 못했습니다.</p>
+                <div className="mt-4 flex justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setLoadKey((k) => k + 1)}
+                    className="rounded-2xl bg-[#222] px-4 py-2 text-sm font-medium text-white"
+                  >
+                    다시 시도
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onCloseAction}
+                    className="rounded-2xl border border-neutral-300/80 px-4 py-2 text-sm"
+                  >
+                    닫기
+                  </button>
+                </div>
+              </div>
             ) : load.state === "missing" || !student ? (
               <div className="py-12 text-center">
                 <p className="break-keep text-sm text-neutral-600">원생 정보를 찾을 수 없거나 볼 권한이 없습니다.</p>

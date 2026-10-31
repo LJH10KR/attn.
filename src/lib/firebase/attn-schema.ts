@@ -421,9 +421,6 @@ export type AcademyStudent = {
   updatedAt?: Timestamp;
 };
 
-/** 학원이 학부모당 등록 가능한 학생(자녀) 상한 */
-export const MAX_STUDENTS_PER_PARENT = 20;
-
 /** `academies/{academyId}/meta/tuitionSettings` — 원장이 설정하는 납부 안내 정보 */
 export const ACADEMY_TUITION_SETTINGS_DOC_ID = "tuitionSettings" as const;
 

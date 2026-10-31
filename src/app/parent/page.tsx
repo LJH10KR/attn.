@@ -1,14 +1,10 @@
 ﻿"use client";
 
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, setDoc, Timestamp } from "firebase/firestore";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  docToStudentRow,
-  type StudentRowVM,
-} from "@/components/academy/academy-student-panel";
 import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardNotificationsModal } from "@/components/dashboard/dashboard-notifications-modal";
@@ -24,10 +20,14 @@ import {
   type PaymentReminderPayload,
 } from "@/components/parent/payment-reminder-modal";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
+import { academyTuitionSettingsPath } from "@/lib/firebase/attn-schema";
 import {
-  academyTuitionSettingsPath,
-  type TuitionInvoiceSummary,
-} from "@/lib/firebase/attn-schema";
+  compareParentChildren,
+  parentChildClassLine,
+  parentChildFromPayload,
+  type ParentChildPayload,
+  type ParentChildVM,
+} from "@/lib/parent/parent-child";
 import {
   getFirebaseAuth,
   getFirebaseDb,
@@ -50,10 +50,6 @@ const glassCard = "glass-card";
 const PAYMENT_RESULT_STORAGE_KEY = "attn_payment_result";
 const PAYMENT_RESULT_TTL_MS = 5 * 60 * 1000;
 
-function sortByName(a: StudentRowVM, b: StudentRowVM): number {
-  return a.name.localeCompare(b.name, "ko");
-}
-
 function isRetryableCallableAuthError(err: unknown): boolean {
   if (!(err instanceof FirebaseError)) return false;
   return (
@@ -61,39 +57,6 @@ function isRetryableCallableAuthError(err: unknown): boolean {
     err.code === "functions/permission-denied"
   );
 }
-
-type CallableStudentPayload = {
-  id: string;
-  name?: string;
-  gradeLabel?: string;
-  status?: string;
-  billable?: boolean;
-  phone?: string;
-  createdAtMillis?: number | null;
-  hasCheckInPin?: boolean;
-  tuitionDueDayOfMonth?: number | null;
-  tuitionAmount?: number | null;
-  weeklySessionCount?: number | null;
-  pricePerSession?: number | null;
-  sessionBalance?: number | null;
-  extraSessionDates?: string[];
-  hasPendingPaymentReminder?: boolean;
-  tuitionInvoice?: TuitionInvoiceSummary | null;
-};
-
-type ParentStudentRow = StudentRowVM & {
-  hasCheckInPin?: boolean;
-  /** 청구 대상(재원) — 휴원 자녀는 결제 카드를 숨김 */
-  billable?: boolean;
-  tuitionDueDayOfMonth?: number | null;
-  tuitionAmount?: number | null;
-  tuitionInvoice?: TuitionInvoiceSummary | null;
-  weeklySessionCount?: number | null;
-  pricePerSession?: number | null;
-  sessionBalance?: number | null;
-  extraSessionDates?: string[];
-  hasPendingPaymentReminder?: boolean;
-};
 
 type TuitionSettingsState = {
   kakaoPayLink?: string;
@@ -106,24 +69,9 @@ type TuitionSettingsState = {
 type ParentListPayload = {
   /** 서버가 읽은 계정 상태 — `pending_approval`이면 연결 대기 화면(토큰 클레임이 예전 값이어도) */
   accountStatus?: "active" | "pending_approval";
-  students?: CallableStudentPayload[];
+  students?: ParentChildPayload[];
   kiosk?: { requireStudentCheckInPin?: boolean };
 };
-
-function studentRowFromCallablePayload(
-  s: CallableStudentPayload,
-): StudentRowVM {
-  const createdAt =
-    typeof s.createdAtMillis === "number"
-      ? Timestamp.fromMillis(s.createdAtMillis)
-      : undefined;
-  return docToStudentRow(s.id, {
-    name: s.name ?? "",
-    gradeLabel: s.gradeLabel ?? "",
-    phone: s.phone ?? "",
-    ...(createdAt ? { createdAt } : {}),
-  });
-}
 
 export default function ParentDashboardPage() {
   const router = useRouter();
@@ -136,7 +84,7 @@ export default function ParentDashboardPage() {
   const [memberPhone, setMemberPhone] = useState<string | null>(null);
   const [googleLinked, setGoogleLinked] = useState(false);
   const [googleEmail, setGoogleEmail] = useState<string | null>(null);
-  const [students, setStudents] = useState<StudentRowVM[]>([]);
+  const [students, setStudents] = useState<ParentChildVM[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
   const { logout: onLogout, logoutBusy, logoutModal } = useRoleLogout({
@@ -152,9 +100,7 @@ export default function ParentDashboardPage() {
   /** 승인 대기·연결 대기(연결된 자녀 0명) — 자녀 목록 대신 안내 화면 */
   const [linkWaiting, setLinkWaiting] = useState(false);
   const [kioskRequirePin, setKioskRequirePin] = useState(false);
-  const [studentsWithPinMeta, setStudentsWithPinMeta] = useState<
-    ParentStudentRow[]
-  >([]);
+  const [studentsWithPinMeta, setStudentsWithPinMeta] = useState<ParentChildVM[]>([]);
   const [tuitionSettings, setTuitionSettings] =
     useState<TuitionSettingsState>(null);
   const [reminderPayload, setReminderPayload] = useState<PaymentReminderPayload | null>(null);
@@ -289,20 +235,8 @@ export default function ParentDashboardPage() {
           const rawList = Array.isArray(payload?.students)
             ? payload.students
             : [];
-          const list = rawList.map((s) => ({
-            ...studentRowFromCallablePayload(s),
-            hasCheckInPin: s.hasCheckInPin === true,
-            billable: s.billable !== false,
-            tuitionDueDayOfMonth: s.tuitionDueDayOfMonth ?? null,
-            tuitionAmount: typeof s.tuitionAmount === "number" ? s.tuitionAmount : null,
-            tuitionInvoice: s.tuitionInvoice ?? null,
-            weeklySessionCount: typeof s.weeklySessionCount === "number" ? s.weeklySessionCount : null,
-            pricePerSession: typeof s.pricePerSession === "number" ? s.pricePerSession : null,
-            sessionBalance: typeof s.sessionBalance === "number" ? s.sessionBalance : null,
-            extraSessionDates: Array.isArray(s.extraSessionDates) ? s.extraSessionDates : [],
-            hasPendingPaymentReminder: s.hasPendingPaymentReminder === true,
-          }));
-          list.sort(sortByName);
+          const list = rawList.map((s) => parentChildFromPayload(s, { withPaymentReminder: true }));
+          list.sort(compareParentChildren);
           setLinkWaiting(payload?.accountStatus === "pending_approval");
           setStudents(list);
           setStudentsWithPinMeta(list);
@@ -452,19 +386,9 @@ export default function ParentDashboardPage() {
       }
       const payload = listRes.data as ParentListPayload;
       const rawList = Array.isArray(payload?.students) ? payload.students : [];
-      const list = rawList.map((s) => ({
-        ...studentRowFromCallablePayload(s),
-        hasCheckInPin: s.hasCheckInPin === true,
-        billable: s.billable !== false,
-        tuitionDueDayOfMonth: s.tuitionDueDayOfMonth ?? null,
-        tuitionAmount: typeof s.tuitionAmount === "number" ? s.tuitionAmount : null,
-        tuitionInvoice: s.tuitionInvoice ?? null,
-        weeklySessionCount: typeof s.weeklySessionCount === "number" ? s.weeklySessionCount : null,
-        pricePerSession: typeof s.pricePerSession === "number" ? s.pricePerSession : null,
-        sessionBalance: typeof s.sessionBalance === "number" ? s.sessionBalance : null,
-        extraSessionDates: Array.isArray(s.extraSessionDates) ? s.extraSessionDates : [],
-      }));
-      list.sort(sortByName);
+      // 새로고침 경로는 납부 안내 자동 창 값을 넣지 않는다(기존 동작 — 창이 다시 뜨지 않게)
+      const list = rawList.map((s) => parentChildFromPayload(s, { withPaymentReminder: false }));
+      list.sort(compareParentChildren);
       setLinkWaiting(payload?.accountStatus === "pending_approval");
       setStudents(list);
       setStudentsWithPinMeta(list);
@@ -702,6 +626,15 @@ export default function ParentDashboardPage() {
                     · {s.gradeLabel || "학년 미입력"}
                   </span>
                 </p>
+                {s.classes.length > 0 ? (
+                  <ul className="mt-0.5 space-y-0.5">
+                    {s.classes.map((c, i) => (
+                      <li key={`${c.name}-${i}`} className="break-keep text-xs text-neutral-600 dark:text-neutral-400">
+                        {parentChildClassLine(c)}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
                 {kioskRequirePin ? (
                   <ParentCheckInPinCard
                     academyId={academyId!}

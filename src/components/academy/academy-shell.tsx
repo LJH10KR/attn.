@@ -162,7 +162,12 @@ export function AcademyShell({ children }: { children: ReactNode }) {
     dismissOne: dismissBellOne,
     dismissAllVisible: dismissBellAll,
     refresh: refreshBell,
-  } = useAcademyDashboardBell(actor && !staffWithoutMenus && canBell ? academyId : null);
+  } = useAcademyDashboardBell(actor && !staffWithoutMenus && canBell ? academyId : null, {
+    // 학부모 승인 대기 알림의 바로 가기 — 학부모 관리 권한이 있을 때만
+    parentsPendingHref: can("operations.parents")
+      ? `${academyPath(academyId, "operations/parents")}?view=pending`
+      : null,
+  });
 
   const { logout, logoutBusy, logoutModal } = useRoleLogout({
     redirectTo: "/login",

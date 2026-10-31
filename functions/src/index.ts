@@ -178,7 +178,6 @@ export {
   completeMemberFirstLogin,
   regenerateMemberTempPassword,
   resetMemberPassword,
-  listAcademyIssuedAccounts,
 } from "./member-auth";
 export {
   getParentSignupAcademyInfo,
