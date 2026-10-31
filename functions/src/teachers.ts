@@ -1,12 +1,11 @@
 import * as admin from "firebase-admin";
-import { FieldValue, Timestamp } from "firebase-admin/firestore";
+import { FieldValue } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { reconcileUserActivationMirror } from "./user-activation-mirror";
 import { detachStaffAccount } from "./lib/staff-account";
 import { assertPermission, type AcademyActor } from "./lib/academy-access";
 import { normalizePermissionList } from "./lib/permissions";
-import { displayGrade, gradeLabel, normalizeStudentStatus } from "./lib/student-profile";
 import { staffAccountChangeViolation } from "./lib/role-policy";
 import { stripTeacherFromClasses } from "./lib/class-teachers";
 import {
@@ -14,10 +13,10 @@ import {
   deleteMemberLoginSecrets,
   purgeUserFirestoreData,
 } from "./lib/firestore-cleanup";
-import { readUidList } from "./lib/parent-recipients";
 
 /**
- * 직원 계정 — 활성 상태 조회, 담당 학생(반 `teacherUids`) 목록, 승인(활성)·비활성·삭제.
+ * 직원 계정 — 활성 상태 조회, 승인(활성)·비활성·삭제.
+ * 담당 학생 목록은 선생님 화면이 클라이언트 쿼리(`students where teacherUids array-contains 본인`, 규칙 허용)로 읽는다.
  * 계정 삭제는 사용 중·비활성이면 인사 기록을 계정 없는 직원으로 남기고, 첫 로그인 전·승인 대기·게스트는 전체 삭제.
  * 계정 만들기는 `staff-invites.ts`(초대 링크·직접 만들어 주기), 인사 정보는 `staff.ts`.
  */
@@ -83,53 +82,6 @@ export const getTeacherActivationState = onCall(
       primaryStatus: teacher.primaryStatus as TeacherStatus | null,
       primaryAcademyId: teacher.primaryAcademyId,
     };
-  },
-);
-
-/**
- * 활성 선생님의 담당 학생(반에서 계산한 `teacherUids`에 본인) 목록.
- * 2-D 규칙 테스트에서 같은 조건의 클라이언트 list 쿼리가 통과함 — 2-F "내 반"에서 클라이언트 쿼리로 바꾸면 삭제 판단.
- */
-export const listTeacherAssignedStudents = onCall(
-  { cors: true, enforceAppCheck: enforceAppCheckOnTeacherState },
-  async (request) => {
-    if (!request.auth?.uid) {
-      throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
-    }
-    const uid = request.auth.uid;
-    const academyId =
-      typeof request.data?.academyId === "string" ? request.data.academyId.trim() : "";
-    if (!academyId) {
-      throw new HttpsError("invalid-argument", "학원 ID가 필요합니다.");
-    }
-
-    const db = admin.firestore();
-    const [teacherSnap, studentsSnap] = await Promise.all([
-      db.doc(`academies/${academyId}/staff/${uid}`).get(),
-      db.collection(`academies/${academyId}/students`).where("teacherUids", "array-contains", uid).get(),
-    ]);
-    if (!teacherSnap.exists || teacherSnap.get("status") !== "active") {
-      throw new HttpsError("permission-denied", "이 학원의 활성 선생님만 학생 목록을 조회할 수 있습니다.");
-    }
-
-    const students = studentsSnap.docs.map((d) => {
-      const data = d.data();
-      const createdAt = data.createdAt as Timestamp | undefined;
-      const createdAtMillis =
-        createdAt && typeof createdAt.toMillis === "function" ? createdAt.toMillis() : null;
-      return {
-        id: d.id,
-        name: typeof data.name === "string" ? data.name : "",
-        gradeLabel: gradeLabel(displayGrade(data.grade, data.gradeYear)),
-        status: normalizeStudentStatus(data.status),
-        phone: typeof data.phone === "string" ? data.phone : "",
-        classIds: readUidList(data.classIds),
-        teacherUids: readUidList(data.teacherUids),
-        createdAtMillis,
-      };
-    });
-
-    return { ok: true as const, students };
   },
 );
 

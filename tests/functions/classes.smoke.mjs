@@ -2,7 +2,8 @@
  * 반 Callable·트리거 통합 스모크 — `npm run test:functions` (Auth·Firestore·Functions 에뮬레이터)
  * saveClass 검증·권한, 원생 배정 → classIds·teacherUids, 정원 초과 표시, add·remove 중복 거부,
  * 선생님 변경 트리거(학생 트리거 3개는 parentUids·잔여 그대로라 바로 끝남), 종강 → 제외·추가 거부·해제 허용, 재개 → 복구,
- * 삭제된 강의실(바뀌지 않으면 통과, 새로 고르면 거부), 순서, 이력, 담당 학생 목록·출결 알림(teacherUids),
+ * 삭제된 강의실(바뀌지 않으면 통과, 새로 고르면 거부), 순서, 이력, 담당 학생·내 반 클라이언트 쿼리·출결 알림(teacherUids),
+ * 수정은 보낸 필드만(빠진 필드 유지·강의실/정원 null = 비움·teacherUids [] = 모두 제거·종강 반 status 생략 = 종강 유지),
  * 배정 해제와 선생님 변경이 겹쳐도 빠진 학생에 예전 선생님이 남지 않음, 직원 계정 삭제 → 반·학생에서 빠짐,
  * 반 삭제 → classIds 정리를 확인한다.
  */
@@ -12,6 +13,14 @@ import { getAuth as adminAuth } from "firebase-admin/auth";
 import { getFirestore as adminDb, Timestamp } from "firebase-admin/firestore";
 import { initializeApp } from "firebase/app";
 import { connectAuthEmulator, getAuth, signInWithEmailAndPassword, signOut } from "firebase/auth";
+import {
+  collection,
+  connectFirestoreEmulator,
+  getDocs,
+  getFirestore,
+  query,
+  where,
+} from "firebase/firestore";
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from "firebase/functions";
 
 const PROJECT = "demo-attn";
@@ -49,6 +58,12 @@ const auth = getAuth(app);
 connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
 const fns = getFunctions(app, "asia-northeast3");
 connectFunctionsEmulator(fns, "127.0.0.1", 5001);
+const clientDb = getFirestore(app);
+connectFirestoreEmulator(clientDb, "127.0.0.1", 8080);
+/** 선생님 화면과 같은 클라이언트 쿼리(보안 규칙을 거침) */
+const myTaughtStudents = async (uid) =>
+  (await getDocs(query(collection(clientDb, `academies/${A}/students`), where("teacherUids", "array-contains", uid))))
+    .docs.map((d) => ({ id: d.id, ...d.data() }));
 const call = (name, data) => httpsCallable(fns, name)(data).then((r) => r.data);
 const studentDoc = async (id) => (await db.doc(`academies/${A}/students/${id}`).get()).data();
 const classDoc = async (id) => (await db.doc(`academies/${A}/classes/${id}`).get());
@@ -148,11 +163,15 @@ const addedHistory = (await history(cA)).find((h) => h.type === "students_added"
 assert.deepEqual(sorted(addedHistory.studentIds), sorted([s1, s2, s3]));
 assert.equal(addedHistory.actorUid, classesStaff.uid);
 
-// --- 담당 학생 목록·출결 알림(권한 없는 선생님 = teacherUids) ---
+// --- 담당 학생 목록(클라이언트 쿼리·규칙)·출결 알림(권한 없는 선생님 = teacherUids) ---
 await signInAs("t1e8@t.dev");
-const taught = await call("listTeacherAssignedStudents", { academyId: A });
-assert.deepEqual(sorted(taught.students.map((s) => s.id)), sorted([s1, s2, s3]));
-assert.deepEqual(taught.students.find((s) => s.id === s1).classIds, [cA, cB]);
+const taught = await myTaughtStudents(t1.uid);
+assert.deepEqual(sorted(taught.map((s) => s.id)), sorted([s1, s2, s3]));
+assert.deepEqual(taught.find((s) => s.id === s1).classIds, [cA, cB]);
+const myClasses = await getDocs(
+  query(collection(clientDb, `academies/${A}/classes`), where("teacherUids", "array-contains", t1.uid)),
+);
+assert.deepEqual(myClasses.docs.map((d) => d.id), [cA], "내 반 쿼리");
 const notify = await call("sendStudentAttendanceNotification", { academyId: A, studentId: s2, kind: "present" });
 assert.equal(notify.reason, "no_parent", "담당 반 학생은 보낼 수 있음(보호자 없음)");
 await assert.rejects(
@@ -228,6 +247,46 @@ assert.deepEqual(
   [(await classDoc(cP)).get("sortOrder"), (await classDoc(cB)).get("sortOrder"), (await classDoc(cA)).get("sortOrder")],
   [0, 1, 2],
 );
+
+// --- 수정은 보낸 필드만: 빠진 필드는 기존 값 유지, 강의실·정원 null = 비움 ---
+const pBase = {
+  status: "active", teacherUids: [t2.uid], roomId: "room2", capacity: 5,
+  schedule: [{ weekday: 2, start: "15:00", end: "16:00" }, { weekday: 4, start: "15:00", end: "16:00" }],
+};
+const cN = (await call("saveClass", { academyId: A, name: "부분수정반", ...pBase })).classId;
+await call("setClassStudents", { academyId: A, classId: cN, add: [s3] });
+assert.deepEqual((await studentDoc(s3)).teacherUids, [t2.uid]);
+const fieldsOf = async (id) => {
+  const d = (await classDoc(id)).data();
+  return { status: d.status, teacherUids: d.teacherUids, roomId: d.roomId, capacity: d.capacity, schedule: d.schedule };
+};
+const nameOnly = await call("saveClass", { academyId: A, classId: cN, name: "부분수정반2" });
+assert.equal(nameOnly.changed, true);
+assert.equal((await classDoc(cN)).get("name"), "부분수정반2");
+assert.deepEqual(await fieldsOf(cN), pBase, "이름만 보낸 수정 → 나머지 그대로");
+const nameHistory = (await history(cN)).find((h) => h.type === "updated");
+assert.deepEqual(Object.keys(nameHistory.changes), ["name"], "바뀐 필드만 이력에");
+await new Promise((r) => setTimeout(r, 1500)); // 트리거가 돌았다면 끝나기를 기다림
+assert.deepEqual((await studentDoc(s3)).teacherUids, [t2.uid], "이름만 수정 → 학생 teacherUids 그대로");
+// null도 이름·상태·시간·선생님은 유지
+assert.equal((await call("saveClass", { academyId: A, classId: cN, status: null, teacherUids: null, schedule: null })).changed, false);
+await call("saveClass", { academyId: A, classId: cN, roomId: null, capacity: null });
+assert.deepEqual(await fieldsOf(cN), { ...pBase, roomId: null, capacity: null }, "강의실·정원 null → 비움");
+// teacherUids: []를 직접 보내면 지금처럼 모두 빠짐 → 학생 teacherUids도 빔
+await call("saveClass", { academyId: A, classId: cN, teacherUids: [] });
+assert.deepEqual((await classDoc(cN)).get("teacherUids"), []);
+await waitTeachers("teacherUids [] → 학생에서 빠짐", s3, []);
+await call("saveClass", { academyId: A, classId: cN, teacherUids: [t2.uid] });
+await waitTeachers("선생님 다시 지정", s3, [t2.uid]);
+// 종강 반에 status 없이 수정 → 종강 유지(학생 teacherUids도 빈 채로)
+await call("saveClass", { academyId: A, classId: cN, status: "ended" });
+await waitTeachers("종강 → 제외", s3, []);
+const endedAt = (await classDoc(cN)).get("endedAt").toMillis();
+await call("saveClass", { academyId: A, classId: cN, name: "부분수정반3", capacity: 3 });
+assert.equal((await classDoc(cN)).get("status"), "ended", "status 생략 → 종강 유지");
+assert.equal((await classDoc(cN)).get("endedAt").toMillis(), endedAt, "종강 시각 그대로");
+await new Promise((r) => setTimeout(r, 1500));
+assert.deepEqual((await studentDoc(s3)).teacherUids, [], "종강 유지 → 학생 teacherUids 빈 채로");
 
 // --- 배정 해제와 선생님 변경이 겹쳐도 빠진 학생에 예전·새 선생님이 남지 않는다 ---
 const cR = (await call("saveClass", { academyId: A, name: "경합반", teacherUids: [t3.uid] })).classId;

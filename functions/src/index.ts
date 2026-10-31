@@ -140,7 +140,6 @@ export {
   deactivateTeacher,
   deleteTeacherInvite,
   getTeacherActivationState,
-  listTeacherAssignedStudents,
 } from "./teachers";
 
 export {

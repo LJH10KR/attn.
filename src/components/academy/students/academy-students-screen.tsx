@@ -19,9 +19,14 @@ import {
   type StudentVM,
 } from "@/lib/academy/student-row";
 import {
+  GRADE_FILTERS,
+  gradeGroup,
+  studentMatchesSearch,
+  type GradeFilter,
+} from "@/lib/academy/student-filters";
+import {
   STUDENT_STATUSES,
   STUDENT_STATUS_LABELS,
-  type DisplayGrade,
   type StudentStatus,
 } from "@/lib/academy/student-profile";
 import { useAcademyClasses, type AcademyClassBrief } from "@/lib/academy/use-academy-classes";
@@ -30,31 +35,12 @@ import { useStudentAccess } from "@/lib/academy/use-student-access";
 import { academyStudentsPath, type AcademyOptionItem } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
-import { formatKrPhoneDisplay, phoneMatchesSearch } from "@/lib/phone/kr-phone";
+import { formatKrPhoneDisplay } from "@/lib/phone/kr-phone";
 import { downloadCsv, type CsvColumn } from "@/lib/ui/csv";
 
 type StatusFilter = StudentStatus | "all";
-type GradeFilter = "all" | "preschool" | "elementary" | "middle" | "high" | "adult" | "graduated";
 /** 반 필터 — 반 id, "none"(반 없음), "all" */
 type ClassFilter = string;
-
-const GRADE_FILTERS: { id: GradeFilter; label: string }[] = [
-  { id: "all", label: "전체 학년" },
-  { id: "preschool", label: "미취학" },
-  { id: "elementary", label: "초등" },
-  { id: "middle", label: "중등" },
-  { id: "high", label: "고등" },
-  { id: "adult", label: "성인·기타" },
-  { id: "graduated", label: "졸업" },
-];
-
-function gradeGroup(g: DisplayGrade | null): GradeFilter | null {
-  if (!g) return null;
-  if (g === "preschool" || g === "adult" || g === "graduated") return g;
-  if (g.startsWith("e")) return "elementary";
-  if (g.startsWith("m")) return "middle";
-  return "high";
-}
 
 const chipClass = (active: boolean) =>
   `shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
@@ -149,13 +135,7 @@ export function AcademyStudentsScreen() {
       if (classFilter === "none" && s.classIds.length > 0) return false;
       if (classFilter !== "all" && classFilter !== "none" && !s.classIds.includes(classFilter)) return false;
       if (gradeFilter !== "all" && gradeGroup(s.displayGrade) !== gradeFilter) return false;
-      if (!q) return true;
-      return (
-        s.name.toLowerCase().includes(q) ||
-        s.school.toLowerCase().includes(q) ||
-        phoneMatchesSearch(s.phone, q) ||
-        s.guardians.some((g) => phoneMatchesSearch(g.phone, q) || (g.name ?? "").toLowerCase().includes(q))
-      );
+      return studentMatchesSearch(s, q);
     });
   }, [students, statusFilter, classFilter, gradeFilter, queryText]);
 

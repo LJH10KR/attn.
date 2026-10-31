@@ -49,7 +49,7 @@ import { useStudentAccess } from "@/lib/academy/use-student-access";
 /**
  * 예전 원생 패널에서 남은 부분 — 원생 관리 화면은 2-E에서 `operations/students`(학생 상세 시트)로 바뀌었다.
  * 남은 사용처: `AcademyParentStudentList`(예전 학부모 패널, 2-G 교체), `StudentRowVM`·`docToStudentRow`
- * (`/teacher` 2-F, `/parent`·학부모 출석 PIN 카드 2-G). 사용처가 0이 되면 2-H에서 파일째 삭제.
+ * (`/parent`·학부모 출석 PIN 카드 2-G — `/teacher`는 2-F에서 `docToStudent`로 바뀜). 사용처가 0이 되면 2-H에서 파일째 삭제.
  */
 
 const glassCard = "glass-card";

@@ -89,18 +89,33 @@ export function StudentDetailSheet({
   const { classes } = useAcademyClasses(academyId, access.readClasses);
 
   useEffect(() => {
+    let cancelled = false;
+    let unsubscribe: (() => void) | null = null;
     setLoad({ state: "loading" });
-    return onSnapshot(
-      doc(getFirebaseDb(), "academies", academyId, "students", studentId),
+    const ref = doc(getFirebaseDb(), "academies", academyId, "students", studentId);
+    const apply = (snap: { exists: () => boolean; id: string; data: () => unknown }) =>
+      setLoad(
+        snap.exists()
+          ? { state: "ok", student: docToStudent(snap.id, snap.data() as Record<string, unknown>) }
+          : { state: "missing" },
+      );
+    // 한 번 읽어 볼 수 있는 문서일 때만 실시간 구독한다. 규칙이 거부하는 문서(다른 반 학생 주소 등)를
+    // 바로 onSnapshot하면 Firestore SDK 12.x가 내부 오류(INTERNAL ASSERTION FAILED ca9/b815)로 멈춘다(2-F QA).
+    getDoc(ref).then(
       (snap) => {
-        setLoad(
-          snap.exists()
-            ? { state: "ok", student: docToStudent(snap.id, snap.data() as Record<string, unknown>) }
-            : { state: "missing" },
-        );
+        if (cancelled) return;
+        apply(snap);
+        if (!snap.exists()) return;
+        unsubscribe = onSnapshot(ref, apply, () => setLoad({ state: "missing" }));
       },
-      () => setLoad({ state: "missing" }),
+      () => {
+        if (!cancelled) setLoad({ state: "missing" });
+      },
     );
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
   }, [academyId, studentId]);
 
   const { readNotes } = access;

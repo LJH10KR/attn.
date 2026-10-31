@@ -57,6 +57,22 @@ const LOADERS: Partial<Record<AcademyPermission, Loader>> = {
       "operations.students": { summary: `재원 ${byStatus.enrolled}명`, ...(detail ? { detail } : {}) },
     };
   },
+  // 숫자는 운영중 기준, 준비중·종강은 보조 줄에 따로(0이면 생략)
+  "operations.classes": async (academyId) => {
+    const classes = collection(getFirebaseDb(), COLLECTIONS.academies, academyId, "classes");
+    const [active, preparing, ended] = await Promise.all(
+      (["active", "preparing", "ended"] as const).map(async (status) => {
+        const snap = await getCountFromServer(query(classes, where("status", "==", status)));
+        return snap.data().count;
+      }),
+    );
+    const detail = [preparing > 0 ? `준비중 ${preparing}` : null, ended > 0 ? `종강 ${ended}` : null]
+      .filter(Boolean)
+      .join(" · ");
+    return {
+      "operations.classes": { summary: `운영 중 ${active}개`, ...(detail ? { detail } : {}) },
+    };
+  },
   "billing.payments": async (academyId) => {
     const { year, month } = nowKST();
     const { start, end } = kstMonthBounds(year, month);

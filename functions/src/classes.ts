@@ -185,32 +185,52 @@ function readClassFields(d: DocumentData): ClassFields {
   };
 }
 
-/** 반 추가(classId 없음)·수정 — 시간·선생님·강의실·정원·상태, 이력 */
+/**
+ * 수정 요청에서 보낸 필드만 parse — 빠진 필드는 기존 값 유지.
+ * 이름·상태·수업 시간·선생님은 null도 "유지"로 보고, 강의실·정원만 null(또는 "")이 "비움"이다.
+ * (예전에는 빠진 필드가 기본값으로 덮여 status 생략 → 종강 반 재개, teacherUids 생략 → 선생님 전부 제거가 됐음)
+ */
+function parseClassPatch(data: Record<string, unknown>): Partial<ClassFields> {
+  const patch: Partial<ClassFields> = {};
+  const sent = (raw: unknown) => raw !== undefined && raw !== null;
+  if (sent(data.name)) patch.name = parseName(data.name);
+  if (sent(data.status)) patch.status = parseClassStatus(data.status);
+  if (sent(data.schedule)) patch.schedule = parseSchedule(data.schedule);
+  if (sent(data.teacherUids)) patch.teacherUids = parseTeacherUids(data.teacherUids);
+  if (data.roomId !== undefined) patch.roomId = parseRoomId(data.roomId);
+  if (data.capacity !== undefined) patch.capacity = parseCapacity(data.capacity);
+  return patch;
+}
+
+/** 반 추가(classId 없음)·수정 — 시간·선생님·강의실·정원·상태, 이력. 수정은 보낸 필드만 바꾼다 */
 export const saveClass = onCall(async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
   }
   const callerUid = request.auth.uid;
-  const academyId = requireId(request.data?.academyId, "학원 ID가 필요합니다.");
-  const classIdRaw = request.data?.classId;
+  const data = (request.data ?? {}) as Record<string, unknown>;
+  const academyId = requireId(data.academyId, "학원 ID가 필요합니다.");
+  const classIdRaw = data.classId;
   const classId =
     classIdRaw === undefined || classIdRaw === null || classIdRaw === ""
       ? null
       : requireId(classIdRaw, "반 정보가 올바르지 않습니다.");
-  const input: ClassFields = {
-    name: parseName(request.data?.name),
-    status: parseClassStatus(request.data?.status),
-    schedule: parseSchedule(request.data?.schedule),
-    teacherUids: parseTeacherUids(request.data?.teacherUids),
-    roomId: parseRoomId(request.data?.roomId),
-    capacity: parseCapacity(request.data?.capacity),
+  // 생성은 빠진 필드에 기본값(운영중·시간 없음·선생님 없음), 수정은 보낸 필드만
+  const input: ClassFields | null = classId ? null : {
+    name: parseName(data.name),
+    status: parseClassStatus(data.status),
+    schedule: parseSchedule(data.schedule),
+    teacherUids: parseTeacherUids(data.teacherUids),
+    roomId: parseRoomId(data.roomId),
+    capacity: parseCapacity(data.capacity),
   };
+  const patch = classId ? parseClassPatch(data) : null;
 
   const db = admin.firestore();
   await assertPermission(db, academyId, callerUid, request.auth.token, "operations.classes");
   const col = classesCol(db, academyId);
 
-  if (!classId) {
+  if (input) {
     if ((await col.count().get()).data().count >= MAX_CLASSES_PER_ACADEMY) {
       throw new HttpsError("failed-precondition", `반은 최대 ${MAX_CLASSES_PER_ACADEMY}개까지 만들 수 있습니다.`);
     }
@@ -236,44 +256,50 @@ export const saveClass = onCall(async (request) => {
     return { ok: true as const, classId: ref.id, changed: true };
   }
 
+  if (!classId || !patch) {
+    throw new HttpsError("invalid-argument", "요청이 올바르지 않습니다.");
+  }
   const ref = col.doc(classId);
   const changed = await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) {
       throw new HttpsError("not-found", "반을 찾을 수 없습니다.");
     }
+    // 합치기·바뀐 필드·검사는 모두 이 트랜잭션에서 읽은 반 문서 기준
     const stored = readClassFields(snap.data() ?? {});
+    const merged: ClassFields = { ...stored, ...patch };
     // 바뀌지 않은 값은 다시 검사하지 않는다(삭제된 강의실·퇴사 직원이 그대로 남아 있어도 다른 필드 수정 가능)
-    if (input.roomId && input.roomId !== stored.roomId) {
-      await assertRoomTx(tx, db, academyId, input.roomId);
+    if (merged.roomId && merged.roomId !== stored.roomId) {
+      await assertRoomTx(tx, db, academyId, merged.roomId);
     }
     await assertNewClassTeachersTx(
       tx,
       db,
       academyId,
-      input.teacherUids.filter((uid) => !stored.teacherUids.includes(uid)),
+      merged.teacherUids.filter((uid) => !stored.teacherUids.includes(uid)),
     );
 
     const changes: Record<string, { before: unknown; after: unknown }> = {};
-    for (const key of Object.keys(input) as (keyof ClassFields)[]) {
-      if (JSON.stringify(stored[key]) !== JSON.stringify(input[key])) {
-        changes[key] = { before: stored[key], after: input[key] };
+    for (const key of Object.keys(patch) as (keyof ClassFields)[]) {
+      if (JSON.stringify(stored[key]) !== JSON.stringify(merged[key])) {
+        changes[key] = { before: stored[key], after: merged[key] };
       }
     }
-    if (Object.keys(changes).length === 0) return false;
+    const changedKeys = Object.keys(changes) as (keyof ClassFields)[];
+    if (changedKeys.length === 0) return false;
 
-    const ending = stored.status !== "ended" && input.status === "ended";
-    const reopening = stored.status === "ended" && input.status !== "ended";
+    const ending = stored.status !== "ended" && merged.status === "ended";
+    const reopening = stored.status === "ended" && merged.status !== "ended";
     const type: ClassHistoryType = ending ? "ended" : reopening ? "reopened" : "updated";
     tx.update(ref, {
-      ...input,
+      ...Object.fromEntries(changedKeys.map((k) => [k, merged[k]])),
       ...(ending ? { endedAt: FieldValue.serverTimestamp() } : {}),
       ...(reopening ? { endedAt: null } : {}),
       updatedAt: FieldValue.serverTimestamp(),
     });
     tx.set(
       classHistoryCol(db, academyId).doc(),
-      classHistoryEntry({ classId, className: input.name, type, actorUid: callerUid, changes }),
+      classHistoryEntry({ classId, className: merged.name, type, actorUid: callerUid, changes }),
     );
     return true;
   });
