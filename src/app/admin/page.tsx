@@ -30,10 +30,14 @@ type SeedBatchListItem = {
   deletedAt: boolean;
 };
 
+/** seed 직원·학부모는 로그인 ID 계정(원장만 이메일) */
+type SeedMemberCredential = { loginId: string; password: string; displayName?: string; phone?: string };
+
 type CreatedCredentials = {
   owner: { email: string; password: string };
-  teachers: Array<{ email: string; password: string }>;
-  parents: Array<{ email: string; password: string }>;
+  teachers: SeedMemberCredential[];
+  parents: SeedMemberCredential[];
+  pendingParents?: SeedMemberCredential[];
 };
 
 type CreateSeedBatchResponse = {
@@ -805,7 +809,7 @@ export default function AdminSeedPage() {
                 />
               </label>
               <label className="block">
-                <span className="mb-1.5 block text-xs font-medium text-neutral-600">학생당 선생님 수(1~5)</span>
+                <span className="mb-1.5 block text-xs font-medium text-neutral-600">반당 선생님 수(1~5)</span>
                 <input
                   type="number"
                   value={teachersPerStudent}
@@ -853,39 +857,42 @@ export default function AdminSeedPage() {
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-neutral-300/60 bg-white/50 p-4">
-                  <h3 className="text-xs font-semibold text-neutral-700">선생님</h3>
-                  <div className="mt-2 space-y-2">
-                    {Array.isArray(lastCreated.credentials.teachers) ? (
-                      lastCreated.credentials.teachers.map((t, i) => (
-                        <div key={t.email} className="text-xs text-neutral-700">
-                          #{i + 1} 이메일{" "}
-                          <span className="font-mono">{t.email}</span> / 비밀번호{" "}
-                          <span className="font-mono">{t.password}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-xs text-neutral-500">없음</p>
-                    )}
+                {(
+                  [
+                    { title: "선생님", hint: "/login/teacher", list: lastCreated.credentials.teachers },
+                    { title: "학부모(연결됨)", hint: "/login/parent", list: lastCreated.credentials.parents },
+                    {
+                      title: "학부모(승인 대기)",
+                      hint: "/login/parent",
+                      list: lastCreated.credentials.pendingParents,
+                    },
+                  ] as const
+                ).map((group) => (
+                  <div key={group.title} className="rounded-2xl border border-neutral-300/60 bg-white/50 p-4">
+                    <h3 className="text-xs font-semibold text-neutral-700">
+                      {group.title} <span className="font-normal text-neutral-500">· {group.hint}에서 로그인 ID로</span>
+                    </h3>
+                    <div className="mt-2 space-y-2">
+                      {Array.isArray(group.list) && group.list.length > 0 ? (
+                        group.list.map((m, i) => (
+                          <div key={m.loginId} className="text-xs text-neutral-700 break-all">
+                            #{i + 1} {m.displayName ? `${m.displayName} · ` : ""}로그인 ID{" "}
+                            <span className="font-mono">{m.loginId}</span> / 비밀번호{" "}
+                            <span className="font-mono">{m.password}</span>
+                            {m.phone ? (
+                              <>
+                                {" "}
+                                / 번호 <span className="font-mono">{m.phone}</span>
+                              </>
+                            ) : null}
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-xs text-neutral-500">없음</p>
+                      )}
+                    </div>
                   </div>
-                </div>
-
-                <div className="rounded-2xl border border-neutral-300/60 bg-white/50 p-4">
-                  <h3 className="text-xs font-semibold text-neutral-700">학부모</h3>
-                  <div className="mt-2 space-y-2">
-                    {Array.isArray(lastCreated.credentials.parents) ? (
-                      lastCreated.credentials.parents.map((p, i) => (
-                        <div key={p.email} className="text-xs text-neutral-700">
-                          #{i + 1} 이메일{" "}
-                          <span className="font-mono">{p.email}</span> / 비밀번호{" "}
-                          <span className="font-mono">{p.password}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-xs text-neutral-500">없음</p>
-                    )}
-                  </div>
-                </div>
+                ))}
               </div>
             </section>
           ) : null}

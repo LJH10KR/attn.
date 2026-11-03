@@ -8,6 +8,11 @@ import {
   deleteMemberLoginSecrets,
   purgeUserFirestoreData,
 } from "./lib/firestore-cleanup";
+import {
+  authUserHasAdminClaim,
+  cleanupDeletedAcademyUsers,
+  safeDeleteAuthUser,
+} from "./lib/admin-user-cleanup";
 import { stripTeacherFromClasses } from "./lib/class-teachers";
 import { deleteParentAccountData } from "./lib/parent-links";
 import { reconcileUserActivationMirror } from "./user-activation-mirror";
@@ -29,29 +34,6 @@ function clampInt(raw: unknown, fallback: number, min: number, max: number): num
   const n = typeof raw === "number" ? raw : Number(raw);
   if (!Number.isFinite(n) || !Number.isInteger(n)) return fallback;
   return Math.max(min, Math.min(max, n));
-}
-
-async function authUserHasAdminClaim(uid: string): Promise<boolean> {
-  try {
-    const u = await admin.auth().getUser(uid);
-    const c = u.customClaims as Record<string, unknown> | undefined;
-    return Boolean(c && c.admin === true);
-  } catch {
-    return false;
-  }
-}
-
-async function safeDeleteAuthUser(uid: string, context: string): Promise<void> {
-  if (!uid || uid.startsWith("academy_")) return;
-  if (await authUserHasAdminClaim(uid)) {
-    logger.warn(`${context}: skip admin auth user`, { uid });
-    return;
-  }
-  try {
-    await admin.auth().deleteUser(uid);
-  } catch (e) {
-    logger.warn(`${context}: deleteUser skipped`, { uid, e });
-  }
 }
 
 function memberAuthUid(data: FirebaseFirestore.DocumentData, docId: string): string {
@@ -202,24 +184,11 @@ export const adminDeleteAcademyCascade = onCall(async (request) => {
     academyId,
   );
 
-  const memberAuthUids = new Set<string>();
-  for (const m of [...teacherSnapshots, ...parentSnapshots]) {
-    memberAuthUids.add(m.authUid);
-  }
-
-  for (const uid of memberAuthUids) {
-    await safeDeleteAuthUser(uid, "adminDeleteAcademyCascade");
-    if (!(await authUserHasAdminClaim(uid))) {
-      await purgeUserFirestoreData(db, uid);
-    }
-  }
-
-  await safeDeleteAuthUser(ownerUid, "adminDeleteAcademyCascade");
-
-  const remainingOwned = await db.collection("academies").where("ownerUid", "==", ownerUid).limit(1).get();
-  if (remainingOwned.empty && !(await authUserHasAdminClaim(ownerUid))) {
-    await purgeUserFirestoreData(db, ownerUid);
-  }
+  await cleanupDeletedAcademyUsers(db, {
+    memberAuthUids: [...teacherSnapshots, ...parentSnapshots].map((m) => m.authUid),
+    ownerUid,
+    context: "adminDeleteAcademyCascade",
+  });
 
   logger.info("adminDeleteAcademyCascade done", { academyId, ownerUid });
   return { ok: true as const };

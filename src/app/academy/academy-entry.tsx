@@ -9,18 +9,22 @@ import { closesBootOverlayItself, useBootOverlay } from "@/components/boot/boot-
 import { academyPath } from "@/lib/academy/academy-routes";
 import { activeKioskAcademyId } from "@/lib/academy/kiosk-student-rows";
 import { readLastAcademy } from "@/lib/academy/last-academy";
-import { resolveStaffLanding } from "@/lib/academy/staff-landing";
+import { isNetworkError, resolveStaffLanding } from "@/lib/academy/staff-landing";
 import { attnIdSortKey, compareAttnIdAsc } from "@/lib/attn-id-sort";
 import { COLLECTIONS } from "@/lib/firebase/attn-schema";
 import { getFirebaseAuth, getFirebaseDb } from "@/lib/firebase/client-app";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { fetchIsOwner } from "@/lib/firebase/owner-profile";
 
+/** 연결 문제로 갈 곳을 정하지 못함 */
+const OFFLINE = Symbol("offline");
+
 /**
  * `/academy`로만 들어왔을 때 갈 곳.
  * - 키오스크 중: 키오스크 학원 홈
  * - 원장: 마지막으로 보던 학원(지금도 소유한 경우) → 오너 대시보드와 같은 순서의 첫 학원 → 학원이 없으면 /owner
  * - 직원: 로그인 정보의 소속 학원 — 착지 판단은 `staff-landing.ts`(메뉴 없으면 /teacher, 활성 아니면 안내 화면)
+ * - 연결 문제로 읽지 못하면 오류를 던짐(호출 측이 연결 확인 화면)
  */
 async function resolveAcademyEntry(user: User): Promise<string | null> {
   const kioskAcademyId = activeKioskAcademyId();
@@ -51,10 +55,11 @@ async function resolveAcademyEntry(user: User): Promise<string | null> {
 export function AcademyEntry() {
   const router = useRouter();
   const { hide: hideBootOverlay } = useBootOverlay();
-  const [state, setState] = useState<"loading" | "forbidden">("loading");
+  const [state, setState] = useState<"loading" | "forbidden" | "offline">("loading");
+  const [retryTick, setRetryTick] = useState(0);
 
   useEffect(() => {
-    if (state === "forbidden") hideBootOverlay();
+    if (state !== "loading") hideBootOverlay();
   }, [state, hideBootOverlay]);
 
   useEffect(() => {
@@ -74,10 +79,12 @@ export function AcademyEntry() {
         return;
       }
       void resolveAcademyEntry(user)
-        .catch(() => null)
+        // 연결 문제로 판단하지 못했으면 "들어갈 학원 없음"이라고 단정하지 않고 연결 확인 화면
+        .catch((err: unknown) => (isNetworkError(err) ? OFFLINE : null))
         .then((target) => {
           if (cancelled) return;
-          if (target) go(target);
+          if (target === OFFLINE) setState("offline");
+          else if (target) go(target);
           else setState("forbidden");
         });
     });
@@ -85,12 +92,32 @@ export function AcademyEntry() {
       cancelled = true;
       unsub();
     };
-  }, [router, hideBootOverlay]);
+  }, [router, hideBootOverlay, retryTick]);
 
   if (state === "loading") {
     return (
       <div className="min-h-[100dvh] bg-background flex items-center justify-center">
         <p className="text-sm text-neutral-500">불러오는 중…</p>
+      </div>
+    );
+  }
+
+  if (state === "offline") {
+    return (
+      <div className="min-h-[100dvh] bg-background flex flex-col items-center justify-center gap-4 px-4">
+        <p className="max-w-xs text-center text-sm text-neutral-600 break-keep">
+          학원 정보를 불러오지 못했습니다. 연결을 확인해 주세요.
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setState("loading");
+            setRetryTick((t) => t + 1);
+          }}
+          className="rounded-2xl bg-[#222] px-6 py-3 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-950"
+        >
+          다시 시도
+        </button>
       </div>
     );
   }

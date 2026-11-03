@@ -53,6 +53,9 @@ type OpenGroup = { key: string; uid: string | null };
 
 type CreateTarget = { name: string; phone: string; studentIds: string[] };
 
+/** 변경 뒤 서버 트리거 반영을 기다려 다시 읽는 시점 */
+const FOLLOW_UP_REFRESH_MS = [2500, 8000] as const;
+
 /**
  * 운영 › 학부모 관리(9-5) — 보호자 탭(번호 묶음 카드·검색·칩·가입 안내) / 승인 대기 탭(`?view=pending`).
  * 학생·학부모 목록을 한 번씩 읽어 클라이언트에서 묶는다(`parent-directory.ts`). 카드 → 보호자 상세 시트(주소 없음),
@@ -105,20 +108,20 @@ export function AcademyParentsScreen() {
 
   /**
    * 연결·해제·만들기·삭제 뒤 다시 읽기 — 계정 상태(승인 대기 ↔ 연결됨)와 연결 요약은 서버 트리거가 조금 뒤에 바꾸므로
-   * 바로 한 번 + 잠시 뒤 한 번 더 읽는다(바로 읽으면 마지막 자녀를 해제한 계정이 "연결됨"으로 남아 보임).
+   * 바로 한 번 + 2.5초 뒤 + 8초 뒤 한 번씩 더 읽는다(바로 읽으면 마지막 자녀를 해제한 계정이 "연결됨"으로 남아 보임,
+   * 운영에서는 트리거 콜드 스타트가 2.5초를 넘을 수 있음). 표시만 늦을 뿐 서버 판단은 맞다.
    */
-  const followUpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const followUpTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const clearFollowUps = useCallback(() => {
+    for (const t of followUpTimers.current) clearTimeout(t);
+    followUpTimers.current = [];
+  }, []);
   const refreshAfterChange = useCallback(() => {
     refresh();
-    if (followUpTimer.current) clearTimeout(followUpTimer.current);
-    followUpTimer.current = setTimeout(refresh, 2500);
-  }, [refresh]);
-  useEffect(
-    () => () => {
-      if (followUpTimer.current) clearTimeout(followUpTimer.current);
-    },
-    [],
-  );
+    clearFollowUps();
+    followUpTimers.current = FOLLOW_UP_REFRESH_MS.map((ms) => setTimeout(refresh, ms));
+  }, [refresh, clearFollowUps]);
+  useEffect(() => clearFollowUps, [clearFollowUps]);
 
   const groups = useMemo(() => buildGuardianDirectory(students, accounts), [students, accounts]);
   const counts = useMemo(() => guardianFilterCounts(groups, nowMs), [groups, nowMs]);

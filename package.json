@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:functions": "npm --prefix functions run build && cross-env NODE_OPTIONS= firebase emulators:exec --only auth,firestore,functions --project demo-attn \"node tests/functions/staff-callables.smoke.mjs && node tests/functions/staff-invites.smoke.mjs && node tests/functions/member-passwords.smoke.mjs && node tests/functions/member-recovery.smoke.mjs && node tests/functions/member-auth-hardening.smoke.mjs && node tests/functions/students.smoke.mjs && node tests/functions/parent-links.smoke.mjs && node tests/functions/classes.smoke.mjs\"",
+    "test:functions": "npm --prefix functions run build && cross-env NODE_OPTIONS= firebase emulators:exec --only auth,firestore,functions --project demo-attn \"node tests/functions/staff-callables.smoke.mjs && node tests/functions/staff-invites.smoke.mjs && node tests/functions/member-passwords.smoke.mjs && node tests/functions/member-recovery.smoke.mjs && node tests/functions/member-auth-hardening.smoke.mjs && node tests/functions/students.smoke.mjs && node tests/functions/parent-links.smoke.mjs && node tests/functions/classes.smoke.mjs && node tests/functions/first-login.smoke.mjs && node tests/functions/parent-link-race.smoke.mjs && node tests/functions/seed.smoke.mjs\"",
     "test:rules": "cross-env NODE_OPTIONS= firebase emulators:exec --only firestore --project demo-attn \"node --test --test-concurrency=1 tests/rules/*.test.mjs\""
   },
   "dependencies": {

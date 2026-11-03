@@ -41,6 +41,35 @@ const recentSessionDecisionByUid = new Map<
   { path: string | null; cachedAt: number }
 >();
 
+/**
+ * uid별 캐시 세대 — `clearSessionDecisionCaches` 때마다 올린다. 비우기 전에 시작된 요청은 끝나도
+ * 세대가 달라 캐시에 넣지 않는다(옛 판단이 다시 들어오지 않게).
+ */
+const cacheGenerationByUid = new Map<string, number>();
+
+function cacheGeneration(uid: string): number {
+  return cacheGenerationByUid.get(uid) ?? 0;
+}
+
+/**
+ * 그 uid의 세션 판단 캐시를 모두 비운다 — 활성 상태 캐시(선생님·학부모), 3초 세션 판단 캐시, 진행 중 요청.
+ * 첫 로그인처럼 계정 상태가 막 바뀐 뒤 부른다(남겨 두면 `/`이 옛 "첫 로그인 전" 판단으로 설정 화면에 보냄).
+ */
+export function clearSessionDecisionCaches(uid: string): void {
+  teacherActivationCacheByUid.delete(uid);
+  parentActivationCacheByUid.delete(uid);
+  recentSessionDecisionByUid.delete(uid);
+  teacherActivationInFlightByUid.delete(uid);
+  parentActivationInFlightByUid.delete(uid);
+  sessionDecisionInFlightByUid.delete(uid);
+  cacheGenerationByUid.set(uid, cacheGeneration(uid) + 1);
+}
+
+/** 진행 중 맵에서 이 요청일 때만 지움(비운 뒤 새로 시작된 요청을 지우지 않게) */
+function deleteInFlightIfSame<T>(map: Map<string, Promise<T>>, uid: string, task: Promise<T>): void {
+  if (map.get(uid) === task) map.delete(uid);
+}
+
 function isCacheFresh(
   entry: ActivationCacheEntry | undefined,
   maxAgeMs: number,
@@ -159,6 +188,7 @@ async function resolveKnownSessionDashboardPath(user: User): Promise<string | nu
     return inFlight;
   }
 
+  const generation = cacheGeneration(uid);
   const decisionPromise = (async (): Promise<string | null> => {
     const { claims } = await user.getIdTokenResult();
     if (claims.membershipStatus === "pending_email_verification") {
@@ -200,10 +230,12 @@ async function resolveKnownSessionDashboardPath(user: User): Promise<string | nu
   sessionDecisionInFlightByUid.set(uid, decisionPromise);
   try {
     const path = await decisionPromise;
-    recentSessionDecisionByUid.set(uid, { path, cachedAt: Date.now() });
+    if (cacheGeneration(uid) === generation) {
+      recentSessionDecisionByUid.set(uid, { path, cachedAt: Date.now() });
+    }
     return path;
   } finally {
-    sessionDecisionInFlightByUid.delete(uid);
+    deleteInFlightIfSame(sessionDecisionInFlightByUid, uid, decisionPromise);
   }
 }
 
@@ -223,49 +255,70 @@ export async function resolveTeacherActivationState(
   user: User,
   opts?: { maxCacheAgeMs?: number; bypassCache?: boolean },
 ): Promise<RoleActivationState> {
+  return resolveActivationState(user, "teacher", opts);
+}
+
+const ACTIVATION_CACHES = {
+  teacher: {
+    cache: teacherActivationCacheByUid,
+    inFlight: teacherActivationInFlightByUid,
+    callable: "getTeacherActivationState",
+  },
+  parent: {
+    cache: parentActivationCacheByUid,
+    inFlight: parentActivationInFlightByUid,
+    callable: "getParentActivationState",
+  },
+} as const;
+
+/** 클레임(활성만) → 미러 → 콜러블 순으로 활성 상태 — uid별 캐시·진행 중 요청 공유 */
+async function resolveActivationState(
+  user: User,
+  role: "teacher" | "parent",
+  opts?: { maxCacheAgeMs?: number; bypassCache?: boolean },
+): Promise<RoleActivationState> {
+  const { cache, inFlight, callable } = ACTIVATION_CACHES[role];
   const uid = user.uid;
   const maxAgeMs = opts?.maxCacheAgeMs ?? ACTIVATION_CACHE_TTL_MS;
   if (!opts?.bypassCache) {
-    const cached = teacherActivationCacheByUid.get(uid);
+    const cached = cache.get(uid);
     if (isCacheFresh(cached, maxAgeMs)) {
       return cached.state;
     }
-    const inFlight = teacherActivationInFlightByUid.get(uid);
-    if (inFlight) return inFlight;
+    const running = inFlight.get(uid);
+    if (running) return running;
   }
+  const generation = cacheGeneration(uid);
+  const remember = (state: RoleActivationState): RoleActivationState => {
+    if (cacheGeneration(uid) === generation) cache.set(uid, { state, cachedAt: Date.now() });
+    return state;
+  };
   const task = (async (): Promise<RoleActivationState> => {
-    const fromClaims = await tryReadActivationRoleFromClaims(user, "teacher");
-    if (fromClaims) {
-      teacherActivationCacheByUid.set(uid, { state: fromClaims, cachedAt: Date.now() });
-      return fromClaims;
-    }
+    const fromClaims = await tryReadActivationRoleFromClaims(user, role);
+    if (fromClaims) return remember(fromClaims);
 
     if (isActivationMirrorClientReadEnabled()) {
-      const fromMirror = await tryReadActivationRoleFromMirror(user, "teacher");
-      if (fromMirror) {
-        teacherActivationCacheByUid.set(uid, { state: fromMirror, cachedAt: Date.now() });
-        return fromMirror;
-      }
+      const fromMirror = await tryReadActivationRoleFromMirror(user, role);
+      if (fromMirror) return remember(fromMirror);
     }
 
-    const functions = getFirebaseFunctions();
-    const fn = httpsCallable(functions, "getTeacherActivationState");
+    const fn = httpsCallable(getFirebaseFunctions(), callable);
     const res = await fn({});
-    const state = normalizeActivationState(
-      res.data as {
-        anyActive?: boolean;
-        primaryStatus?: string | null;
-        primaryAcademyId?: string | null;
-      },
+    return remember(
+      normalizeActivationState(
+        res.data as {
+          anyActive?: boolean;
+          primaryStatus?: string | null;
+          primaryAcademyId?: string | null;
+        },
+      ),
     );
-    teacherActivationCacheByUid.set(uid, { state, cachedAt: Date.now() });
-    return state;
   })();
-  teacherActivationInFlightByUid.set(uid, task);
+  inFlight.set(uid, task);
   try {
     return await task;
   } finally {
-    teacherActivationInFlightByUid.delete(uid);
+    deleteInFlightIfSame(inFlight, uid, task);
   }
 }
 
@@ -281,50 +334,7 @@ export async function resolveParentActivationState(
   user: User,
   opts?: { maxCacheAgeMs?: number; bypassCache?: boolean },
 ): Promise<RoleActivationState> {
-  const uid = user.uid;
-  const maxAgeMs = opts?.maxCacheAgeMs ?? ACTIVATION_CACHE_TTL_MS;
-  if (!opts?.bypassCache) {
-    const cached = parentActivationCacheByUid.get(uid);
-    if (isCacheFresh(cached, maxAgeMs)) {
-      return cached.state;
-    }
-    const inFlight = parentActivationInFlightByUid.get(uid);
-    if (inFlight) return inFlight;
-  }
-  const task = (async (): Promise<RoleActivationState> => {
-    const fromClaims = await tryReadActivationRoleFromClaims(user, "parent");
-    if (fromClaims) {
-      parentActivationCacheByUid.set(uid, { state: fromClaims, cachedAt: Date.now() });
-      return fromClaims;
-    }
-
-    if (isActivationMirrorClientReadEnabled()) {
-      const fromMirror = await tryReadActivationRoleFromMirror(user, "parent");
-      if (fromMirror) {
-        parentActivationCacheByUid.set(uid, { state: fromMirror, cachedAt: Date.now() });
-        return fromMirror;
-      }
-    }
-
-    const functions = getFirebaseFunctions();
-    const fn = httpsCallable(functions, "getParentActivationState");
-    const res = await fn({});
-    const state = normalizeActivationState(
-      res.data as {
-        anyActive?: boolean;
-        primaryStatus?: string | null;
-        primaryAcademyId?: string | null;
-      },
-    );
-    parentActivationCacheByUid.set(uid, { state, cachedAt: Date.now() });
-    return state;
-  })();
-  parentActivationInFlightByUid.set(uid, task);
-  try {
-    return await task;
-  } finally {
-    parentActivationInFlightByUid.delete(uid);
-  }
+  return resolveActivationState(user, "parent", opts);
 }
 
 /** 로그인 페이지에서 자동 리다이렉트를 건너뛸지 (역할 경로·쿼리 안내·강제 체류) */

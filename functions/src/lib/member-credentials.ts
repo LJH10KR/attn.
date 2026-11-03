@@ -38,13 +38,15 @@ export function randomTempPassword(): string {
  * 로그인 ID 계정(내부 이메일)의 Firebase Auth 비밀번호 — 아무도 모르는 무작위 값.
  * 앱 로그인은 서버가 `secrets/login` 해시로 확인한 뒤 커스텀 토큰을 주므로 Auth 비밀번호를 쓰지 않는다.
  * 사용자 비밀번호를 Auth에도 넣으면 내부 이메일로 `signInWithEmailAndPassword`를 시도해 연속 실패 잠금을 우회할 수 있음.
- * Auth 비밀번호를 만들거나 바꾸는 모든 곳(계정 생성·첫 로그인·변경·재발급·초기화)에서 이 값만 쓸 것.
+ * Auth 비밀번호를 만들거나 바꾸는 모든 곳(계정 생성·변경·재발급·초기화·seed)에서 이 값만 쓸 것.
+ * (첫 로그인은 Auth 비밀번호를 바꾸지 않고 `revokeRefreshTokens`로 세션만 끊는다)
  */
 export function randomAuthPassword(): string {
   return crypto.randomBytes(32).toString("base64url");
 }
 
-function internalEmailForAttnId(attnId: string): string {
+/** 로그인 ID 계정의 Auth 내부 이메일 — 사람이 쓰지 않는 주소(로그인은 로그인 ID로만) */
+export function internalEmailForAttnId(attnId: string): string {
   const safe = attnId.replace(/[^a-zA-Z0-9._-]/g, "_");
   return `attn+${safe}@provision.attndot.internal`;
 }

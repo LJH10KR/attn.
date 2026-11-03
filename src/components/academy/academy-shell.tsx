@@ -1,6 +1,5 @@
 "use client";
 
-import { FirebaseError } from "firebase/app";
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import Link from "next/link";
@@ -25,7 +24,11 @@ import {
 } from "@/lib/academy/academy-routes";
 import { rememberLastAcademy } from "@/lib/academy/last-academy";
 import type { AcademyPermission } from "@/lib/academy/permissions";
-import { isAccountAuthError, resolveStaffLanding } from "@/lib/academy/staff-landing";
+import {
+  isAccountAuthError,
+  isNetworkError,
+  resolveStaffLandingResult,
+} from "@/lib/academy/staff-landing";
 import { usePermissions, type AcademyPermissionState } from "@/lib/academy/use-permissions";
 import { useRoleLogout } from "@/lib/auth/use-role-logout";
 import { COLLECTIONS } from "@/lib/firebase/attn-schema";
@@ -82,16 +85,9 @@ const BELL_PERMISSIONS: readonly AcademyPermission[] = [
  */
 type MissingActorLanding = { kind: "go"; target: string } | { kind: "forbidden" } | { kind: "offline" };
 
-function isOfflineError(err: unknown): boolean {
-  return (
-    (typeof navigator !== "undefined" && navigator.onLine === false) ||
-    (err instanceof FirebaseError && err.code === "auth/network-request-failed")
-  );
-}
-
 async function landingForMissingActor(user: User, academyId: string): Promise<MissingActorLanding> {
   // 오프라인이면 학원 문서·권한 구독이 실패해 actor가 비었을 수 있음 — 권한 없음으로 단정하지 않음
-  if (isOfflineError(null)) return { kind: "offline" };
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return { kind: "offline" };
   try {
     const { claims } = await user.getIdTokenResult();
     if (claims.role !== "teacher" || claims.academyId !== academyId) return { kind: "forbidden" };
@@ -99,16 +95,20 @@ async function landingForMissingActor(user: User, academyId: string): Promise<Mi
     try {
       await user.getIdToken(true);
     } catch (err) {
-      if (!isAccountAuthError(err)) return isOfflineError(err) ? { kind: "offline" } : { kind: "forbidden" };
+      if (!isAccountAuthError(err)) return isNetworkError(err) ? { kind: "offline" } : { kind: "forbidden" };
       await signOut(getFirebaseAuth()).catch(() => undefined);
       return { kind: "go", target: "/login/teacher" };
     }
-    const target = await resolveStaffLanding(user, academyId);
+    const result = await resolveStaffLandingResult(user, academyId);
+    // staff 문서를 연결 문제로 못 읽었으면 이 자리에서 연결 확인 화면(다른 곳으로 보내지 않음)
+    if (result.kind === "offline") return { kind: "offline" };
     const here = academyPath(academyId);
     // 다시 이 학원이면(권한 구독 오류 등) 이동하지 않음 — 같은 주소로 되풀이 이동 방지
-    return target === here || target.startsWith(`${here}/`) ? { kind: "forbidden" } : { kind: "go", target };
+    return result.target === here || result.target.startsWith(`${here}/`)
+      ? { kind: "forbidden" }
+      : { kind: "go", target: result.target };
   } catch (err) {
-    return isOfflineError(err) ? { kind: "offline" } : { kind: "forbidden" };
+    return isNetworkError(err) ? { kind: "offline" } : { kind: "forbidden" };
   }
 }
 

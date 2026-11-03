@@ -123,25 +123,18 @@ export async function releaseUnusedParentPhoneIndex(
   });
 }
 
-/** 이 계정이 자기 번호 색인을 잡고 있는지(연결된 적 있는 계정) */
-export async function parentHoldsPhoneIndex(
-  db: admin.firestore.Firestore,
-  academyId: string,
-  phone: unknown,
-  uid: string,
-): Promise<boolean> {
-  if (typeof phone !== "string" || !guardianPhoneKey(phone)) return false;
-  const snap = await parentPhoneIndexRef(db, academyId, phone).get();
-  return snap.exists && snap.get("parentUid") === uid;
-}
-
 export type LinkTarget = { uid: string; phone: string; displayName: string };
+
+/** 연결하는 사이 학부모 계정 번호가 바뀌었을 때 */
+export const PARENT_ACCOUNT_CHANGED_MSG = "계정 정보가 바뀌었습니다. 다시 시도해 주세요.";
 
 /**
  * 학생 1명에 계정 연결(트랜잭션). 번호가 같은 보호자 항목에 연결하고, 없으면(원장이 직접 고른 원생)
  * 계정 이름·번호로 보호자 항목을 추가한다. 이미 연결돼 있으면 "already".
  * 같은 트랜잭션에서 번호 색인도 확인한다(다른 계정이 잡았으면 거부, 없으면 다시 잡음) —
  * 같은 계정의 다른 요청이 색인을 되돌리는 것과 겹쳐도 색인 없는 연결이 생기지 않게.
+ * 학부모 문서도 같은 트랜잭션에서 다시 읽는다(존재·상태·번호) — 호출 측이 트랜잭션 밖에서 읽은 번호(`target.phone`)가
+ * 그 사이 `updateParentProfile`로 바뀌었으면 거부해, 옛 번호 색인이 다시 생기거나 옛 번호로 연결되지 않게 한다.
  */
 export async function linkParentToStudentTx(
   db: admin.firestore.Firestore,
@@ -152,7 +145,21 @@ export async function linkParentToStudentTx(
   const ref = db.doc(`academies/${academyId}/students/${studentId}`);
   const key = guardianPhoneKey(target.phone);
   return db.runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
+    const [snap, parentSnap] = await Promise.all([
+      tx.get(ref),
+      tx.get(parentDocRef(db, academyId, target.uid)),
+    ]);
+    if (!parentSnap.exists) {
+      throw new HttpsError("not-found", "학부모 계정을 찾을 수 없습니다.");
+    }
+    const violation = parentLinkTargetViolation(parentSnap.get("status"));
+    if (violation) {
+      throw new HttpsError("failed-precondition", violation);
+    }
+    const currentPhone = parentSnap.get("phone");
+    if (!key || guardianPhoneKey(typeof currentPhone === "string" ? currentPhone : "") !== key) {
+      throw new HttpsError("failed-precondition", PARENT_ACCOUNT_CHANGED_MSG);
+    }
     if (!snap.exists) {
       throw new HttpsError("not-found", "원생 정보를 찾을 수 없습니다.");
     }

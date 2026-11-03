@@ -78,7 +78,16 @@ async function countParentsAwaitingApproval(
   return snap.data().count;
 }
 
-/** 홈 요약·히트맵용 집계 — 학원 규모에서 쓰기 시 전체 재계산(정합성 우선) */
+/**
+ * 학원 문서가 있는지 — 학원 삭제(cascade)가 멤버·학생을 지우면 그 삭제 트리거가 뒤늦게 돌아
+ * 지워진 학원 아래에 집계·inbox 문서를 다시 만들 수 있어, 쓰기 직전에 확인한다.
+ * (확인 직후 학원이 지워지는 좁은 틈은 남음)
+ */
+async function academyExists(db: admin.firestore.Firestore, academyId: string): Promise<boolean> {
+  return (await db.doc(`academies/${academyId}`).get()).exists;
+}
+
+/** 홈 요약·히트맵용 집계 — 학원 규모에서 쓰기 시 전체 재계산(정합성 우선). 학원 문서가 없으면 쓰지 않음 */
 export async function reconcileAcademyDashboardStats(
   db: admin.firestore.Firestore,
   academyId: string,
@@ -103,6 +112,7 @@ export async function reconcileAcademyDashboardStats(
     countParentsAwaitingApproval(db, academyId),
   ]);
 
+  if (!(await academyExists(db, academyId))) return;
   await statsRef(db, academyId).set({
     schemaVersion: ACADEMY_DASHBOARD_STATS_SCHEMA_VERSION,
     teachers,
@@ -143,6 +153,7 @@ async function syncTeacherInbox(
 
   if (status === "pending_registration" || status === "pending_setup") {
     await inviteRef.delete();
+    if (!(await academyExists(db, academyId))) return;
     await pendingRef.set({
       ...base,
       kind: "pending_registration",
@@ -153,6 +164,7 @@ async function syncTeacherInbox(
 
   if (status === "invitation_sent") {
     await pendingRef.delete();
+    if (!(await academyExists(db, academyId))) return;
     const invitationExpiresAt = inviteExpiresAtFromData(after, TEACHER_INVITE_TTL_MS);
     await inviteRef.set({
       ...base,
@@ -184,6 +196,7 @@ async function syncParentInbox(
     return;
   }
   await Promise.all(legacyRefs.map((r) => r.delete()));
+  if (!(await academyExists(db, academyId))) return;
   const existing = await approvalRef.get();
   await approvalRef.set({
     schemaVersion: ACADEMY_ADMIN_INBOX_SCHEMA_VERSION,

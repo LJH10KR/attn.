@@ -5,8 +5,18 @@ import { FieldValue } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { DEFAULT_STAFF_ROLE_ID } from "./lib/permissions";
-import { academySeqMetaPath, formatStudentAttnId } from "./lib/attn-id";
-import { deleteCollectionDocs, deleteStudentDocs } from "./lib/firestore-cleanup";
+import {
+  academySeqMetaPath,
+  attnLoginIndexPath,
+  formatParentAttnId,
+  formatStudentAttnId,
+  formatTeacherAttnId,
+} from "./lib/attn-id";
+import { cleanupDeletedAcademyUsers } from "./lib/admin-user-cleanup";
+import { deleteAcademyFirestoreCascade, deleteCollectionDocs } from "./lib/firestore-cleanup";
+import { internalEmailForAttnId, randomAuthPassword } from "./lib/member-credentials";
+import { passwordSecretFields } from "./lib/password-hash";
+import { allocateTeacherLoginId } from "./lib/teacher-login-id";
 import { deriveGuardianFields, type Guardian } from "./lib/student-guardians";
 import { classesCol, classHistoryCol, classHistoryEntry, computeTeacherUids } from "./lib/class-teachers";
 import { kstYear, type GradeCode, type StudentStatus } from "./lib/student-profile";
@@ -50,9 +60,65 @@ function validateNewAcademySlug(academyId: string): void {
   }
 }
 
+/** 테스트 시드 계정 전용 고정 비밀번호(로그인 테스트 편의) — 원장은 이메일, 직원·학부모는 로그인 ID 비밀번호 */
+const SEED_PASSWORD = "Atn1234!";
+
 function randomPassword(): string {
-  // 테스트 시드 계정 전용 고정 8자리 비밀번호(로그인 테스트 편의)
-  return "Atn1234!";
+  return SEED_PASSWORD;
+}
+
+type SeedMember = {
+  uid: string;
+  attnId: string;
+  loginId: string;
+  displayName: string;
+};
+
+/**
+ * seed 직원·학부모 — 실제 계정과 같은 로그인 ID 계정(내부 이메일, Auth 비밀번호 무작위).
+ * 로그인은 로그인 ID + `SEED_PASSWORD`(`secrets/login` 해시)로만 된다. 문서·색인은 호출 측 배치에서 쓴다.
+ */
+async function createSeedMemberAuth(attnId: string, displayName: string, loginId: string): Promise<SeedMember> {
+  const user = await admin.auth().createUser({
+    email: internalEmailForAttnId(attnId),
+    password: randomAuthPassword(),
+    displayName,
+    emailVerified: false,
+    disabled: false,
+  });
+  return { uid: user.uid, attnId, loginId, displayName };
+}
+
+/** seed 멤버의 로그인 비밀번호·로그인 색인 쓰기 */
+async function seedMemberLoginWrites(
+  db: FirebaseFirestore.Firestore,
+  academyId: string,
+  role: "teacher" | "parent",
+  m: SeedMember,
+): Promise<Array<{ ref: DocumentReference; data: Record<string, unknown> }>> {
+  const col = role === "teacher" ? "staff" : "parents";
+  return [
+    {
+      ref: db.doc(`academies/${academyId}/${col}/${m.uid}/secrets/login`),
+      data: {
+        ...(await passwordSecretFields(SEED_PASSWORD)),
+        authProvider: "password",
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+    },
+    {
+      ref: db.doc(attnLoginIndexPath(m.loginId)),
+      data: {
+        loginId: m.loginId,
+        attnId: m.attnId,
+        academyId,
+        authUid: m.uid,
+        role,
+        ...(role === "parent" ? { authProvider: "password" } : {}),
+        createdAt: FieldValue.serverTimestamp(),
+      },
+    },
+  ];
 }
 
 function randomEmail(kind: SeedUserKind, seqNo: number): string {
@@ -208,7 +274,7 @@ export const createSeedBatch = onCall(async (request) => {
 
   // 반당 선생님 수(입력 이름은 예전 그대로 teachersPerStudent)
   if (teachersPerStudent > teachersCount) {
-    throw new HttpsError("invalid-argument", "teachersPerStudent는 teachersCount보다 작거나 같아야 합니다.");
+    throw new HttpsError("invalid-argument", "반당 선생님 수는 선생님 수보다 클 수 없습니다.");
   }
 
   // batchId는 이메일/문서 id 구성에 들어가므로 고정 길이 + 유니크 보장
@@ -241,8 +307,9 @@ export const createSeedBatch = onCall(async (request) => {
 
   // 1) Auth 유저 생성(UID 확보가 필요)
   // 번호는 seedCounters 트랜잭션으로 예약하므로 전체 스캔 없이 저비용으로 유니크 보장
+  // 원장은 이메일 로그인(seedCounters 번호), 직원·학부모는 로그인 ID 계정(학원 meta/seq 번호)
   const [ownerNo] = await reserveSeedNumberRange(db, "owner", 1);
-  const teacherNos = await reserveSeedNumberRange(db, "teacher", teachersCount);
+  // 학부모 번호(보호자 연락처)를 배치마다 다르게 만드는 데만 쓴다
   const parentNos = await reserveSeedNumberRange(db, "parent", parentsCount);
 
   const ownerAuth = await createAuthUser({
@@ -252,28 +319,25 @@ export const createSeedBatch = onCall(async (request) => {
     displayIdx: 0,
   });
 
-  const teacherAuths: Array<{ uid: string; email: string; password: string; displayName: string }> = [];
+  const teacherAuths: SeedMember[] = [];
+  const usedTeacherLoginIds = new Set<string>();
   for (let i = 0; i < teachersCount; i++) {
+    let loginId = await allocateTeacherLoginId(db);
+    while (usedTeacherLoginIds.has(loginId)) loginId = await allocateTeacherLoginId(db);
+    usedTeacherLoginIds.add(loginId);
     teacherAuths.push(
-      await createAuthUser({
-        db,
-        kind: "teacher",
-        seqNo: teacherNos[i]!,
-        displayIdx: i,
-      }),
+      await createSeedMemberAuth(
+        formatTeacherAttnId(academyId, i + 1),
+        randomDisplayName("teacher", i),
+        loginId,
+      ),
     );
   }
 
-  const parentAuths: Array<{ uid: string; email: string; password: string; displayName: string }> = [];
+  const parentAuths: SeedMember[] = [];
   for (let i = 0; i < parentsCount; i++) {
-    parentAuths.push(
-      await createAuthUser({
-        db,
-        kind: "parent",
-        seqNo: parentNos[i]!,
-        displayIdx: i,
-      }),
-    );
+    const attnId = formatParentAttnId(academyId, i + 1);
+    parentAuths.push(await createSeedMemberAuth(attnId, randomDisplayName("parent", i), attnId));
   }
 
   // 2) Firestore 시드(쓰기 수가 많지 않으므로 배치 단위 커밋)
@@ -308,18 +372,22 @@ export const createSeedBatch = onCall(async (request) => {
     },
   });
 
-  // teachers
+  // teachers — 로그인 ID 계정(기본 역할 "선생님", 사용 중)
   for (const t of teacherAuths) {
     writes.push({
       ref: db.doc(`academies/${academyId}/staff/${t.uid}`),
       data: {
-        email: t.email,
+        attnId: t.attnId,
+        loginId: t.loginId,
+        email: "",
         displayName: t.displayName,
         subject: null,
         phone: null,
         academyId,
         status: "active",
         authUid: t.uid,
+        authProvider: "password",
+        isGuest: false,
         roleId: DEFAULT_STAFF_ROLE_ID,
         permissions: [],
         employmentStatus: "employed",
@@ -328,6 +396,7 @@ export const createSeedBatch = onCall(async (request) => {
         updatedAt: FieldValue.serverTimestamp(),
       },
     });
+    writes.push(...(await seedMemberLoginWrites(db, academyId, "teacher", t)));
   }
 
   // 반 3개 — 여러 명 반 2개(반당 선생님 teachersPerStudent명) + 1인 반 1개, 강의실 선택지 2개
@@ -394,12 +463,16 @@ export const createSeedBatch = onCall(async (request) => {
     writes.push({
       ref: db.doc(`academies/${academyId}/parents/${parent.uid}`),
       data: {
-        email: parent.email,
+        attnId: parent.attnId,
+        loginId: parent.loginId,
+        email: "",
         displayName: parent.displayName,
         phone: parentPhone,
         academyId,
         status: "active",
         authUid: parent.uid,
+        authProvider: "password",
+        signupSource: "academy_created",
         linkedStudentIds: Array.from({ length: studentsPerParent }, (_, s) => `student_${p + 1}_${s + 1}`).sort(),
         approvedAt: FieldValue.serverTimestamp(),
         approvedByUid: createdByUid,
@@ -413,6 +486,7 @@ export const createSeedBatch = onCall(async (request) => {
       ref: db.doc(`academies/${academyId}/parentPhones/${parentPhone.replace(/\D/g, "")}`),
       data: { parentUid: parent.uid, createdAt: FieldValue.serverTimestamp() },
     });
+    writes.push(...(await seedMemberLoginWrites(db, academyId, "parent", parent)));
 
     for (let s = 0; s < studentsPerParent; s++) {
       const studentId = `student_${p + 1}_${s + 1}`;
@@ -471,24 +545,30 @@ export const createSeedBatch = onCall(async (request) => {
   }
 
   // 승인 대기 학부모 2명 — 번호가 맞는 원생이 있는 계정(첫 학부모 첫 자녀의 연락처 전용 보호자 번호)과 매칭 없는 계정
-  const pendingParents: Array<{ uid: string; email: string; password: string; phone: string; displayName: string }> = [];
+  const pendingParents: Array<SeedMember & { phone: string }> = [];
   const pendingNos = await reserveSeedNumberRange(db, "parent", 2);
   for (let i = 0; i < 2; i++) {
-    const a = await createAuthUser({ db, kind: "parent", seqNo: pendingNos[i]!, displayIdx: parentsCount + i });
+    const attnId = formatParentAttnId(academyId, parentsCount + i + 1);
+    const a = await createSeedMemberAuth(attnId, randomDisplayName("parent", parentsCount + i), attnId);
     const phone =
       i === 0
         ? `010-8001-${String(parentNos[0]! % 10000).padStart(4, "0")}`
         : `010-7${String(i).padStart(3, "0")}-${String(pendingNos[i]! % 10000).padStart(4, "0")}`;
     pendingParents.push({ ...a, phone });
+    // 자가 가입 + 이메일 인증을 마친 승인 대기 계정과 같은 모양
     writes.push({
       ref: db.doc(`academies/${academyId}/parents/${a.uid}`),
       data: {
-        email: a.email,
+        attnId: a.attnId,
+        loginId: a.loginId,
+        email: "",
         displayName: a.displayName,
         phone,
         academyId,
         status: "pending_approval",
         authUid: a.uid,
+        authProvider: "password",
+        contactEmailVerified: true,
         linkedStudentIds: [],
         approvedAt: null,
         approvedByUid: null,
@@ -497,6 +577,7 @@ export const createSeedBatch = onCall(async (request) => {
         updatedAt: FieldValue.serverTimestamp(),
       },
     });
+    writes.push(...(await seedMemberLoginWrites(db, academyId, "parent", a)));
   }
 
   writes.push(
@@ -509,7 +590,11 @@ export const createSeedBatch = onCall(async (request) => {
   writes.push(
     {
       ref: db.doc(academySeqMetaPath(academyId)),
-      data: { nextTeacherSeq: 1, nextParentSeq: 1, nextStudentSeq: studentSeq + 1 },
+      data: {
+        nextTeacherSeq: teachersCount + 1,
+        nextParentSeq: parentsCount + pendingParents.length + 1,
+        nextStudentSeq: studentSeq + 1,
+      },
     },
     {
       ref: academyOptionsRef(db, academyId),
@@ -543,10 +628,26 @@ export const createSeedBatch = onCall(async (request) => {
   const writeChunks = chunkArray(writes, chunkSize);
   for (const c of writeChunks) {
     const batch = db.batch();
-    for (const w of c) batch.set(w.ref, w.data);
+    // merge — 비밀번호 해시 필드(`passwordSecretFields`)가 FieldValue.delete()를 담고 있음(새 문서라 결과는 같음)
+    for (const w of c) batch.set(w.ref, w.data, { merge: true });
     await batch.commit();
   }
   await ensureAcademyRoleTemplates(db, academyId);
+
+  // 로그인 판단용 클레임(로그인 ID 로그인 때도 다시 씀)
+  for (const t of teacherAuths) {
+    await admin.auth().setCustomUserClaims(t.uid, { role: "teacher", academyId, membershipStatus: "active" });
+  }
+  for (const p of parentAuths) {
+    await admin.auth().setCustomUserClaims(p.uid, { role: "parent", academyId, membershipStatus: "active" });
+  }
+  for (const p of pendingParents) {
+    await admin.auth().setCustomUserClaims(p.uid, {
+      role: "parent",
+      academyId,
+      membershipStatus: "pending_approval",
+    });
+  }
 
   logger.info("seedBatch created", {
     batchId,
@@ -563,9 +664,14 @@ export const createSeedBatch = onCall(async (request) => {
     academyId,
     credentials: {
       owner: { email: ownerAuth.email, password: ownerAuth.password },
-      teachers: teacherAuths.map((t) => ({ email: t.email, password: t.password })),
-      parents: parentAuths.map((p) => ({ email: p.email, password: p.password })),
-      pendingParents: pendingParents.map((p) => ({ email: p.email, password: p.password, phone: p.phone })),
+      teachers: teacherAuths.map((t) => ({ loginId: t.loginId, password: SEED_PASSWORD, displayName: t.displayName })),
+      parents: parentAuths.map((p) => ({ loginId: p.loginId, password: SEED_PASSWORD, displayName: p.displayName })),
+      pendingParents: pendingParents.map((p) => ({
+        loginId: p.loginId,
+        password: SEED_PASSWORD,
+        displayName: p.displayName,
+        phone: p.phone,
+      })),
     },
     hint: {
       ownerLoginUrl: "/login/owner",
@@ -618,54 +724,20 @@ export const deleteSeedBatch = onCall(async (request) => {
     throw new HttpsError("failed-precondition", "seed 배치 메타데이터가 올바르지 않습니다.");
   }
 
-  // Firestore 삭제
-  const academyTeachersRef = db.collection(`academies/${academyId}/staff`);
-  const academyParentsRef = db.collection(`academies/${academyId}/parents`);
-  const academyStudentsRef = db.collection(`academies/${academyId}/students`);
-  const academyRolesRef = db.collection(`academies/${academyId}/roles`);
-  const secretsLoginRef = db.doc(`academies/${academyId}/secrets/login`);
-  const academyRef = db.doc(`academies/${academyId}`);
+  // 학원 삭제와 같은 cascade(멤버 로그인 정보·색인·알림 기록 포함) + seed 학원만 결제 장부까지
+  const { teacherSnapshots, parentSnapshots } = await deleteAcademyFirestoreCascade(db, academyId);
+  await deleteCollectionDocs(db, `academies/${academyId}/payments`);
 
-  const [teachersSnap, parentsSnap, studentsSnap, rolesSnap, secretsSnap] = await Promise.all([
-    academyTeachersRef.get(),
-    academyParentsRef.get(),
-    academyStudentsRef.get(),
-    academyRolesRef.get(),
-    secretsLoginRef.get(),
-  ]);
-
-  // 학생 문서·하위 기록·학원 메모
-  await deleteStudentDocs(db, academyId, studentsSnap.docs.map((d) => d.id));
-  await deleteCollectionDocs(db, `academies/${academyId}/studentNotes`);
-  await deleteCollectionDocs(db, `academies/${academyId}/parentPhones`);
-  await deleteCollectionDocs(db, `academies/${academyId}/classes`);
-  await deleteCollectionDocs(db, `academies/${academyId}/classHistory`);
-
-  const deleteOps: DocumentReference[] = [];
-  teachersSnap.docs.forEach((d) => deleteOps.push(d.ref));
-  parentsSnap.docs.forEach((d) => deleteOps.push(d.ref));
-  rolesSnap.docs.forEach((d) => deleteOps.push(d.ref));
-  const metaSnap = await db.collection(`academies/${academyId}/meta`).get();
-  metaSnap.docs.forEach((d) => deleteOps.push(d.ref));
-  if (secretsSnap.exists) deleteOps.push(secretsLoginRef);
-  deleteOps.push(academyRef);
-
-  const chunkSize = 400;
-  for (const c of chunkArray(deleteOps, chunkSize)) {
-    const batch = db.batch();
-    for (const ref of c) batch.delete(ref);
-    await batch.commit();
-  }
-
-  // Auth 삭제(삭제 실패는 무시: 이미 지워졌을 수 있음)
-  const authUids = [ownerUid, ...teacherUids, ...parentUids].filter(Boolean);
-  for (const uid of authUids) {
-    try {
-      await admin.auth().deleteUser(uid);
-    } catch (e) {
-      logger.warn("seedBatch deleteUser skipped", { uid, e });
-    }
-  }
+  // Auth·사용자 데이터 — 학원 삭제(adminDeleteAcademyCascade)와 같은 보호(admin 계정 제외, 원장은 남은 소유 학원이 없을 때만)
+  await cleanupDeletedAcademyUsers(db, {
+    memberAuthUids: [
+      ...teacherUids,
+      ...parentUids,
+      ...[...teacherSnapshots, ...parentSnapshots].map((m) => m.authUid),
+    ],
+    ownerUid,
+    context: "deleteSeedBatch",
+  });
 
   await batchRef.update({ deletedAt: FieldValue.serverTimestamp() });
 

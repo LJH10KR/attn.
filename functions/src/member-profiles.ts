@@ -10,7 +10,6 @@ import {
 import { digitsOnlyKrPhone, parseOptionalKrPhone } from "./lib/kr-phone";
 import {
   claimParentPhoneIndexInTx,
-  parentHoldsPhoneIndex,
   parentPhoneIndexRef,
 } from "./lib/parent-links";
 import { verifyLoginPasswordThrottled } from "./lib/login-throttle";
@@ -167,11 +166,8 @@ export const updateParentProfile = onCall(async (request) => {
   const displayName = assertDisplayName(request.data?.displayName);
   const hasPhoneField = request.data != null && "phone" in request.data;
   const phone = hasPhoneField ? parseOptionalKrPhone(request.data?.phone) : undefined;
-  const ref = admin.firestore().doc(`academies/${academyId}/parents/${uid}`);
-  const snap = await ref.get();
-  if (!snap.exists) {
-    throw new HttpsError("not-found", "학부모 정보를 찾을 수 없습니다.");
-  }
+  const db = admin.firestore();
+  const ref = db.doc(`academies/${academyId}/parents/${uid}`);
 
   const patch: Record<string, unknown> = {
     displayName,
@@ -180,27 +176,37 @@ export const updateParentProfile = onCall(async (request) => {
   if (phone !== undefined) {
     patch.phone = phone;
   }
-  const db = admin.firestore();
-  const oldPhone = snap.get("phone");
-  const phoneChanged =
-    phone !== undefined &&
-    digitsOnlyKrPhone(phone ?? "") !== digitsOnlyKrPhone(typeof oldPhone === "string" ? oldPhone : "");
-  if (phoneChanged && (await parentHoldsPhoneIndex(db, academyId, oldPhone, uid))) {
-    // 연결된 적 있는 계정(번호 색인 보유) — 색인을 새 번호로 옮긴다. 새 번호를 다른 계정이 잡고 있으면 거부
-    if (!phone) {
-      throw new HttpsError("invalid-argument", "학원에 연결된 계정은 휴대폰 번호를 비울 수 없습니다.");
+  /**
+   * 판단·색인 이동·문서 수정을 한 트랜잭션에서 — 옛 번호 색인은 이 계정이 가졌든 아니든 항상 안에서 읽는다.
+   * 그래야 첫 연결(`linkParentToStudents`)이 같은 번호 색인을 만드는 것과 겹칠 때 충돌로 순서가 정해져,
+   * "계정 번호는 새 번호인데 색인·연결은 옛 번호"가 남지 않는다(연결 쪽은 학생별 트랜잭션에서 계정 번호를 다시 확인).
+   */
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) {
+      throw new HttpsError("not-found", "학부모 정보를 찾을 수 없습니다.");
     }
-    const oldIndexRef = parentPhoneIndexRef(db, academyId, oldPhone as string);
-    await db.runTransaction(async (tx) => {
-      const [oldIdx, current] = await Promise.all([tx.get(oldIndexRef), tx.get(ref)]);
-      const writeIndex = await claimParentPhoneIndexInTx(tx, db, academyId, phone, uid);
+    const oldPhone = snap.get("phone");
+    const oldKey = digitsOnlyKrPhone(typeof oldPhone === "string" ? oldPhone : "");
+    const oldIndexRef = oldKey ? parentPhoneIndexRef(db, academyId, oldKey) : null;
+    const oldIdx = oldIndexRef ? await tx.get(oldIndexRef) : null;
+    const holdsIndex = Boolean(oldIdx?.exists && oldIdx.get("parentUid") === uid);
+    const phoneChanged = phone !== undefined && digitsOnlyKrPhone(phone ?? "") !== oldKey;
+
+    let writeIndex: (() => boolean) | null = null;
+    if (phoneChanged && holdsIndex) {
+      // 연결된 적 있는 계정(번호 색인 보유) — 색인을 새 번호로 옮긴다. 새 번호를 다른 계정이 잡고 있으면 거부
+      if (!phone) {
+        throw new HttpsError("invalid-argument", "학원에 연결된 계정은 휴대폰 번호를 비울 수 없습니다.");
+      }
+      writeIndex = await claimParentPhoneIndexInTx(tx, db, academyId, phone, uid);
+    }
+    if (writeIndex && oldIndexRef) {
       writeIndex();
-      if (oldIdx.exists && oldIdx.get("parentUid") === uid) tx.delete(oldIndexRef);
-      if (current.exists) tx.update(ref, patch);
-    });
-  } else {
-    await ref.update(patch);
-  }
+      tx.delete(oldIndexRef);
+    }
+    tx.update(ref, patch);
+  });
   try {
     await admin.auth().updateUser(uid, { displayName });
   } catch {

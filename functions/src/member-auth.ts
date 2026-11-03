@@ -283,7 +283,13 @@ export const signInParent = onCall(async (request) => {
   return signInMember(loginId, password, "parent");
 });
 
-/** 최초 비밀번호 변경 + 사용 가능 상태로(직원 active, 학부모는 연결 수로) */
+/**
+ * 최초 비밀번호 변경 + 사용 가능 상태로(직원 active, 학부모는 연결 수로).
+ * 임시 비밀번호로 만들어진 다른 기기 세션은 모두 끊고(`revokeRefreshTokens`), 지금 기기는 응답의 새 커스텀 토큰으로
+ * 다시 로그인한다 — 끊기 전 발급된 이 기기의 토큰도 갱신이 거부되므로(첫 로그인 직후 새로고침에서 로그아웃되던 문제).
+ * 순서: 해시 저장(임시 비밀번호 무효) → 세션 끊기 → 상태 전환 → 클레임 → 새 토큰(전환 뒤 상태).
+ * 세션 끊기를 상태 전환보다 먼저 하는 이유: 전환 뒤에 끊기가 실패하면 다시 호출할 수 없어(이미 active) 다른 세션이 남는다.
+ */
 export const completeMemberFirstLogin = onCall(async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
@@ -313,11 +319,12 @@ export const completeMemberFirstLogin = onCall(async (request) => {
     throw new HttpsError("failed-precondition", "첫 로그인 비밀번호 설정이 필요한 계정이 아닙니다.");
   }
 
-  await admin.auth().updateUser(uid, { password: randomAuthPassword() });
   await memberRef
     .collection("secrets")
     .doc("login")
     .set(await passwordSecretFields(newPassword), { merge: true });
+  // 임시 비밀번호로 만든 세션(다른 기기 포함)을 모두 끊는다 — 지금 기기는 아래 새 토큰으로 다시 로그인
+  await admin.auth().revokeRefreshTokens(uid);
   // 직원은 사용 중, 학부모는 연결 수로(0명이면 연결 대기)
   const db = admin.firestore();
   const membershipStatus = await db.runTransaction(async (tx) => {
@@ -343,7 +350,9 @@ export const completeMemberFirstLogin = onCall(async (request) => {
     membershipStatus,
   });
 
-  return { ok: true, membershipStatus };
+  // 끊은 뒤 발급 — 직원 토큰의 클레임은 전환 뒤 상태(세션 내내 남으므로 pending_setup이면 안 됨)
+  const customToken = await createMemberCustomToken(uid, role, academyId, membershipStatus);
+  return { ok: true, membershipStatus, customToken };
 });
 
 /** 오너/학원 — 임시 비밀번호 재발급 (1회 표시) */

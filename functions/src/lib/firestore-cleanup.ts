@@ -32,6 +32,21 @@ export async function deleteCollectionDocs(
   );
 }
 
+/** 쿼리에 걸리는 문서를 400개씩 나눠 끝까지 삭제 */
+export async function deleteQueryDocs(
+  db: admin.firestore.Firestore,
+  query: FirebaseFirestore.Query,
+): Promise<number> {
+  let total = 0;
+  for (;;) {
+    const snap = await query.limit(400).get();
+    if (snap.empty) return total;
+    await batchDeleteRefs(db, snap.docs.map((d) => d.ref));
+    total += snap.size;
+    if (snap.size < 400) return total;
+  }
+}
+
 export function loginIndexKeysFromMember(data: FirebaseFirestore.DocumentData): string[] {
   const keys = new Set<string>();
   const loginId = data.loginId;
@@ -256,6 +271,10 @@ export async function deleteAcademyFirestoreCascade(
   await deleteCollectionDocs(db, `academies/${academyId}/parentPhones`);
   await deleteCollectionDocs(db, `academies/${academyId}/classes`);
   await deleteCollectionDocs(db, `academies/${academyId}/classHistory`);
+  // 출결 알림 기록과 그 푸시 전달 문서(최상위 `_pushDeliveries`, academyId 필드로 찾음).
+  // 결제 장부(`payments`)는 지우지 않는다 — 보존 정책은 4단계 수납에서(seed 삭제만 따로 지움).
+  await deleteCollectionDocs(db, `academies/${academyId}/attendanceNotifications`);
+  await deleteQueryDocs(db, db.collection("_pushDeliveries").where("academyId", "==", academyId));
 
   const metaSnap = await db.collection(`academies/${academyId}/meta`).get();
   metaSnap.docs.forEach((d) => deleteOps.push(d.ref));
