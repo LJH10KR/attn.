@@ -11,7 +11,7 @@ function syncBadgeCountToServiceWorker(count: number, badgeUserId?: string): voi
       reg.active?.postMessage({
         type: "ATTN_BADGE_SYNC",
         count: Math.max(0, Math.floor(count || 0)),
-        parentUserId: badgeUserId ?? "",
+        recipientUid: badgeUserId ?? "",
       });
     } catch {
       /* ignore */
@@ -72,6 +72,6 @@ export function setAppIconBadgeFromPushData(
   if (raw === undefined || raw === "") return;
   const parsed = parseInt(String(raw), 10);
   if (Number.isNaN(parsed) || parsed < 0) return;
-  const uid = typeof data.parentUserId === "string" ? data.parentUserId : undefined;
+  const uid = typeof data.recipientUid === "string" ? data.recipientUid : undefined;
   setAppIconBadgeCount(parsed, { badgeUserId: uid });
 }

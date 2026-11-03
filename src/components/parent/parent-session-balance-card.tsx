@@ -1,6 +1,7 @@
 "use client";
 
 import PortOne from "@portone/browser-sdk/v2";
+import { getFirebaseAuth } from "@/lib/firebase/client-app";
 import { useState } from "react";
 
 type TuitionSettings = {
@@ -127,6 +128,8 @@ export function ParentSessionBalanceCard({
         customData: {
           studentId,
           academyId,
+          // 결제한 앱 계정 — 서버가 학생의 연결 보호자일 때만 결제 기록에 남김(표시용)
+          payerUid: getFirebaseAuth().currentUser?.uid ?? null,
           paymentType: "session_based",
           sessionCount: chargeSessionCount,
         },

@@ -12,31 +12,78 @@ import { academyMenu } from "@/lib/academy/academy-routes";
 import type { AcademyNavTab, AcademyPermission } from "@/lib/academy/permissions";
 import { kstMonthBounds, nowKST } from "@/lib/academy/kst-month";
 import { docToStaffRow } from "@/lib/academy/staff-row";
+import {
+  STUDENT_STATUSES,
+  STUDENT_STATUS_LABELS,
+  type StudentStatus,
+} from "@/lib/academy/student-profile";
 import { academyPaymentsPath, academyStaffPath, COLLECTIONS } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
 
-export type AcademyMenuStat = { summary?: string; badge?: number };
+export type AcademyMenuStat = {
+  summary?: string;
+  detail?: string;
+  badge?: number;
+  /** 메뉴 주소 뒤에 붙일 쿼리(예: 승인 대기가 있으면 `view=pending`) */
+  query?: string;
+};
 export type AcademyMenuStats = Partial<Record<AcademyPermission, AcademyMenuStat>>;
 
 type Loader = (academyId: string) => Promise<AcademyMenuStats>;
 
 /** 메뉴별 요약 숫자 — 권한이 있는 메뉴만 읽는다(규칙과 같은 권한) */
 const LOADERS: Partial<Record<AcademyPermission, Loader>> = {
+  // 요약 = 자녀가 연결된 계정 수, 배지 = 가입 승인 대기(연결된 적 없는 계정 — 연결 해제로 돌아온 계정은 제외)
   "operations.parents": async (academyId) => {
     const parents = collection(getFirebaseDb(), COLLECTIONS.academies, academyId, "parents");
-    const [all, pending] = await Promise.all([
-      getCountFromServer(parents),
-      getCountFromServer(query(parents, where("status", "==", "pending_registration"))),
+    const [linked, pending] = await Promise.all([
+      getCountFromServer(query(parents, where("status", "==", "active"))),
+      getCountFromServer(
+        query(parents, where("status", "==", "pending_approval"), where("approvedAt", "==", null)),
+      ),
     ]);
+    const badge = pending.data().count;
     return {
-      "operations.parents": { summary: `${all.data().count}명`, badge: pending.data().count },
+      // 승인 대기가 있으면 학부모 관리의 승인 대기 탭으로 바로 들어간다
+      "operations.parents": {
+        summary: `연결 ${linked.data().count}명`,
+        badge,
+        ...(badge > 0 ? { query: "view=pending" } : {}),
+      },
     };
   },
+  // 숫자는 재원 기준, 휴원·미등록·퇴원은 보조 줄에 따로(0이면 생략)
   "operations.students": async (academyId) => {
-    const snap = await getCountFromServer(
-      collection(getFirebaseDb(), COLLECTIONS.academies, academyId, "students"),
+    const students = collection(getFirebaseDb(), COLLECTIONS.academies, academyId, "students");
+    const counts = await Promise.all(
+      STUDENT_STATUSES.map(async (status) => {
+        const snap = await getCountFromServer(query(students, where("status", "==", status)));
+        return [status, snap.data().count] as const;
+      }),
     );
-    return { "operations.students": { summary: `${snap.data().count}명` } };
+    const byStatus = Object.fromEntries(counts) as Record<StudentStatus, number>;
+    const detail = STUDENT_STATUSES.filter((s) => s !== "enrolled" && byStatus[s] > 0)
+      .map((s) => `${STUDENT_STATUS_LABELS[s]} ${byStatus[s]}`)
+      .join(" · ");
+    return {
+      "operations.students": { summary: `재원 ${byStatus.enrolled}명`, ...(detail ? { detail } : {}) },
+    };
+  },
+  // 숫자는 운영중 기준, 준비중·종강은 보조 줄에 따로(0이면 생략)
+  "operations.classes": async (academyId) => {
+    const classes = collection(getFirebaseDb(), COLLECTIONS.academies, academyId, "classes");
+    const [active, preparing, ended] = await Promise.all(
+      (["active", "preparing", "ended"] as const).map(async (status) => {
+        const snap = await getCountFromServer(query(classes, where("status", "==", status)));
+        return snap.data().count;
+      }),
+    );
+    const detail = [preparing > 0 ? `준비중 ${preparing}` : null, ended > 0 ? `종강 ${ended}` : null]
+      .filter(Boolean)
+      .join(" · ");
+    return {
+      "operations.classes": { summary: `운영 중 ${active}개`, ...(detail ? { detail } : {}) },
+    };
   },
   "billing.payments": async (academyId) => {
     const { year, month } = nowKST();

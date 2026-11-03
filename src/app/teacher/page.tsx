@@ -1,16 +1,14 @@
 "use client";
 
 import { FirebaseError } from "firebase/app";
-import { formatKrPhoneDisplay } from "@/lib/phone/kr-phone";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, Timestamp } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  docToStudentRow,
-  type StudentRowVM,
-} from "@/components/academy/academy-student-panel";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { StudentDetailSheet } from "@/components/academy/student-detail/student-detail-sheet";
+import { useStudentDetailParam } from "@/components/academy/student-detail/use-student-detail-param";
+import { groupMyClasses, TeacherMyClasses } from "@/components/teacher/teacher-my-classes";
 import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardNotificationsModal } from "@/components/dashboard/dashboard-notifications-modal";
@@ -29,7 +27,13 @@ import {
   type AttendanceNotifyResult,
 } from "@/lib/academy/attendance-records";
 import { academyPath } from "@/lib/academy/academy-routes";
+import { seoulWeekday } from "@/lib/academy/class-schedule";
 import { staffDocHasAcademyMenus } from "@/lib/academy/staff-landing";
+import { docToStudent, type StudentVM } from "@/lib/academy/student-row";
+import { docToClassBrief, type AcademyClassBrief } from "@/lib/academy/use-academy-classes";
+import { useAcademyOptionList } from "@/lib/academy/use-academy-option-list";
+import { usePermissions } from "@/lib/academy/use-permissions";
+import { academyStudentsPath, COLLECTIONS } from "@/lib/firebase/attn-schema";
 import { setLastDashboardRoleHint } from "@/lib/auth/last-dashboard-role";
 import { useBootOverlay } from "@/components/boot/boot-overlay";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
@@ -40,52 +44,57 @@ import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 
 const glassCard = "glass-card";
 
-function sortByName(a: StudentRowVM, b: StudentRowVM): number {
-  return a.name.localeCompare(b.name, "ko");
+type MyClassesData = { students: StudentVM[]; classes: AcademyClassBrief[] };
+
+/**
+ * 내 반·담당 학생 — 클라이언트 쿼리(규칙: 활성 선생님 + `teacherUids`에 본인).
+ * 학생 `teacherUids`는 반(종강 제외)에서 서버가 계산하고, 반 문서의 `teacherUids`는 반 선생님 그대로.
+ */
+async function loadMyClasses(academyId: string, uid: string): Promise<MyClassesData> {
+  const db = getFirebaseDb();
+  const [studentSnap, classSnap] = await Promise.all([
+    getDocs(query(collection(db, academyStudentsPath(academyId)), where("teacherUids", "array-contains", uid))),
+    getDocs(
+      query(
+        collection(db, COLLECTIONS.academies, academyId, "classes"),
+        where("teacherUids", "array-contains", uid),
+      ),
+    ),
+  ]);
+  return {
+    students: studentSnap.docs.map((d) => docToStudent(d.id, d.data() as Record<string, unknown>)),
+    classes: classSnap.docs.map((d) => docToClassBrief(d.id, d.data() as Record<string, unknown>)),
+  };
 }
 
-function isRetryableCallableAuthError(err: unknown): boolean {
-  if (!(err instanceof FirebaseError)) return false;
-  return (
-    err.code === "functions/unauthenticated" ||
-    err.code === "functions/permission-denied"
-  );
-}
-
-type CallableStudentPayload = {
-  id: string;
-  parentUserId?: string;
-  name?: string;
-  age?: number;
-  phone?: string;
-  emergencyContact?: string;
-  assignedTeacherUids?: string[];
-  assignedTeacherUid?: string | null;
-  createdAtMillis?: number | null;
-};
-
-function studentRowFromCallablePayload(
-  s: CallableStudentPayload,
-): StudentRowVM {
-  const createdAt =
-    typeof s.createdAtMillis === "number"
-      ? Timestamp.fromMillis(s.createdAtMillis)
-      : undefined;
-  return docToStudentRow(s.id, {
-    parentUserId: s.parentUserId ?? "",
-    name: s.name ?? "",
-    age: s.age ?? 0,
-    phone: s.phone ?? "",
-    emergencyContact: s.emergencyContact ?? "",
-    assignedTeacherUids: s.assignedTeacherUids ?? [],
-    ...(s.assignedTeacherUid
-      ? { assignedTeacherUid: s.assignedTeacherUid }
-      : {}),
-    ...(createdAt ? { createdAt } : {}),
-  });
+/** 규칙 거부(계정 비활성·권한 변경)와 네트워크 오류를 나눠 안내 */
+function myClassesErrorMessage(err: unknown): string {
+  const code = err instanceof FirebaseError ? err.code : "";
+  if (code === "permission-denied") {
+    return "담당 반 정보를 볼 수 없습니다. 계정이 비활성화되었거나 학원에서 권한이 바뀌었을 수 있습니다.";
+  }
+  if (code === "unavailable" || code === "deadline-exceeded" || (typeof navigator !== "undefined" && !navigator.onLine)) {
+    return "네트워크 연결을 확인한 뒤 목록 새로고침을 눌러 주세요.";
+  }
+  return "담당 학생 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.";
 }
 
 export default function TeacherDashboardPage() {
+  return (
+    <Suspense
+      fallback={
+        <RoleDashboardBootShell
+          loadingLabel="선생님 대시보드 확인 중"
+          footerHint="선생님 계정과 연결 정보를 확인하는 중입니다."
+        />
+      }
+    >
+      <TeacherDashboard />
+    </Suspense>
+  );
+}
+
+function TeacherDashboard() {
   const router = useRouter();
   const { hide: hideBootOverlay } = useBootOverlay();
   const { profile: authProfile } = useAuthProfile();
@@ -98,7 +107,7 @@ export default function TeacherDashboardPage() {
   const [googleEmail, setGoogleEmail] = useState<string | null>(null);
   /** 학원 메뉴 권한을 위임받은 직원 — 학원 관리 화면(5탭)으로 가는 길 */
   const [hasAcademyMenus, setHasAcademyMenus] = useState(false);
-  const [students, setStudents] = useState<StudentRowVM[]>([]);
+  const [myClasses, setMyClasses] = useState<MyClassesData>({ students: [], classes: [] });
   const [listError, setListError] = useState<string | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
   const { logout: onLogout, logoutBusy, logoutModal } = useRoleLogout({
@@ -131,7 +140,7 @@ export default function TeacherDashboardPage() {
       if (!user) {
         resetTeacherListSession();
         teacherInitGenerationRef.current += 1;
-        setStudents([]);
+        setMyClasses({ students: [], classes: [] });
         setListError(null);
         setAcademyId(null);
         setReady(false);
@@ -148,7 +157,7 @@ export default function TeacherDashboardPage() {
 
       const gen = ++teacherInitGenerationRef.current;
       resetTeacherListSession();
-      setStudents([]);
+      setMyClasses({ students: [], classes: [] });
       setListError(null);
       setListInitialLoading(false);
 
@@ -199,18 +208,8 @@ export default function TeacherDashboardPage() {
         setListInitialLoading(true);
 
         try {
-          const listFn = httpsCallable(
-            getFirebaseFunctions(),
-            "listTeacherAssignedStudents",
-          );
-          let listRes;
-          try {
-            listRes = await listFn({ academyId: aid });
-          } catch (err) {
-            if (!isRetryableCallableAuthError(err)) throw err;
-            await user.getIdToken(true);
-            listRes = await listFn({ academyId: aid });
-          }
+          const data = await loadMyClasses(aid, uid);
+          // 사용자가 바뀐 뒤 늦게 도착한 응답은 버린다
           if (
             cancelled ||
             gen !== teacherInitGenerationRef.current ||
@@ -218,24 +217,17 @@ export default function TeacherDashboardPage() {
           ) {
             return;
           }
-
-          const payload = listRes.data as {
-            students?: CallableStudentPayload[];
-          };
-          const rawList = Array.isArray(payload?.students)
-            ? payload.students
-            : [];
-          const list = rawList.map((s) => studentRowFromCallablePayload(s));
-          list.sort(sortByName);
-          setStudents(list);
+          setMyClasses(data);
           setListError(null);
           teacherListLoadedUidRef.current = uid;
-        } catch {
-          if (!cancelled && gen === teacherInitGenerationRef.current) {
-            setStudents([]);
-            setListError(
-              "전담 학생 목록을 불러오지 못했습니다. 잠시 후 새로고침해 주세요.",
-            );
+        } catch (err) {
+          if (
+            !cancelled &&
+            gen === teacherInitGenerationRef.current &&
+            auth.currentUser?.uid === uid
+          ) {
+            setMyClasses({ students: [], classes: [] });
+            setListError(myClassesErrorMessage(err));
           }
         } finally {
           if (!cancelled && gen === teacherInitGenerationRef.current) {
@@ -264,31 +256,18 @@ export default function TeacherDashboardPage() {
     if (!user?.uid || !aid) {
       return;
     }
+    const uid = user.uid;
+    const gen = teacherInitGenerationRef.current;
+    const stale = () => gen !== teacherInitGenerationRef.current || auth.currentUser?.uid !== uid;
     setListRefreshBusy(true);
     setListError(null);
     try {
-      const listFn = httpsCallable(
-        getFirebaseFunctions(),
-        "listTeacherAssignedStudents",
-      );
-      let listRes;
-      try {
-        listRes = await listFn({ academyId: aid });
-      } catch (err) {
-        if (!isRetryableCallableAuthError(err)) throw err;
-        await user.getIdToken(true);
-        listRes = await listFn({ academyId: aid });
-      }
-      const payload = listRes.data as { students?: CallableStudentPayload[] };
-      const rawList = Array.isArray(payload?.students) ? payload.students : [];
-      const list = rawList.map((s) => studentRowFromCallablePayload(s));
-      list.sort(sortByName);
-      setStudents(list);
+      const data = await loadMyClasses(aid, uid);
+      if (stale()) return;
+      setMyClasses(data);
       setListError(null);
-    } catch {
-      setListError(
-        "전담 학생 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
-      );
+    } catch (err) {
+      if (!stale()) setListError(myClassesErrorMessage(err));
     } finally {
       setListRefreshBusy(false);
     }
@@ -371,6 +350,19 @@ export default function TeacherDashboardPage() {
       cancelled = true;
     };
   }, [academyId]);
+
+  // 학생 상세 시트 — 권한 없는 선생님은 정보 탭만(D10), 판단은 studentAccess(teacherUids)
+  const permissions = usePermissions(academyId);
+  const detail = useStudentDetailParam();
+  const { items: rooms } = useAcademyOptionList(academyId, "rooms");
+  const roomLabelOf = useCallback(
+    (roomId: string) => rooms.find((r) => r.id === roomId)?.label ?? null,
+    [rooms],
+  );
+  const classGroups = useMemo(
+    () => groupMyClasses(myClasses.classes, myClasses.students, seoulWeekday()),
+    [myClasses],
+  );
 
   const headerProfile = useMemo(
     () =>
@@ -465,7 +457,7 @@ export default function TeacherDashboardPage() {
         </p> */}
 
         <div className="mt-[26px] mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-foreground">전담 학생</h2>
+          <h2 className="text-sm font-semibold text-foreground">내 반</h2>
           <button
             type="button"
             onClick={() => void refreshAssignedStudents()}
@@ -492,64 +484,40 @@ export default function TeacherDashboardPage() {
           {listInitialLoading ? (
             <StudentListSectionSkeleton
               rows={3}
-              label="전담 학생 목록 불러오는 중"
+              label="내 반 불러오는 중"
             />
-          ) : students.length === 0 ? (
-            <p
-              className={`py-12 text-center text-sm text-neutral-500 ${glassCard}`}
-            >
-              전담으로 연결된 학생이 없습니다. 학원에서 배정이 되면 여기에
-              표시됩니다.
-            </p>
+          ) : classGroups.length === 0 ? (
+            listError ? null : (
+              <p
+                className={`break-keep px-4 py-12 text-center text-sm text-neutral-500 ${glassCard}`}
+              >
+                담당 반이 없습니다. 학원에서 반 선생님으로 지정되면 여기에
+                표시됩니다.
+              </p>
+            )
           ) : (
-            students.map((s) => (
-              <div key={s.id} className={`p-4 ${glassCard}`}>
-                <p className="font-medium text-foreground">
-                  {s.name}
-                  <span className="font-normal text-neutral-500">
-                    {" "}
-                    · 만 {s.age}세
-                  </span>
-                </p>
-                <p className="mt-2 text-[11px] text-neutral-600">
-                  연락{" "}
-                  <span className="text-foreground">
-                    {formatKrPhoneDisplay(s.phone) || "—"}
-                  </span>
-                </p>
-                <p className="mt-0.5 text-[11px] text-neutral-600">
-                  비상 연락{" "}
-                  <span className="text-foreground">
-                    {formatKrPhoneDisplay(s.emergencyContact) || "—"}
-                  </span>
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={notifyBusyKey !== null}
-                    onClick={() => void sendAttendanceNotify(s.id, "present")}
-                    className="rounded-[8px] border border-emerald-400/60 bg-emerald-500/15 px-3 py-2 text-[11px] font-medium text-emerald-950 hover:bg-emerald-500/25 disabled:opacity-50"
-                  >
-                    {notifyBusyKey === `${s.id}-present`
-                      ? "기록 중…"
-                      : "출석"}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={notifyBusyKey !== null}
-                    onClick={() => void sendAttendanceNotify(s.id, "absent")}
-                    className="rounded-[8px] border border-amber-400/60 bg-amber-500/12 px-3 py-2 text-[11px] font-medium text-amber-950 hover:bg-amber-500/22 disabled:opacity-50"
-                  >
-                    {notifyBusyKey === `${s.id}-absent`
-                      ? "기록 중…"
-                      : "결석"}
-                  </button>
-                </div>
-              </div>
-            ))
+            <TeacherMyClasses
+              groups={classGroups}
+              roomLabelOf={roomLabelOf}
+              notifyBusyKey={notifyBusyKey}
+              onNotifyAction={(id, kind) => void sendAttendanceNotify(id, kind)}
+              onOpenStudentAction={(id) => detail.open(id)}
+            />
           )}
         </div>
       </div>
+
+      {detail.studentId && academyId ? (
+        <StudentDetailSheet
+          key={detail.studentId}
+          academyId={academyId}
+          studentId={detail.studentId}
+          tabParam={detail.tabParam}
+          permissions={permissions}
+          onTabChangeAction={detail.setTab}
+          onCloseAction={detail.close}
+        />
+      ) : null}
 
       <DashboardNotificationsModal
         open={notificationsOpen}

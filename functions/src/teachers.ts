@@ -1,5 +1,5 @@
 import * as admin from "firebase-admin";
-import { FieldValue, Timestamp, type QueryDocumentSnapshot } from "firebase-admin/firestore";
+import { FieldValue } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { reconcileUserActivationMirror } from "./user-activation-mirror";
@@ -7,15 +7,16 @@ import { detachStaffAccount } from "./lib/staff-account";
 import { assertPermission, type AcademyActor } from "./lib/academy-access";
 import { normalizePermissionList } from "./lib/permissions";
 import { staffAccountChangeViolation } from "./lib/role-policy";
+import { stripTeacherFromClasses } from "./lib/class-teachers";
 import {
   deleteAttnLoginIndexForMember,
   deleteMemberLoginSecrets,
   purgeUserFirestoreData,
-  stripTeacherFromStudents,
 } from "./lib/firestore-cleanup";
 
 /**
- * 직원 계정 — 활성 상태 조회, 담당 학생 목록, 승인(활성)·비활성·삭제.
+ * 직원 계정 — 활성 상태 조회, 승인(활성)·비활성·삭제.
+ * 담당 학생 목록은 선생님 화면이 클라이언트 쿼리(`students where teacherUids array-contains 본인`, 규칙 허용)로 읽는다.
  * 계정 삭제는 사용 중·비활성이면 인사 기록을 계정 없는 직원으로 남기고, 첫 로그인 전·승인 대기·게스트는 전체 삭제.
  * 계정 만들기는 `staff-invites.ts`(초대 링크·직접 만들어 주기), 인사 정보는 `staff.ts`.
  */
@@ -81,73 +82,6 @@ export const getTeacherActivationState = onCall(
       primaryStatus: teacher.primaryStatus as TeacherStatus | null,
       primaryAcademyId: teacher.primaryAcademyId,
     };
-  },
-);
-
-/**
- * 활성 선생님 전담 학생 목록 — 클라이언트 Firestore list + 보안 규칙 OR 조합이
- * 에뮬/일부 환경에서 evaluation error를 내는 경우가 있어 Admin 조회로 통일합니다.
- */
-export const listTeacherAssignedStudents = onCall(
-  { cors: true, enforceAppCheck: enforceAppCheckOnTeacherState },
-  async (request) => {
-    if (!request.auth?.uid) {
-      throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
-    }
-    const uid = request.auth.uid;
-    const academyId =
-      typeof request.data?.academyId === "string" ? request.data.academyId.trim() : "";
-    if (!academyId) {
-      throw new HttpsError("invalid-argument", "학원 ID가 필요합니다.");
-    }
-
-    const db = admin.firestore();
-    const teacherRef = db.doc(`academies/${academyId}/staff/${uid}`);
-    const col = db.collection(`academies/${academyId}/students`);
-
-    const [teacherSnap, byArrSnap, byLegacySnap] = await Promise.all([
-      teacherRef.get(),
-      col.where("assignedTeacherUids", "array-contains", uid).get(),
-      col.where("assignedTeacherUid", "==", uid).get(),
-    ]);
-    if (!teacherSnap.exists || teacherSnap.get("status") !== "active") {
-      throw new HttpsError("permission-denied", "이 학원의 활성 선생님만 학생 목록을 조회할 수 있습니다.");
-    }
-
-    const byId = new Map<string, QueryDocumentSnapshot>();
-    for (const d of byArrSnap.docs) {
-      byId.set(d.id, d);
-    }
-    for (const d of byLegacySnap.docs) {
-      byId.set(d.id, d);
-    }
-
-    const students = [...byId.values()].map((d) => {
-      const data = d.data();
-      const createdAt = data.createdAt as Timestamp | undefined;
-      const createdAtMillis =
-        createdAt && typeof createdAt.toMillis === "function" ? createdAt.toMillis() : null;
-      const rawUids = data.assignedTeacherUids;
-      const assignedTeacherUids =
-        Array.isArray(rawUids) && rawUids.every((x: unknown) => typeof x === "string")
-          ? (rawUids as string[]).filter((x) => x.length > 0)
-          : [];
-      const legacyUid = data.assignedTeacherUid;
-      return {
-        id: d.id,
-        parentUserId: typeof data.parentUserId === "string" ? data.parentUserId : "",
-        name: typeof data.name === "string" ? data.name : "",
-        age: typeof data.age === "number" && Number.isFinite(data.age) ? Math.floor(data.age) : 0,
-        phone: typeof data.phone === "string" ? data.phone : "",
-        emergencyContact: typeof data.emergencyContact === "string" ? data.emergencyContact : "",
-        assignedTeacherUids,
-        assignedTeacherUid:
-          typeof legacyUid === "string" && legacyUid.length > 0 ? legacyUid : null,
-        createdAtMillis,
-      };
-    });
-
-    return { ok: true as const, students };
   },
 );
 
@@ -264,13 +198,14 @@ export const deleteTeacherInvite = onCall(async (request) => {
   // 써 오던 계정(사용 중·비활성)은 계정만 지우고 인사 기록 유지 — 초대 취소·가입 거절(첫 로그인 전·승인 대기)과 게스트는 전체 삭제
   const keepStaffRecord = (st === "active" || st === "inactive") && snap.get("isGuest") !== true;
 
-  await stripTeacherFromStudents(db, academyId, authUid);
   await deleteMemberLoginSecrets(db, academyId, "teacher", teacherId);
   await deleteAttnLoginIndexForMember(db, data, authUid);
   const keptStaffId = keepStaffRecord ? await detachStaffAccount(db, academyId, snap) : null;
   if (!keepStaffRecord) {
     await ref.delete();
   }
+  // staff 문서를 분리·삭제한 뒤 반에서 뺀다 — 그 사이 저장된 반도 새 uid 검사(D6)에서 막히므로 지운 uid가 남지 않음
+  await stripTeacherFromClasses(db, academyId, authUid, callerUid);
 
   try {
     await admin.auth().deleteUser(authUid);

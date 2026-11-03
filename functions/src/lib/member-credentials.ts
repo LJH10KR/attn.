@@ -1,7 +1,7 @@
 import * as crypto from "node:crypto";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
-import { attnLoginIndexPath, formatStudentAttnId } from "./attn-id";
+import { attnLoginIndexPath } from "./attn-id";
 import { allocateTeacherLoginId } from "./teacher-login-id";
 import { tempPasswordSecretFields } from "./password-hash";
 import { DEFAULT_STAFF_ROLE_ID } from "./permissions";
@@ -38,13 +38,15 @@ export function randomTempPassword(): string {
  * 로그인 ID 계정(내부 이메일)의 Firebase Auth 비밀번호 — 아무도 모르는 무작위 값.
  * 앱 로그인은 서버가 `secrets/login` 해시로 확인한 뒤 커스텀 토큰을 주므로 Auth 비밀번호를 쓰지 않는다.
  * 사용자 비밀번호를 Auth에도 넣으면 내부 이메일로 `signInWithEmailAndPassword`를 시도해 연속 실패 잠금을 우회할 수 있음.
- * Auth 비밀번호를 만들거나 바꾸는 모든 곳(계정 생성·첫 로그인·변경·재발급·초기화)에서 이 값만 쓸 것.
+ * Auth 비밀번호를 만들거나 바꾸는 모든 곳(계정 생성·변경·재발급·초기화·seed)에서 이 값만 쓸 것.
+ * (첫 로그인은 Auth 비밀번호를 바꾸지 않고 `revokeRefreshTokens`로 세션만 끊는다)
  */
 export function randomAuthPassword(): string {
   return crypto.randomBytes(32).toString("base64url");
 }
 
-function internalEmailForAttnId(attnId: string): string {
+/** 로그인 ID 계정의 Auth 내부 이메일 — 사람이 쓰지 않는 주소(로그인은 로그인 ID로만) */
+export function internalEmailForAttnId(attnId: string): string {
   const safe = attnId.replace(/[^a-zA-Z0-9._-]/g, "_");
   return `attn+${safe}@provision.attndot.internal`;
 }
@@ -56,6 +58,8 @@ export async function provisionMemberAccount(params: {
   role: MemberKind;
   displayName: string;
   tempPassword?: string;
+  /** 멤버 문서에 함께 쓸 필드(학부모 번호·승인 기록 등) */
+  extra?: Record<string, unknown>;
 }): Promise<ProvisionedMember> {
   const { db, academyId, attnId, role, displayName } = params;
   const tempPassword = params.tempPassword ?? randomTempPassword();
@@ -106,13 +110,8 @@ export async function provisionMemberAccount(params: {
     memberData.permissions = [];
     memberData.employmentStatus = "employed";
   }
-  if (role === "parent") {
-    memberData.childrenCount = 0;
-    memberData.nextStudentSeq = 1;
-  }
-
   const batch = db.batch();
-  batch.set(memberRef, memberData);
+  batch.set(memberRef, { ...memberData, ...params.extra });
   batch.set(
     db.doc(`academies/${academyId}/${col}/${authUid}/secrets/login`),
     await tempPasswordSecretFields(tempPassword),
@@ -135,60 +134,4 @@ export async function provisionMemberAccount(params: {
   });
 
   return { authUid, attnId, loginId, displayName, tempPassword, role };
-}
-
-export async function provisionTemplateStudentsForParent(params: {
-  db: admin.firestore.Firestore;
-  academyId: string;
-  parentAuthUid: string;
-  parentAttnId: string;
-  count: number;
-}): Promise<Array<{ studentId: string; attnId: string; name: string }>> {
-  const { db, academyId, parentAuthUid, parentAttnId, count } = params;
-  const parentRef = db.doc(`academies/${academyId}/parents/${parentAuthUid}`);
-  const parentSnap = await parentRef.get();
-  if (!parentSnap.exists) {
-    throw new Error("PARENT_NOT_FOUND");
-  }
-
-  const created: Array<{ studentId: string; attnId: string; name: string }> = [];
-
-  await db.runTransaction(async (tx) => {
-    const snap = await tx.get(parentRef);
-    let nextSeq = (snap.get("nextStudentSeq") as number) || 1;
-    const batchWrites: Array<() => void> = [];
-
-    for (let i = 0; i < count; i++) {
-      const studentSeq = nextSeq;
-      nextSeq += 1;
-      const attnId = formatStudentAttnId(parentAttnId, studentSeq);
-      const name = attnId;
-      const studentRef = db.collection(`academies/${academyId}/students`).doc();
-      batchWrites.push(() => {
-        tx.set(studentRef, {
-          attnId,
-          parentUserId: parentAuthUid,
-          name,
-          age: 8,
-          phone: "",
-          emergencyContact: "",
-          assignedTeacherUids: [],
-          createdAt: FieldValue.serverTimestamp(),
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-      });
-      created.push({ studentId: studentRef.id, attnId, name });
-    }
-
-    for (const w of batchWrites) {
-      w();
-    }
-    tx.update(parentRef, {
-      nextStudentSeq: nextSeq,
-      childrenCount: FieldValue.increment(count),
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-  });
-
-  return created;
 }

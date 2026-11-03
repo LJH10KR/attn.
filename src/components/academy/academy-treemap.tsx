@@ -6,6 +6,7 @@ import {
   treemapSquarify,
   type HierarchyRectangularNode,
 } from "d3-hierarchy";
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 export type AcademyHeatmapItem = {
@@ -17,6 +18,8 @@ export type AcademyHeatmapItem = {
   score: number;
   /** 보조 숫자 표시 (예: 요청 건수) */
   metric: string;
+  /** 칸을 누르면 갈 주소(예: 학부모 승인 대기 목록) — 없으면 누를 수 없는 칸 */
+  href?: string;
 };
 
 function scoreToHeatColor(score: number): { bg: string; fg: string } {
@@ -168,24 +171,24 @@ export function AcademyTreemap({
           const pw = (w / size.w) * 100;
           const ph = (h / size.h) * 100;
 
-          return (
-            <div
-              key={d.id}
-              className="absolute box-border flex flex-col justify-end overflow-hidden p-2 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.35)]"
-              style={{
-                left: `${left}%`,
-                top: `${top}%`,
-                width: `${pw}%`,
-                height: `${ph}%`,
-                backgroundColor: bg,
-                color: fg,
-              }}
-            >
+          const cellClass =
+            "absolute box-border flex flex-col justify-end overflow-hidden p-2 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.35)]";
+          const cellStyle = {
+            left: `${left}%`,
+            top: `${top}%`,
+            width: `${pw}%`,
+            height: `${ph}%`,
+            backgroundColor: bg,
+            color: fg,
+          };
+          const content = (
+            <>
               <div
                 className="line-clamp-3 break-words font-semibold leading-snug"
                 style={{ fontSize: titleSize }}
               >
                 {d.label}
+                {d.href ? <span aria-hidden> ›</span> : null}
               </div>
               <div
                 className="mt-0.5 tabular-nums opacity-95"
@@ -193,6 +196,16 @@ export function AcademyTreemap({
               >
                 {d.metric}
               </div>
+            </>
+          );
+
+          return d.href ? (
+            <Link key={d.id} href={d.href} className={`${cellClass} hover:brightness-110`} style={cellStyle}>
+              {content}
+            </Link>
+          ) : (
+            <div key={d.id} className={cellClass} style={cellStyle}>
+              {content}
             </div>
           );
         })}

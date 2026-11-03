@@ -140,7 +140,10 @@ export const getParentSignupGoogleStatus = onCall(async (request) => {
   };
 });
 
-/** 인증 — Google 계정으로 학부모 가입 완료(이름·전화번호 필수) */
+/**
+ * 인증 — Google 계정으로 학부모 가입 완료(이름·전화번호 필수) → 승인 대기(`pending_approval`).
+ * 번호 중복은 막지 않고 응답에 번호·원생 정보를 담지 않는다(번호 색인은 학원이 연결할 때 잡음).
+ */
 export const registerParentGoogleSignup = onCall(async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "Google 로그인 후 다시 시도해 주세요.");
@@ -199,15 +202,15 @@ export const registerParentGoogleSignup = onCall(async (request) => {
     phone,
     email: googleEmail,
     academyId,
-    status: "active",
+    status: "pending_approval",
     authUid: uid,
     authProvider: "google",
-    childrenCount: 0,
-    nextStudentSeq: 1,
     signupSource: "parent_link_google",
+    linkedStudentIds: [],
+    approvedAt: null,
+    approvedByUid: null,
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
-    activatedAt: FieldValue.serverTimestamp(),
   });
   batch.set(db.doc(`academies/${academyId}/parents/${uid}/secrets/login`), {
     authProvider: "google",
@@ -233,18 +236,21 @@ export const registerParentGoogleSignup = onCall(async (request) => {
   await admin.auth().setCustomUserClaims(uid, {
     role: "parent",
     academyId,
-    membershipStatus: "active",
+    membershipStatus: "pending_approval",
   });
 
   return {
     attnId,
     loginId,
     academyId,
-    membershipStatus: "active" as const,
+    membershipStatus: "pending_approval" as const,
   };
 });
 
-/** 공개 — 학부모 자가 가입 (비밀번호·이름·로그인 ID 직접 설정 → 즉시 active) */
+/**
+ * 공개 — 학부모 자가 가입(비밀번호·이름·로그인 ID 직접 설정) → 이메일 인증(OTP) 후 승인 대기.
+ * 번호 중복은 막지 않고 응답에 번호·원생 정보를 담지 않는다(인증 없는 함수로 번호 소속을 알아내거나 선점하지 못하게).
+ */
 export const registerParentSelfSignup = onCall(async (request) => {
   const academyId =
     typeof request.data?.academyId === "string" ? request.data.academyId.trim() : "";
@@ -325,9 +331,10 @@ export const registerParentSelfSignup = onCall(async (request) => {
     academyId,
     status: "pending_email_verification",
     authUid,
-    childrenCount: 0,
-    nextStudentSeq: 1,
     authProvider: "password",
+    linkedStudentIds: [],
+    approvedAt: null,
+    approvedByUid: null,
     signupSource: "parent_link",
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),

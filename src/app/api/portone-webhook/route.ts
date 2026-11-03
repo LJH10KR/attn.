@@ -17,6 +17,8 @@ type PaymentCustomData = {
   paymentType?: unknown;
   sessionCount?: unknown;
   invoicePeriod?: unknown;
+  /** 결제한 앱 계정 — `completePayment`가 결제 조회 결과의 customData에서 직접 읽음 */
+  payerUid?: unknown;
 };
 
 function isNonEmptyString(value: unknown): value is string {

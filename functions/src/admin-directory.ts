@@ -6,10 +6,15 @@ import {
   deleteAcademyFirestoreCascade,
   deleteAttnLoginIndexForMember,
   deleteMemberLoginSecrets,
-  deleteStudentDocs,
   purgeUserFirestoreData,
-  stripTeacherFromStudents,
 } from "./lib/firestore-cleanup";
+import {
+  authUserHasAdminClaim,
+  cleanupDeletedAcademyUsers,
+  safeDeleteAuthUser,
+} from "./lib/admin-user-cleanup";
+import { stripTeacherFromClasses } from "./lib/class-teachers";
+import { deleteParentAccountData } from "./lib/parent-links";
 import { reconcileUserActivationMirror } from "./user-activation-mirror";
 
 function assertAdmin(request: {
@@ -29,29 +34,6 @@ function clampInt(raw: unknown, fallback: number, min: number, max: number): num
   const n = typeof raw === "number" ? raw : Number(raw);
   if (!Number.isFinite(n) || !Number.isInteger(n)) return fallback;
   return Math.max(min, Math.min(max, n));
-}
-
-async function authUserHasAdminClaim(uid: string): Promise<boolean> {
-  try {
-    const u = await admin.auth().getUser(uid);
-    const c = u.customClaims as Record<string, unknown> | undefined;
-    return Boolean(c && c.admin === true);
-  } catch {
-    return false;
-  }
-}
-
-async function safeDeleteAuthUser(uid: string, context: string): Promise<void> {
-  if (!uid || uid.startsWith("academy_")) return;
-  if (await authUserHasAdminClaim(uid)) {
-    logger.warn(`${context}: skip admin auth user`, { uid });
-    return;
-  }
-  try {
-    await admin.auth().deleteUser(uid);
-  } catch (e) {
-    logger.warn(`${context}: deleteUser skipped`, { uid, e });
-  }
 }
 
 function memberAuthUid(data: FirebaseFirestore.DocumentData, docId: string): string {
@@ -202,24 +184,11 @@ export const adminDeleteAcademyCascade = onCall(async (request) => {
     academyId,
   );
 
-  const memberAuthUids = new Set<string>();
-  for (const m of [...teacherSnapshots, ...parentSnapshots]) {
-    memberAuthUids.add(m.authUid);
-  }
-
-  for (const uid of memberAuthUids) {
-    await safeDeleteAuthUser(uid, "adminDeleteAcademyCascade");
-    if (!(await authUserHasAdminClaim(uid))) {
-      await purgeUserFirestoreData(db, uid);
-    }
-  }
-
-  await safeDeleteAuthUser(ownerUid, "adminDeleteAcademyCascade");
-
-  const remainingOwned = await db.collection("academies").where("ownerUid", "==", ownerUid).limit(1).get();
-  if (remainingOwned.empty && !(await authUserHasAdminClaim(ownerUid))) {
-    await purgeUserFirestoreData(db, ownerUid);
-  }
+  await cleanupDeletedAcademyUsers(db, {
+    memberAuthUids: [...teacherSnapshots, ...parentSnapshots].map((m) => m.authUid),
+    ownerUid,
+    context: "adminDeleteAcademyCascade",
+  });
 
   logger.info("adminDeleteAcademyCascade done", { academyId, ownerUid });
   return { ok: true as const };
@@ -227,7 +196,7 @@ export const adminDeleteAcademyCascade = onCall(async (request) => {
 
 /**
  * 관리자용 — 선생님 또는 학부모 멤버 1명과(가능하면) 해당 Auth 계정을 삭제합니다.
- * 학부모인 경우 자녀 학생 문서도 함께 삭제합니다.
+ * 학부모인 경우 원생은 남기고 보호자 연결만 해제합니다.
  */
 export const adminDeleteMemberUser = onCall(async (request) => {
   assertAdmin(request as unknown as { auth?: { uid: string; token?: Record<string, unknown> } | null });
@@ -253,28 +222,18 @@ export const adminDeleteMemberUser = onCall(async (request) => {
   const authUid = memberAuthUid(data, memberDocId);
 
   if (role === "teacher") {
-    await stripTeacherFromStudents(db, academyId, authUid);
     await deleteMemberLoginSecrets(db, academyId, "teacher", memberDocId);
     await deleteAttnLoginIndexForMember(db, data, authUid);
     await ref.delete();
+    // staff 문서를 지운 뒤 반 선생님에서 뺀다(학생 teacherUids는 반 트리거가 맞춤)
+    await stripTeacherFromClasses(db, academyId, authUid, request.auth?.uid ?? null);
     await safeDeleteAuthUser(authUid, "adminDeleteMemberUser teacher");
     if (!(await authUserHasAdminClaim(authUid))) {
       await purgeUserFirestoreData(db, authUid);
     }
   } else {
-    const studentsSnap = await db.collection(`academies/${academyId}/students`).get();
-    const studentIds = studentsSnap.docs
-      .filter((s) => {
-        const pid = s.get("parentUserId");
-        return pid === memberDocId || pid === authUid;
-      })
-      .map((s) => s.id);
-    if (studentIds.length > 0) {
-      await deleteStudentDocs(db, academyId, studentIds);
-    }
-    await deleteMemberLoginSecrets(db, academyId, "parent", memberDocId);
-    await deleteAttnLoginIndexForMember(db, data, authUid);
-    await ref.delete();
+    // 원생은 그대로 두고 연결만 해제(결제 parentUids는 학생 트리거가 정리), 번호 색인·로그인 정보 삭제
+    await deleteParentAccountData(db, academyId, memberDocId);
     await safeDeleteAuthUser(authUid, "adminDeleteMemberUser parent");
     if (!(await authUserHasAdminClaim(authUid))) {
       await purgeUserFirestoreData(db, authUid);

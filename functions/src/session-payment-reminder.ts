@@ -7,6 +7,8 @@ import {
   applyMulticastDeliveryResults,
   buildTokenBuckets,
 } from "./push-subscription-delivery";
+import { resolveParentRecipients } from "./lib/parent-recipients";
+import { isBillableStudent } from "./lib/student-profile";
 
 const REGION = "asia-northeast3";
 
@@ -17,25 +19,26 @@ type TuitionSettings = {
   accountHolder?: string;
 };
 
-async function sendSessionPaymentReminderToParent(
+/** 보호자 1명에게 발송 — 보낸 기기 수(성공) */
+async function sendSessionPaymentReminderToRecipient(
   db: admin.firestore.Firestore,
   params: {
     academyId: string;
     studentId: string;
     studentName: string;
-    parentUserId: string;
+    recipientUid: string;
     sessionBalance: number;
     weeklySessionCount: number;
     pricePerSession: number | undefined;
     extraSessionDates: string[];
     settings: TuitionSettings;
   },
-): Promise<void> {
+): Promise<number> {
   const {
     academyId,
     studentId,
     studentName,
-    parentUserId,
+    recipientUid,
     sessionBalance,
     weeklySessionCount,
     pricePerSession,
@@ -43,15 +46,15 @@ async function sendSessionPaymentReminderToParent(
     settings,
   } = params;
 
-  const parentUserRef = db.doc(`users/${parentUserId}`);
+  const parentUserRef = db.doc(`users/${recipientUid}`);
   const userSnap = await parentUserRef.get();
 
   if (!userSnap.exists || userSnap.get("pushNotificationsEnabled") !== true) {
     logger.info("sessionPaymentReminder: parent push disabled, skipping", {
       studentId,
-      parentUserId,
+      recipientUid,
     });
-    return;
+    return 0;
   }
 
   const userData = userSnap.data();
@@ -66,9 +69,9 @@ async function sendSessionPaymentReminderToParent(
   if (tokens.length === 0) {
     logger.info("sessionPaymentReminder: no FCM tokens, skipping", {
       studentId,
-      parentUserId,
+      recipientUid,
     });
-    return;
+    return 0;
   }
 
   // 납부 안내 메시지 구성 (월 4주 단위 정산)
@@ -98,7 +101,7 @@ async function sendSessionPaymentReminderToParent(
     studentId,
     studentName,
     academyId,
-    parentUserId,
+    recipientUid,
     sessionBalance: String(sessionBalance),
     weeklySessionCount: String(weeklySessionCount),
   };
@@ -124,7 +127,7 @@ async function sendSessionPaymentReminderToParent(
   if (resp.failureCount > 0) {
     logger.warn("sessionPaymentReminder: FCM partial failure", {
       studentId,
-      parentUserId,
+      recipientUid,
       successCount: resp.successCount,
       failureCount: resp.failureCount,
     });
@@ -132,7 +135,7 @@ async function sendSessionPaymentReminderToParent(
 
   await applyMulticastDeliveryResults({
     db,
-    parentUserId,
+    recipientUid,
     userLastSyncedAt,
     buckets,
     responses: resp.responses,
@@ -140,19 +143,37 @@ async function sendSessionPaymentReminderToParent(
   });
 
   if (resp.successCount > 0) {
-    await db
-      .doc(`academies/${academyId}/students/${studentId}`)
-      .update({ sentSessionPaymentReminder: true });
-
     logger.info("sessionPaymentReminder: sent successfully", {
       studentId,
-      parentUserId,
+      recipientUid,
       sessionBalance,
       weeklySessionCount,
       successCount: resp.successCount,
     });
   }
+  return resp.successCount;
 }
+
+/** 학생의 활성 보호자 전원에게 발송 — 한 명이라도 받으면 발송 표시(충전 시 초기화) */
+async function sendSessionPaymentReminderToParents(
+  db: admin.firestore.Firestore,
+  params: Omit<Parameters<typeof sendSessionPaymentReminderToRecipient>[1], "recipientUid"> & {
+    parentUids: unknown;
+  },
+): Promise<void> {
+  const { parentUids, ...rest } = params;
+  const recipients = await resolveParentRecipients(db, rest.academyId, parentUids);
+  const sent = await Promise.all(
+    recipients.map((recipientUid) => sendSessionPaymentReminderToRecipient(db, { ...rest, recipientUid })),
+  );
+  if (sent.some((n) => n > 0)) {
+    await db
+      .doc(`academies/${rest.academyId}/students/${rest.studentId}`)
+      .update({ sentSessionPaymentReminder: true });
+  }
+}
+
+
 
 /**
  * 학생 문서 업데이트 시 sessionBalance 감소 → 기준치 이하 도달 시 즉시 FCM 발송.
@@ -195,9 +216,10 @@ export const onStudentSessionBalanceChanged = onDocumentUpdated(
     // 이미 발송된 알림 — 충전 시 초기화됨
     if (after.sentSessionPaymentReminder === true) return;
 
+    // 퇴원·휴원·미등록은 청구 대상이 아니므로 안내하지 않는다
+    if (!isBillableStudent(after)) return;
+
     const { academyId, studentId } = event.params;
-    const parentUserId = typeof after.parentUserId === "string" ? after.parentUserId : "";
-    if (!parentUserId) return;
 
     const studentName = typeof after.name === "string" && after.name ? after.name : "학생";
     const pricePerSession =
@@ -218,11 +240,11 @@ export const onStudentSessionBalanceChanged = onDocumentUpdated(
     }
 
     try {
-      await sendSessionPaymentReminderToParent(db, {
+      await sendSessionPaymentReminderToParents(db, {
         academyId,
         studentId,
         studentName,
-        parentUserId,
+        parentUids: after.parentUids,
         sessionBalance: balanceAfter,
         weeklySessionCount,
         pricePerSession,
@@ -322,9 +344,7 @@ export const sendSessionPaymentReminders = onSchedule(
           continue;
         }
 
-        const parentUserId =
-          typeof data.parentUserId === "string" ? data.parentUserId : "";
-        if (!parentUserId) continue;
+        if (!isBillableStudent(data)) continue;
 
         const studentName =
           typeof data.name === "string" && data.name ? data.name : "학생";
@@ -340,11 +360,11 @@ export const sendSessionPaymentReminders = onSchedule(
             : [];
 
         try {
-          await sendSessionPaymentReminderToParent(db, {
+          await sendSessionPaymentReminderToParents(db, {
             academyId,
             studentId,
             studentName,
-            parentUserId,
+            parentUids: data.parentUids,
             sessionBalance,
             weeklySessionCount,
             pricePerSession,

@@ -26,7 +26,6 @@ const ROUTELESS_PERMISSIONS: readonly AcademyPermission[] = ["billing.refunds"];
 
 /** 아직 화면이 없어 "준비 중"으로 보여 주는 메뉴 */
 const NOT_READY_PERMISSIONS: readonly AcademyPermission[] = [
-  "operations.classes",
   "billing.invoices",
   "billing.collections",
   "lessons.attendance",

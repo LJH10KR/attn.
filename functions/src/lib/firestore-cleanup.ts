@@ -32,6 +32,21 @@ export async function deleteCollectionDocs(
   );
 }
 
+/** 쿼리에 걸리는 문서를 400개씩 나눠 끝까지 삭제 */
+export async function deleteQueryDocs(
+  db: admin.firestore.Firestore,
+  query: FirebaseFirestore.Query,
+): Promise<number> {
+  let total = 0;
+  for (;;) {
+    const snap = await query.limit(400).get();
+    if (snap.empty) return total;
+    await batchDeleteRefs(db, snap.docs.map((d) => d.ref));
+    total += snap.size;
+    if (snap.size < 400) return total;
+  }
+}
+
 export function loginIndexKeysFromMember(data: FirebaseFirestore.DocumentData): string[] {
   const keys = new Set<string>();
   const loginId = data.loginId;
@@ -250,12 +265,16 @@ export async function deleteAcademyFirestoreCascade(
       db.doc(`academies/${academyId}/parents/${p.docId}/secrets/login`),
     );
   }
-  for (const s of studentsSnap.docs) {
-    deleteOps.push(s.ref);
-    deleteOps.push(
-      db.doc(`academies/${academyId}/students/${s.id}/serverSecrets/checkIn`),
-    );
-  }
+  // 학생 문서와 하위 기록·메모(남은 메모 문서까지)
+  await deleteStudentDocs(db, academyId, studentsSnap.docs.map((s) => s.id));
+  await deleteCollectionDocs(db, `academies/${academyId}/studentNotes`);
+  await deleteCollectionDocs(db, `academies/${academyId}/parentPhones`);
+  await deleteCollectionDocs(db, `academies/${academyId}/classes`);
+  await deleteCollectionDocs(db, `academies/${academyId}/classHistory`);
+  // 출결 알림 기록과 그 푸시 전달 문서(최상위 `_pushDeliveries`, academyId 필드로 찾음).
+  // 결제 장부(`payments`)는 지우지 않는다 — 보존 정책은 4단계 수납에서(seed 삭제만 따로 지움).
+  await deleteCollectionDocs(db, `academies/${academyId}/attendanceNotifications`);
+  await deleteQueryDocs(db, db.collection("_pushDeliveries").where("academyId", "==", academyId));
 
   const metaSnap = await db.collection(`academies/${academyId}/meta`).get();
   metaSnap.docs.forEach((d) => deleteOps.push(d.ref));
@@ -281,46 +300,10 @@ export async function deleteAcademyFirestoreCascade(
   return { teacherSnapshots, parentSnapshots };
 }
 
-export async function stripTeacherFromStudents(
-  db: admin.firestore.Firestore,
-  academyId: string,
-  teacherUid: string,
-): Promise<void> {
-  const studentsSnap = await db.collection(`academies/${academyId}/students`).get();
-  const updates: Array<{ ref: DocumentReference; patch: Record<string, unknown> }> = [];
+/** 학생 하위 기록 컬렉션 — 학생·학원 삭제 때 함께 지운다 */
+const STUDENT_SUBCOLLECTIONS = ["attendanceRecords", "tuitionInvoices", "sessionLogs"] as const;
 
-  for (const doc of studentsSnap.docs) {
-    const data = doc.data();
-    const arr = Array.isArray(data.assignedTeacherUids)
-      ? (data.assignedTeacherUids as string[])
-      : [];
-    const legacy =
-      typeof data.assignedTeacherUid === "string" ? (data.assignedTeacherUid as string) : null;
-    const next = arr.filter((id) => id !== teacherUid);
-    let patch: Record<string, unknown> | null = null;
-    if (next.length !== arr.length) {
-      patch = {
-        assignedTeacherUids: next,
-        updatedAt: FieldValue.serverTimestamp(),
-      };
-    }
-    if (legacy === teacherUid) {
-      patch = {
-        ...(patch ?? { updatedAt: FieldValue.serverTimestamp() }),
-        assignedTeacherUid: FieldValue.delete(),
-      };
-    }
-    if (patch) updates.push({ ref: doc.ref, patch });
-  }
-
-  for (const chunk of chunkArray(updates, 400)) {
-    const batch = db.batch();
-    for (const u of chunk) batch.update(u.ref, u.patch);
-    await batch.commit();
-  }
-}
-
-/** 학생 문서 + serverSecrets + attendanceRecords + tuitionInvoices 삭제 */
+/** 학생 문서 + serverSecrets + 하위 기록 + 학원 메모(studentNotes) 삭제 */
 export async function deleteStudentDocs(
   db: admin.firestore.Firestore,
   academyId: string,
@@ -328,7 +311,8 @@ export async function deleteStudentDocs(
 ): Promise<void> {
   const refs: DocumentReference[] = [];
   for (const studentId of studentIds) {
-    for (const sub of ["attendanceRecords", "tuitionInvoices"]) {
+    refs.push(db.doc(`academies/${academyId}/studentNotes/${studentId}`));
+    for (const sub of STUDENT_SUBCOLLECTIONS) {
       const subSnap = await db
         .collection(`academies/${academyId}/students/${studentId}/${sub}`)
         .get();

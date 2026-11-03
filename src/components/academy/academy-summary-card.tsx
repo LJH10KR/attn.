@@ -10,6 +10,8 @@ export type AcademySummaryRow = {
   ready: boolean;
   /** 오른쪽 보조 문구(원생 12명 등) — 불러오는 중이면 "…" */
   summary?: string | null;
+  /** 이름 아래 작은 보조 줄(휴원 1 · 퇴원 2 등) — 없으면 한 줄 */
+  detail?: string | null;
   /** 처리할 일 숫자 배지(승인 대기 등) — 0이면 숨김 */
   badge?: number;
 };
@@ -62,7 +64,12 @@ export function AcademySummaryCard({
                 href={r.href}
                 className="flex items-center gap-3 px-4 py-3.5 transition hover:bg-white/50 dark:hover:bg-white/5"
               >
-                <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{r.label}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-foreground">{r.label}</span>
+                  {r.detail ? (
+                    <span className="mt-0.5 block truncate text-[11px] tabular-nums text-neutral-500">{r.detail}</span>
+                  ) : null}
+                </span>
                 {!r.ready ? (
                   <span className="shrink-0 rounded-full bg-neutral-500/15 px-2 py-0.5 text-[10px] font-semibold text-neutral-600 dark:text-neutral-300">
                     준비 중

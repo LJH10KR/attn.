@@ -1,14 +1,10 @@
 ﻿"use client";
 
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, setDoc, Timestamp } from "firebase/firestore";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  docToStudentRow,
-  type StudentRowVM,
-} from "@/components/academy/academy-student-panel";
 import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardNotificationsModal } from "@/components/dashboard/dashboard-notifications-modal";
@@ -24,10 +20,14 @@ import {
   type PaymentReminderPayload,
 } from "@/components/parent/payment-reminder-modal";
 import { IosPwaHintModal } from "@/components/parent/ios-pwa-hint-modal";
+import { academyTuitionSettingsPath } from "@/lib/firebase/attn-schema";
 import {
-  academyTuitionSettingsPath,
-  type TuitionInvoiceSummary,
-} from "@/lib/firebase/attn-schema";
+  compareParentChildren,
+  parentChildClassLine,
+  parentChildFromPayload,
+  type ParentChildPayload,
+  type ParentChildVM,
+} from "@/lib/parent/parent-child";
 import {
   getFirebaseAuth,
   getFirebaseDb,
@@ -43,17 +43,12 @@ import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
 import { FirebaseError } from "firebase/app";
-import { formatKrPhoneDisplay } from "@/lib/phone/kr-phone";
 
 const glassCard = "glass-card";
 
 /** src/app/payment/complete/page.tsx가 남기는 결제 결과 크로스탭 신호 — 키를 그대로 공유 */
 const PAYMENT_RESULT_STORAGE_KEY = "attn_payment_result";
 const PAYMENT_RESULT_TTL_MS = 5 * 60 * 1000;
-
-function sortByName(a: StudentRowVM, b: StudentRowVM): number {
-  return a.name.localeCompare(b.name, "ko");
-}
 
 function isRetryableCallableAuthError(err: unknown): boolean {
   if (!(err instanceof FirebaseError)) return false;
@@ -62,39 +57,6 @@ function isRetryableCallableAuthError(err: unknown): boolean {
     err.code === "functions/permission-denied"
   );
 }
-
-type CallableStudentPayload = {
-  id: string;
-  parentUserId?: string;
-  name?: string;
-  age?: number;
-  phone?: string;
-  emergencyContact?: string;
-  assignedTeacherUids?: string[];
-  assignedTeacherUid?: string | null;
-  createdAtMillis?: number | null;
-  hasCheckInPin?: boolean;
-  tuitionDueDayOfMonth?: number | null;
-  tuitionAmount?: number | null;
-  weeklySessionCount?: number | null;
-  pricePerSession?: number | null;
-  sessionBalance?: number | null;
-  extraSessionDates?: string[];
-  hasPendingPaymentReminder?: boolean;
-  tuitionInvoice?: TuitionInvoiceSummary | null;
-};
-
-type ParentStudentRow = StudentRowVM & {
-  hasCheckInPin?: boolean;
-  tuitionDueDayOfMonth?: number | null;
-  tuitionAmount?: number | null;
-  tuitionInvoice?: TuitionInvoiceSummary | null;
-  weeklySessionCount?: number | null;
-  pricePerSession?: number | null;
-  sessionBalance?: number | null;
-  extraSessionDates?: string[];
-  hasPendingPaymentReminder?: boolean;
-};
 
 type TuitionSettingsState = {
   kakaoPayLink?: string;
@@ -105,30 +67,11 @@ type TuitionSettingsState = {
 } | null;
 
 type ParentListPayload = {
-  students?: CallableStudentPayload[];
+  /** 서버가 읽은 계정 상태 — `pending_approval`이면 연결 대기 화면(토큰 클레임이 예전 값이어도) */
+  accountStatus?: "active" | "pending_approval";
+  students?: ParentChildPayload[];
   kiosk?: { requireStudentCheckInPin?: boolean };
 };
-
-function studentRowFromCallablePayload(
-  s: CallableStudentPayload,
-): StudentRowVM {
-  const createdAt =
-    typeof s.createdAtMillis === "number"
-      ? Timestamp.fromMillis(s.createdAtMillis)
-      : undefined;
-  return docToStudentRow(s.id, {
-    parentUserId: s.parentUserId ?? "",
-    name: s.name ?? "",
-    age: s.age ?? 0,
-    phone: s.phone ?? "",
-    emergencyContact: s.emergencyContact ?? "",
-    assignedTeacherUids: s.assignedTeacherUids ?? [],
-    ...(s.assignedTeacherUid
-      ? { assignedTeacherUid: s.assignedTeacherUid }
-      : {}),
-    ...(createdAt ? { createdAt } : {}),
-  });
-}
 
 export default function ParentDashboardPage() {
   const router = useRouter();
@@ -141,7 +84,7 @@ export default function ParentDashboardPage() {
   const [memberPhone, setMemberPhone] = useState<string | null>(null);
   const [googleLinked, setGoogleLinked] = useState(false);
   const [googleEmail, setGoogleEmail] = useState<string | null>(null);
-  const [students, setStudents] = useState<StudentRowVM[]>([]);
+  const [students, setStudents] = useState<ParentChildVM[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
   const { logout: onLogout, logoutBusy, logoutModal } = useRoleLogout({
@@ -154,10 +97,10 @@ export default function ParentDashboardPage() {
   const [iosAutoModalOpen, setIosAutoModalOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [listInitialLoading, setListInitialLoading] = useState(false);
+  /** 승인 대기·연결 대기(연결된 자녀 0명) — 자녀 목록 대신 안내 화면 */
+  const [linkWaiting, setLinkWaiting] = useState(false);
   const [kioskRequirePin, setKioskRequirePin] = useState(false);
-  const [studentsWithPinMeta, setStudentsWithPinMeta] = useState<
-    ParentStudentRow[]
-  >([]);
+  const [studentsWithPinMeta, setStudentsWithPinMeta] = useState<ParentChildVM[]>([]);
   const [tuitionSettings, setTuitionSettings] =
     useState<TuitionSettingsState>(null);
   const [reminderPayload, setReminderPayload] = useState<PaymentReminderPayload | null>(null);
@@ -246,7 +189,8 @@ export default function ParentDashboardPage() {
         ) {
           return;
         }
-        if (!data?.anyActive || !data.primaryAcademyId) {
+        const waiting = !data?.anyActive && data?.primaryStatus === "pending_approval";
+        if ((!data?.anyActive && !waiting) || !data.primaryAcademyId) {
           const q = new URLSearchParams();
           q.set("state", data?.primaryStatus ?? "unknown");
           if (data?.primaryAcademyId) q.set("academyId", data.primaryAcademyId);
@@ -257,8 +201,13 @@ export default function ParentDashboardPage() {
         const aid = data.primaryAcademyId;
         setAcademyId(aid);
         setInitError(null);
+        setLinkWaiting(waiting);
         setReady(true);
         setLastDashboardRoleHint("parent");
+        if (waiting) {
+          parentListLoadedUidRef.current = uid;
+          return;
+        }
         setListInitialLoading(true);
 
         try {
@@ -286,19 +235,9 @@ export default function ParentDashboardPage() {
           const rawList = Array.isArray(payload?.students)
             ? payload.students
             : [];
-          const list = rawList.map((s) => ({
-            ...studentRowFromCallablePayload(s),
-            hasCheckInPin: s.hasCheckInPin === true,
-            tuitionDueDayOfMonth: s.tuitionDueDayOfMonth ?? null,
-            tuitionAmount: typeof s.tuitionAmount === "number" ? s.tuitionAmount : null,
-            tuitionInvoice: s.tuitionInvoice ?? null,
-            weeklySessionCount: typeof s.weeklySessionCount === "number" ? s.weeklySessionCount : null,
-            pricePerSession: typeof s.pricePerSession === "number" ? s.pricePerSession : null,
-            sessionBalance: typeof s.sessionBalance === "number" ? s.sessionBalance : null,
-            extraSessionDates: Array.isArray(s.extraSessionDates) ? s.extraSessionDates : [],
-            hasPendingPaymentReminder: s.hasPendingPaymentReminder === true,
-          }));
-          list.sort(sortByName);
+          const list = rawList.map((s) => parentChildFromPayload(s, { withPaymentReminder: true }));
+          list.sort(compareParentChildren);
+          setLinkWaiting(payload?.accountStatus === "pending_approval");
           setStudents(list);
           setStudentsWithPinMeta(list);
           setKioskRequirePin(payload?.kiosk?.requireStudentCheckInPin === true);
@@ -447,18 +386,10 @@ export default function ParentDashboardPage() {
       }
       const payload = listRes.data as ParentListPayload;
       const rawList = Array.isArray(payload?.students) ? payload.students : [];
-      const list = rawList.map((s) => ({
-        ...studentRowFromCallablePayload(s),
-        hasCheckInPin: s.hasCheckInPin === true,
-        tuitionDueDayOfMonth: s.tuitionDueDayOfMonth ?? null,
-        tuitionAmount: typeof s.tuitionAmount === "number" ? s.tuitionAmount : null,
-        tuitionInvoice: s.tuitionInvoice ?? null,
-        weeklySessionCount: typeof s.weeklySessionCount === "number" ? s.weeklySessionCount : null,
-        pricePerSession: typeof s.pricePerSession === "number" ? s.pricePerSession : null,
-        sessionBalance: typeof s.sessionBalance === "number" ? s.sessionBalance : null,
-        extraSessionDates: Array.isArray(s.extraSessionDates) ? s.extraSessionDates : [],
-      }));
-      list.sort(sortByName);
+      // 새로고침 경로는 납부 안내 자동 창 값을 넣지 않는다(기존 동작 — 창이 다시 뜨지 않게)
+      const list = rawList.map((s) => parentChildFromPayload(s, { withPaymentReminder: false }));
+      list.sort(compareParentChildren);
+      setLinkWaiting(payload?.accountStatus === "pending_approval");
       setStudents(list);
       setStudentsWithPinMeta(list);
       setKioskRequirePin(payload?.kiosk?.requireStudentCheckInPin === true);
@@ -633,6 +564,28 @@ export default function ParentDashboardPage() {
           연결된 자녀 학생 정보를 확인할 수 있습니다.
         </p> */}
 
+        {linkWaiting ? (
+          <div className={`mt-[26px] px-5 py-10 text-center ${glassCard}`}>
+            <p className="break-keep text-base font-semibold text-foreground">
+              {academyName ?? "학원"} 연결 대기 중
+            </p>
+            <p className="mt-2 break-keep text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">
+              학원에서 연결을 확인하면 자녀가 표시됩니다.
+            </p>
+            {listError ? (
+              <p className="mt-4 break-keep text-xs text-red-700">{listError}</p>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => void refreshChildrenList()}
+              disabled={listRefreshBusy || !academyId}
+              className="mt-6 rounded-[8px] border border-neutral-300/80 bg-white/70 px-4 py-2.5 text-xs font-medium text-neutral-800 hover:bg-white disabled:opacity-50"
+            >
+              {listRefreshBusy ? "확인 중…" : "새로고침"}
+            </button>
+          </div>
+        ) : (
+        <>
         <div className="mt-[26px] mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-foreground">자녀 학생</h2>
           <button
@@ -661,8 +614,7 @@ export default function ParentDashboardPage() {
             <p
               className={`py-12 text-center text-sm text-neutral-500 ${glassCard}`}
             >
-              등록된 자녀 학생이 없습니다. 학원에서 자녀를 연결하면 여기에
-              표시됩니다.
+              지금 표시할 자녀가 없습니다. 자세한 내용은 학원에 문의해 주세요.
             </p>
           ) : (
             studentsWithPinMeta.map((s) => (
@@ -671,21 +623,18 @@ export default function ParentDashboardPage() {
                   {s.name}
                   <span className="font-normal text-neutral-500">
                     {" "}
-                    · 만 {s.age}세
+                    · {s.gradeLabel || "학년 미입력"}
                   </span>
                 </p>
-                <p className="mt-2 text-[11px] text-neutral-600">
-                  연락{" "}
-                  <span className="text-foreground">
-                    {formatKrPhoneDisplay(s.phone) || "—"}
-                  </span>
-                </p>
-                <p className="mt-0.5 text-[11px] text-neutral-600">
-                  비상 연락{" "}
-                  <span className="text-foreground">
-                    {formatKrPhoneDisplay(s.emergencyContact) || "—"}
-                  </span>
-                </p>
+                {s.classes.length > 0 ? (
+                  <ul className="mt-0.5 space-y-0.5">
+                    {s.classes.map((c, i) => (
+                      <li key={`${c.name}-${i}`} className="break-keep text-xs text-neutral-600 dark:text-neutral-400">
+                        {parentChildClassLine(c)}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
                 {kioskRequirePin ? (
                   <ParentCheckInPinCard
                     academyId={academyId!}
@@ -693,7 +642,7 @@ export default function ParentDashboardPage() {
                     onUpdatedAction={() => void refreshChildrenList()}
                   />
                 ) : null}
-                {s.tuitionDueDayOfMonth ? (
+                {!s.billable ? null : s.tuitionDueDayOfMonth ? (
                   <ParentTuitionReminderCard
                     studentId={s.id}
                     studentName={s.name}
@@ -723,6 +672,8 @@ export default function ParentDashboardPage() {
         </div>
 
         <ParentPaymentHistory academyId={academyId} parentUid={authUid} />
+        </>
+        )}
 
         <IosPwaHintModal
           open={iosAutoModalOpen}

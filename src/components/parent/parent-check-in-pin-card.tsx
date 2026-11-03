@@ -3,7 +3,7 @@
 import { httpsCallable } from "firebase/functions";
 import { useCallback, useState } from "react";
 import { PinPadModal } from "@/components/academy/pin-pad-modal";
-import type { StudentRowVM } from "@/components/academy/academy-student-panel";
+import type { ParentChildVM } from "@/lib/parent/parent-child";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { FirebaseError } from "firebase/app";
 
@@ -16,7 +16,7 @@ function callableMessage(err: unknown, fallback: string): string {
 
 type Props = {
   academyId: string;
-  student: StudentRowVM & { hasCheckInPin?: boolean };
+  student: Pick<ParentChildVM, "id" | "name" | "hasCheckInPin">;
   onUpdatedAction?: () => void;
 };
 

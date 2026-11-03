@@ -6,7 +6,6 @@ import type { DashboardNotificationRow } from "@/components/dashboard/dashboard-
 import {
   ACADEMY_ADMIN_INBOX_SCHEMA_VERSION,
   academyAdminInboxCollectionPath,
-  PARENT_INVITE_TTL_MS,
   TEACHER_INVITE_TTL_MS,
   type AcademyAdminInboxDoc,
 } from "@/lib/firebase/attn-schema";
@@ -32,7 +31,17 @@ function inviteExpired(
   return exp.toMillis() <= now;
 }
 
-function mapInboxDoc(id: string, data: Record<string, unknown>, now: number): DashboardNotificationRow[] {
+type BellLinks = {
+  /** 학부모 승인 대기 바로 가기(학부모 관리 `?view=pending`) — `operations.parents` 권한이 있을 때만 */
+  parentsPendingHref?: string | null;
+};
+
+function mapInboxDoc(
+  id: string,
+  data: Record<string, unknown>,
+  now: number,
+  links: BellLinks,
+): DashboardNotificationRow[] {
   if (data.schemaVersion !== ACADEMY_ADMIN_INBOX_SCHEMA_VERSION) return [];
 
   const kind = data.kind as AcademyAdminInboxDoc["kind"];
@@ -44,8 +53,23 @@ function mapInboxDoc(id: string, data: Record<string, unknown>, now: number): Da
   const email = typeof data.email === "string" ? data.email : "";
   const invitedAt = readTs(data.invitedAt);
   const invitationExpiresAt = readTs(data.invitationExpiresAt);
-  const ttlMs = entityType === "teacher" ? TEACHER_INVITE_TTL_MS : PARENT_INVITE_TTL_MS;
   const roleLabel = entityType === "teacher" ? "선생님" : "학부모";
+
+  if (kind === "parent_pending_approval") {
+    return [
+      {
+        id,
+        title: `학부모 가입 승인 대기: ${name}`,
+        detail: "학부모 관리에서 자녀를 연결해 주세요.",
+        ...(links.parentsPendingHref ? { href: links.parentsPendingHref, hrefLabel: "승인하러 가기" } : {}),
+      },
+    ];
+  }
+
+  // 아래 두 종류는 직원 계정(학부모 이메일 초청은 2-C에서 폐지 — 남은 학부모 항목은 표시하지 않음)
+  if (entityType !== "teacher" && (kind === "pending_registration" || kind === "invitation_sent")) {
+    return [];
+  }
 
   if (kind === "pending_registration") {
     return [
@@ -58,7 +82,7 @@ function mapInboxDoc(id: string, data: Record<string, unknown>, now: number): Da
   }
 
   if (kind === "invitation_sent") {
-    if (inviteExpired(invitedAt, invitationExpiresAt, ttlMs, now)) {
+    if (inviteExpired(invitedAt, invitationExpiresAt, TEACHER_INVITE_TTL_MS, now)) {
       return [
         {
           id,
@@ -121,14 +145,15 @@ function saveDismissed(academyId: string, set: Set<string>): void {
   }
 }
 
-/** 초청 만료 판정용 클라이언트 시계 — inbox `invitation_sent` 항목 표시용 */
+/** 초청 만료 판정용 클라이언트 시계 — 직원 inbox `invitation_sent` 항목 표시용 */
 const BELL_EXPIRY_TICK_MS = 60_000;
 
 /**
  * 학원 대시보드 알림벨 — `adminInbox` (Functions 유지) 기반.
  * Firestore는 마운트·탭 복귀·`refresh()`(모달 열기 등) 시에만 조회합니다.
  */
-export function useAcademyDashboardBell(academyId: string | null) {
+export function useAcademyDashboardBell(academyId: string | null, links: BellLinks = {}) {
+  const parentsPendingHref = links.parentsPendingHref ?? null;
   const [inboxDocs, setInboxDocs] = useState<{ id: string; data: Record<string, unknown> }[]>(
     [],
   );
@@ -186,11 +211,11 @@ export function useAcademyDashboardBell(academyId: string | null) {
     const now = nowMs;
     const out: DashboardNotificationRow[] = [];
     for (const d of inboxDocs) {
-      out.push(...mapInboxDoc(d.id, d.data, now));
+      out.push(...mapInboxDoc(d.id, d.data, now, { parentsPendingHref }));
     }
     out.sort((a, b) => a.title.localeCompare(b.title, "ko"));
     return out;
-  }, [inboxDocs, nowMs]);
+  }, [inboxDocs, nowMs, parentsPendingHref]);
 
   rawItemsRef.current = rawItems;
 

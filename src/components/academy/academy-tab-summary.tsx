@@ -14,14 +14,19 @@ export function AcademyTabSummary({ tab }: { tab: AcademyNavTab }) {
 
   return (
     <AcademySummaryCard
-      rows={menus.map((m) => ({
-        key: m.permission,
-        label: m.label,
-        href: href(m.sub),
-        ready: m.ready,
-        summary: stats[m.permission]?.summary,
-        badge: stats[m.permission]?.badge,
-      }))}
+      rows={menus.map((m) => {
+        const stat = stats[m.permission];
+        return {
+          key: m.permission,
+          label: m.label,
+          // 예: 승인 대기 학부모가 있으면 학부모 관리의 승인 대기 탭(`?view=pending`)으로
+          href: stat?.query ? `${href(m.sub)}?${stat.query}` : href(m.sub),
+          ready: m.ready,
+          summary: stat?.summary,
+          detail: stat?.detail,
+          badge: stat?.badge,
+        };
+      })}
     />
   );
 }

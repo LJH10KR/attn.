@@ -1,5 +1,6 @@
 import type { Timestamp } from "firebase/firestore";
 import type { AcademyPermission, RoleTemplateKey } from "@/lib/academy/permissions";
+import type { GradeCode, StudentStatus } from "@/lib/academy/student-profile";
 
 /**
  * attn. Firestore 데이터 모델 — 사용자·학원 계층
@@ -50,9 +51,8 @@ export type AcademyDashboardStatsDoc = {
   teachersPending: number;
   teachersInviteNeeded: number;
   teachersInviteSent: number;
+  /** 학부모 가입 승인 대기(`pending_approval` && `approvedAt == null`) */
   parentsPending: number;
-  parentsInviteNeeded: number;
-  parentsInviteSent: number;
   updatedAt: Timestamp;
 };
 
@@ -77,14 +77,19 @@ export function academyKioskSettingsPath(academyId: string): string {
 export const ACADEMY_ADMIN_INBOX_SCHEMA_VERSION = 1 as const;
 
 export type AcademyAdminInboxKind =
+  /** 직원 초대 링크 가입 승인 대기·첫 로그인 전 */
   | "pending_registration"
+  /** 예전 직원 초청 메일(폐지) — 남은 항목 표시용 */
   | "invitation_sent"
+  /** 학부모 가입 승인 대기(연결 해제로 돌아온 계정은 만들지 않음) */
+  | "parent_pending_approval"
   | "session_payment_received";
 
 export type AcademyAdminInboxDoc = {
   schemaVersion: typeof ACADEMY_ADMIN_INBOX_SCHEMA_VERSION;
   kind: AcademyAdminInboxKind;
-  entityType: "teacher" | "parent";
+  /** 회차 결제 알림은 학생 단위(`student`, entityId = studentId) */
+  entityType: "teacher" | "parent" | "student";
   entityId: string;
   displayName: string;
   email: string;
@@ -186,11 +191,16 @@ export type TeacherRegistrationStatus =
 /** 초청 메일 발송 시점부터 학원이 안내하는 유효 창 (밀리초) — Functions·UI에서 동일 값 사용 */
 export const TEACHER_INVITE_TTL_MS = 24 * 60 * 60 * 1000;
 
-/** 학부모 초청 — 선생님과 동일 24h */
-export const PARENT_INVITE_TTL_MS = TEACHER_INVITE_TTL_MS;
-
-/** 학부모 등록 단계 — 선생님과 동일 상태 값 */
-export type ParentRegistrationStatus = TeacherRegistrationStatus;
+/**
+ * 학부모 앱 계정 상태(`functions/src/lib/parent-links.ts` `ParentAccountStatus`와 같게).
+ * 승인 대기·연결 대기(`pending_approval`)는 Auth를 끄지 않고 앱의 연결 대기 화면으로 간다. 비활성만 Auth off.
+ */
+export type ParentAccountStatus =
+  | "pending_email_verification"
+  | "pending_setup"
+  | "pending_approval"
+  | "active"
+  | "inactive";
 
 /**
  * 직원 계정 상태 — 계정 없이 인사 정보만 등록한 직원은 "no_account",
@@ -262,7 +272,7 @@ export type AcademyStaff = {
 /** `academies/{academyId}/meta/options` — 종류별 선택지 `{id, label}[]`(쓰기는 `saveAcademyOptionList`만) */
 export const ACADEMY_OPTIONS_DOC_ID = "options" as const;
 
-export type AcademyOptionListKind = "jobTitles";
+export type AcademyOptionListKind = "jobTitles" | "guardianRelations" | "rooms";
 
 export type AcademyOptionItem = { id: string; label: string };
 
@@ -288,56 +298,103 @@ export type AcademyRoleDoc = {
 };
 
 /**
- * 학원 학부모 — 초청 전 임의 문서 ID, 초청 발송 후 authUid 부여 및 문서 ID를 Auth uid로 이전.
- * 생성·수정·삭제는 Cloud Functions만 수행.
+ * 학원 학부모 앱 계정 — 문서 ID = Auth uid. 생성·수정·삭제는 Cloud Functions만 수행.
+ * 자녀 연결의 원본은 학생 `guardians[].linkedParentUid`이고 `linkedStudentIds`는 서버 트리거가 맞추는 요약.
  */
 export type AcademyParent = {
   attnId?: string;
+  loginId?: string;
   /** 인증 코드 수신용 연락 이메일 (자가 가입) */
   contactEmail?: string;
   contactEmailVerified?: boolean;
   email: string;
   displayName: string;
-  nextStudentSeq?: number;
   phone?: string | null;
-  emergencyContact?: string | null;
-  childrenCount: number;
   academyId: string;
-  status: ParentRegistrationStatus;
+  status: ParentAccountStatus;
   authUid?: string | null;
-  invitedAt?: Timestamp | null;
-  invitationExpiresAt?: Timestamp | null;
-  onboardingCompleteAt?: Timestamp | null;
+  authProvider?: "password" | "google";
+  signupSource?: "parent_link" | "parent_link_google" | "academy_created";
+  /** 연결 자녀 id(서버 트리거) */
+  linkedStudentIds?: string[];
+  /** 첫 연결(승인) 시각 — 생성 때 null. `pending_approval`인데 값이 있으면 "연결 해제됨" */
+  approvedAt?: Timestamp | null;
+  approvedByUid?: string | null;
+  /** 푸시 수신 상태 요약(`syncParentPushSubscription`) */
+  pushEnabled?: boolean;
+  pushTokenCount?: number;
+  pushSyncedAt?: Timestamp;
   activatedAt?: Timestamp | null;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 };
 
-/** 학생당 전담 선생 상한 — Firestore 규칙과 클라이언트가 동일 값 사용 */
-export const MAX_ASSIGNED_TEACHERS_PER_STUDENT = 20;
+/** 반 상태 — 운영중·준비중·종강(종강 반은 학생 `teacherUids` 계산에서 빠짐, 원생 추가 불가) */
+export type AcademyClassStatus = "active" | "preparing" | "ended";
+
+/** 수업 시간 한 칸 — 요일 월=1~일=7 */
+export type AcademyClassScheduleSlot = { weekday: number; start: string; end: string };
+
+/**
+ * `academies/{academyId}/classes/{classId}` — 쓰기는 Functions(`classes.ts`)만, 원장·활성 직원 읽기.
+ * 원생 수는 저장하지 않는다(학생 `classIds array-contains`로 셈).
+ */
+export type AcademyClass = {
+  name: string;
+  status: AcademyClassStatus;
+  schedule: AcademyClassScheduleSlot[];
+  /** 원장 uid 또는 계정이 있는 직원 uid, 최대 10명 */
+  teacherUids: string[];
+  /** `meta/options.rooms` 선택지 id — 지운 선택지면 "강의실 미지정" */
+  roomId: string | null;
+  capacity: number | null;
+  sortOrder: number;
+  endedAt?: Timestamp | null;
+  createdAt: Timestamp;
+  updatedAt?: Timestamp;
+};
 
 /** 원비 납부 방식 */
 export type TuitionType = "monthly_fixed" | "session_based";
 
-/** 학생 — 부모와 연결, Auth 없을 수 있음 */
+/** 원생 보호자 연락처 — 보호자 정보의 원본(`functions/src/lib/student-guardians.ts`) */
+export type StudentGuardian = {
+  id: string;
+  /** `meta/options.guardianRelations` 선택지 id */
+  relationId: string | null;
+  name: string | null;
+  phone: string;
+  isPrimary: boolean;
+  /** 연결된 학부모 앱 계정 — 서버 연결 함수만 씀 */
+  linkedParentUid: string | null;
+};
+
+/**
+ * 원생 — 학부모 계정 없이 먼저 존재(원생 중심 모델). 생성·원생 정보 수정은 서버(`saveStudent`)만.
+ * 학원 내부 메모는 `studentNotes/{studentId}`(학부모가 읽지 못함).
+ */
 export type AcademyStudent = {
+  /** `{academyId}_s{n}` — 학부모 번호와 분리 */
   attnId?: string;
-  parentUserId: string;
   name: string;
-  /** 만 나이 등 정수(0~120) */
-  age: number;
+  grade?: GradeCode;
+  /** grade를 저장한 해(서울) — 표시 학년은 `displayGrade` */
+  gradeYear?: number;
+  school?: string | null;
+  /** 학생 본인 번호(선택) */
   phone?: string | null;
-  emergencyContact?: string | null;
-  /**
-   * 전담 선생님 Auth uid 목록 — 과목별로 동일 학생이 여러 선생님에게 전담될 수 있음.
-   * 활성 선생만 허용(규칙), 최대 `MAX_ASSIGNED_TEACHERS_PER_STUDENT`명.
-   */
-  assignedTeacherUids?: string[];
-  /**
-   * @deprecated 구 단일 전담 필드 — 기존 문서 호환용. 클라이언트는 읽을 때 `assignedTeacherUids`와 병합하고
-   * 전담 저장 시 제거(`deleteField`)합니다.
-   */
-  assignedTeacherUid?: string | null;
+  status?: StudentStatus;
+  statusChangedAt?: Timestamp;
+  firstAttendedOn?: string | null;
+  guardians?: StudentGuardian[];
+  /** 보호자 번호(숫자만) — 서버 파생, 번호 매칭 쿼리용 */
+  guardianPhones?: string[];
+  /** 연결된 보호자 계정 — 서버 파생, 학부모 읽기 규칙·푸시 대상 */
+  parentUids?: string[];
+  /** 배정된 반 — 반 배정 함수만 */
+  classIds?: string[];
+  /** 반 담당 선생님 — `classIds`의 반(종강 제외) 선생님 합집합, 서버 파생. 선생님 읽기 규칙이 이 필드로 판별 */
+  teacherUids?: string[];
   /** 매월 지정일 납부 — tuitionType이 "monthly_fixed"이거나 미설정(학원 기본값) 시 사용 */
   tuitionDueDayOfMonth?: number;
   tuitionAmount?: number;
@@ -363,9 +420,6 @@ export type AcademyStudent = {
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 };
-
-/** 학원이 학부모당 등록 가능한 학생(자녀) 상한 */
-export const MAX_STUDENTS_PER_PARENT = 20;
 
 /** `academies/{academyId}/meta/tuitionSettings` — 원장이 설정하는 납부 안내 정보 */
 export const ACADEMY_TUITION_SETTINGS_DOC_ID = "tuitionSettings" as const;
@@ -540,7 +594,10 @@ export type AcademyPaymentDoc = {
   paymentId: string;
   studentId: string;
   studentName: string;
-  parentUserId: string;
+  /** 결제 때 학생의 연결 보호자 — 이후 연결·해제 때 서버가 갱신(학부모 결제 내역 읽기 기준) */
+  parentUids: string[];
+  /** 결제한 앱 계정(결제 요청 customData, 결제 시점 `parentUids`에 있을 때만) — 표시용, 검증된 신원 아님 */
+  payerUid?: string | null;
   amount: number;
   status: AcademyPaymentStatus;
   /** 결제 종류 — 미설정 시 기존 데이터와의 호환을 위해 "monthly_fixed"로 취급 */

@@ -23,6 +23,7 @@ import {
   verifyLoginPasswordThrottled,
 } from "./lib/login-throttle";
 import { normalizePermissionList } from "./lib/permissions";
+import { parentStatusFromLinks, readLinkedStudentIdsInTx } from "./lib/parent-links";
 import { memberPasswordResetViolation, staffAccountChangeViolation } from "./lib/role-policy";
 
 /** 로그인 실패 응답 — 없는 ID·다른 역할의 ID·비밀번호 없음·틀린 비밀번호 모두 같은 코드·문구(계정 존재 여부를 알 수 없게) */
@@ -58,6 +59,21 @@ async function verifyMemberPassword(
         : undefined
       : undefined;
   return { status, contactEmail };
+}
+
+/**
+ * 로그인 ID 로그인용 커스텀 토큰. 커스텀 토큰에 넣은 클레임(developer claims)은 그 세션 내내 토큰 갱신 뒤에도 남아
+ * `setCustomUserClaims`로 바꾼 값을 덮는다. 학부모는 세션 중 상태가 바뀌므로(이메일 인증 → 승인 대기, 연결 → 사용 중)
+ * 토큰에 클레임을 넣지 않고 서버에 저장된 클레임(직전에 `setCustomUserClaims`)만 따르게 한다. 직원 흐름은 그대로.
+ */
+function createMemberCustomToken(
+  uid: string,
+  role: MemberKind,
+  academyId: string,
+  status: string,
+): Promise<string> {
+  if (role === "parent") return admin.auth().createCustomToken(uid);
+  return admin.auth().createCustomToken(uid, { role, academyId, membershipStatus: status });
 }
 
 async function resolveParentLoginIndex(loginKey: string) {
@@ -146,11 +162,7 @@ async function signInMember(loginKey: string, password: string, role: MemberKind
     membershipStatus: status,
   });
 
-  const customToken = await admin.auth().createCustomToken(authUid, {
-    role,
-    academyId,
-    membershipStatus: status,
-  });
+  const customToken = await createMemberCustomToken(authUid, role, academyId, status);
 
   return {
     customToken,
@@ -200,11 +212,7 @@ export const reauthenticateMember = onCall(async (request) => {
     password,
     "비밀번호가 올바르지 않습니다.",
   );
-  const customToken = await admin.auth().createCustomToken(uid, {
-    role,
-    academyId,
-    membershipStatus: status,
-  });
+  const customToken = await createMemberCustomToken(uid, role, academyId, status);
   return { ok: true as const, customToken };
 });
 
@@ -275,7 +283,13 @@ export const signInParent = onCall(async (request) => {
   return signInMember(loginId, password, "parent");
 });
 
-/** 최초 비밀번호 변경 + active 전환 */
+/**
+ * 최초 비밀번호 변경 + 사용 가능 상태로(직원 active, 학부모는 연결 수로).
+ * 임시 비밀번호로 만들어진 다른 기기 세션은 모두 끊고(`revokeRefreshTokens`), 지금 기기는 응답의 새 커스텀 토큰으로
+ * 다시 로그인한다 — 끊기 전 발급된 이 기기의 토큰도 갱신이 거부되므로(첫 로그인 직후 새로고침에서 로그아웃되던 문제).
+ * 순서: 해시 저장(임시 비밀번호 무효) → 세션 끊기 → 상태 전환 → 클레임 → 새 토큰(전환 뒤 상태).
+ * 세션 끊기를 상태 전환보다 먼저 하는 이유: 전환 뒤에 끊기가 실패하면 다시 호출할 수 없어(이미 active) 다른 세션이 남는다.
+ */
 export const completeMemberFirstLogin = onCall(async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
@@ -305,24 +319,40 @@ export const completeMemberFirstLogin = onCall(async (request) => {
     throw new HttpsError("failed-precondition", "첫 로그인 비밀번호 설정이 필요한 계정이 아닙니다.");
   }
 
-  await admin.auth().updateUser(uid, { password: randomAuthPassword() });
-  await memberRef.update({
-    status: "active",
-    activatedAt: FieldValue.serverTimestamp(),
-    updatedAt: FieldValue.serverTimestamp(),
-  });
   await memberRef
     .collection("secrets")
     .doc("login")
     .set(await passwordSecretFields(newPassword), { merge: true });
+  // 임시 비밀번호로 만든 세션(다른 기기 포함)을 모두 끊는다 — 지금 기기는 아래 새 토큰으로 다시 로그인
+  await admin.auth().revokeRefreshTokens(uid);
+  // 직원은 사용 중, 학부모는 연결 수로(0명이면 연결 대기)
+  const db = admin.firestore();
+  const membershipStatus = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(memberRef);
+    if (snap.get("status") !== "pending_setup") {
+      throw new HttpsError("failed-precondition", "첫 로그인 비밀번호 설정이 필요한 계정이 아닙니다.");
+    }
+    const linkedStudentIds =
+      role === "parent" ? await readLinkedStudentIdsInTx(tx, db, academyId, uid) : null;
+    const next = linkedStudentIds ? parentStatusFromLinks(linkedStudentIds.length) : "active";
+    tx.update(memberRef, {
+      status: next,
+      ...(linkedStudentIds ? { linkedStudentIds } : {}),
+      ...(next === "active" ? { activatedAt: FieldValue.serverTimestamp() } : {}),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return next;
+  });
 
   await admin.auth().setCustomUserClaims(uid, {
     role,
     academyId,
-    membershipStatus: "active",
+    membershipStatus,
   });
 
-  return { ok: true, membershipStatus: "active" as const };
+  // 끊은 뒤 발급 — 직원 토큰의 클레임은 전환 뒤 상태(세션 내내 남으므로 pending_setup이면 안 됨)
+  const customToken = await createMemberCustomToken(uid, role, academyId, membershipStatus);
+  return { ok: true, membershipStatus, customToken };
 });
 
 /** 오너/학원 — 임시 비밀번호 재발급 (1회 표시) */
@@ -482,48 +512,5 @@ export const resetMemberPassword = onCall(async (request) => {
       typeof loginId === "string" && loginId ? loginId : typeof attnId === "string" ? attnId : "",
     displayName: typeof displayName === "string" ? displayName : "",
     tempPassword,
-  };
-});
-
-/** 오너/학원 — 미활성 계정 목록 (attnId, 이름, 상태) */
-export const listAcademyIssuedAccounts = onCall(async (request) => {
-  if (!request.auth?.uid) {
-    throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
-  }
-  const { uid, token } = request.auth;
-  const academyId =
-    typeof request.data?.academyId === "string" ? request.data.academyId.trim() : "";
-  if (!academyId) {
-    throw new HttpsError("invalid-argument", "학원 ID가 필요합니다.");
-  }
-
-  const db = admin.firestore();
-  await assertPermission(db, academyId, uid, token, "settings.members");
-
-  const [teachersSnap, parentsSnap] = await Promise.all([
-    db.collection(`academies/${academyId}/staff`).get(),
-    db.collection(`academies/${academyId}/parents`).get(),
-  ]);
-
-  const mapRow = (
-    d: FirebaseFirestore.QueryDocumentSnapshot,
-    role: MemberKind,
-  ) => {
-    const data = d.data();
-    return {
-      authUid: d.id,
-      role,
-      attnId: typeof data.attnId === "string" ? data.attnId : "",
-      displayName: typeof data.displayName === "string" ? data.displayName : "",
-      status: typeof data.status === "string" ? data.status : "pending_setup",
-    };
-  };
-
-  return {
-    // 계정 없는 직원(인사 정보만)은 발급 계정 목록에서 제외
-    teachers: teachersSnap.docs
-      .filter((d) => d.get("status") !== "no_account")
-      .map((d) => mapRow(d, "teacher")),
-    parents: parentsSnap.docs.map((d) => mapRow(d, "parent")),
   };
 });

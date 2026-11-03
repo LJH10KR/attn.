@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 
@@ -9,7 +10,24 @@ export type DashboardNotificationRow = {
   id: string;
   title: string;
   detail?: string;
+  /** 바로 가기(예: 학부모 승인 대기 목록) — 누르면 모달을 닫고 이동 */
+  href?: string;
+  hrefLabel?: string;
 };
+
+function RowLink({ href, label, onNavigate }: { href: string; label?: string; onNavigate: () => void }) {
+  return (
+    <Link
+      href={href}
+      onClick={onNavigate}
+      // 스와이프 행이 pointer capture를 쓰므로 링크에서 시작한 포인터는 행으로 올리지 않는다
+      onPointerDown={(e) => e.stopPropagation()}
+      className="mt-2 inline-block rounded-[8px] bg-[#222] px-3 py-1.5 text-xs font-medium text-white dark:bg-neutral-100 dark:text-neutral-950"
+    >
+      {label ?? "바로 가기"}
+    </Link>
+  );
+}
 
 type DashboardNotificationsModalProps = {
   open: boolean;
@@ -27,12 +45,18 @@ const DELETE_PANEL_PX = 72;
 function SwipeToDeleteNotificationRow({
   title,
   detail,
+  href,
+  hrefLabel,
+  onNavigate,
   isOpen,
   onOpenChange,
   onDelete,
 }: {
   title: string;
   detail?: string;
+  href?: string;
+  hrefLabel?: string;
+  onNavigate: () => void;
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onDelete: () => void;
@@ -134,6 +158,7 @@ function SwipeToDeleteNotificationRow({
               {detail}
             </p>
           ) : null}
+          {href ? <RowLink href={href} label={hrefLabel} onNavigate={onNavigate} /> : null}
         </div>
         <div
           className="flex shrink-0 items-stretch"
@@ -248,6 +273,9 @@ export function DashboardNotificationsModal({
                   key={row.id}
                   title={row.title}
                   detail={row.detail}
+                  href={row.href}
+                  hrefLabel={row.hrefLabel}
+                  onNavigate={onClose}
                   isOpen={openSwipeId === row.id}
                   onOpenChange={(next) => handleOpenSwipe(row.id, next)}
                   onDelete={() => void onDeleteItem?.(row.id)}
@@ -264,6 +292,7 @@ export function DashboardNotificationsModal({
                       {row.detail}
                     </p>
                   ) : null}
+                  {row.href ? <RowLink href={row.href} label={row.hrefLabel} onNavigate={onClose} /> : null}
                 </li>
               ))}
             </ul>
