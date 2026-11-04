@@ -359,6 +359,18 @@ service cloud.firestore {
         allow read, write: if false;
       }
 
+      /**
+       * 반 출결(문서 ID = `{date}_{classId}_{studentId}`, 2-I) — 쓰기는 Functions(`recordClassAttendance`)만.
+       * 읽기는 출결·청구서 권한, 그리고 그 반 선생님(반 `teacherUids`) — 선생님은 `classId ==` 조건 목록 조회로 읽는다.
+       */
+      match /attendance/{attendanceId} {
+        allow read: if isAdmin()
+          || hasAnyPermission(academyId, ['lessons.attendance', 'billing.invoices'])
+          || (isAcademyTeacherActive(academyId)
+              && uidListHasMe(get(/databases/$(database)/documents/academies/$(academyId)/classes/$(resource.data.classId)).data.teacherUids));
+        allow write: if false;
+      }
+
       match /students/{studentId} {
         /**
          * 원생을 다루는 메뉴(원생·학부모·반·출결·수납)는 모두 학생 목록을 읽는다.
@@ -393,12 +405,15 @@ service cloud.firestore {
         }
 
         /**
-         * 출결 기록(문서 ID = 서울 기준 YYYY-MM-DD) — 결석 사유가 원비 차감 근거가 되므로
-         * 쓰기는 Functions(`recordStudentAbsences` 등)만, 읽기는 학원만.
+         * 등원 기록(문서 ID = 서울 기준 YYYY-MM-DD, present=등원·absent=미등원) — 미등원 사유가 원비 차감
+         * 근거가 되므로 쓰기는 Functions(`recordStudentArrival`·`recordStudentAbsences` 등)만.
+         * 읽기는 출결·청구서 권한, 그리고 담당 선생님(학생 `teacherUids`, 2-I ★6 — "등원 처리"·출석 버튼 판단).
          */
         match /attendanceRecords/{date} {
           allow read: if isAdmin()
-            || hasAnyPermission(academyId, ['lessons.attendance', 'billing.invoices']);
+            || hasAnyPermission(academyId, ['lessons.attendance', 'billing.invoices'])
+            || (isAcademyTeacherActive(academyId)
+                && uidListHasMe(get(/databases/$(database)/documents/academies/$(academyId)/students/$(studentId)).data.teacherUids));
           allow write: if false;
         }
 

@@ -82,12 +82,16 @@ export function AcademyAttendanceLogPanel({
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span
                   className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                    r.kind === "present"
-                      ? "bg-emerald-500/15 text-emerald-900"
-                      : "bg-amber-500/20 text-amber-900"
+                    r.context === "class"
+                      ? r.kind === "present"
+                        ? "bg-sky-500/15 text-sky-900"
+                        : "bg-orange-500/15 text-orange-900"
+                      : r.kind === "present"
+                        ? "bg-emerald-500/15 text-emerald-900"
+                        : "bg-amber-500/20 text-amber-900"
                   }`}
                 >
-                  {attendanceKindLabel(r.kind, r.reason)}
+                  {attendanceKindLabel(r)}
                 </span>
                 <span className="text-xs font-medium text-foreground">
                   {r.studentName || r.studentId || "학생"}

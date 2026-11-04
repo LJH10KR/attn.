@@ -1,13 +1,13 @@
 import type { AcademyClassScheduleSlot } from "@/lib/firebase/attn-schema";
 
 /**
- * 반 수업 시간 — 저장은 칸 단위 `{weekday 1(월)~7(일), start, end}`(서버 `parseSchedule`),
- * 화면은 "같은 시간대의 요일 묶음" 여러 줄로 편집한다(월·수 16:00–17:00 / 금 18:00–19:30).
- * 막는 조건은 서버와 같게: 요일 1개 이상, 시작 < 끝, 똑같은 칸 금지, 풀어 놓은 칸 최대 14개.
- * 한 반 안의 칸끼리 겹치는 것은 경고만(저장 가능). 다른 반·강의실끼리는 검사하지 않는다(견적서 4-2).
+ * 반 수업 시간 — 저장은 칸 단위 `{weekday 1(월)~7(일), start, end}`(서버 `functions/src/lib/class-schedule.ts`).
+ * 2-I부터 **한 반은 요일당 1칸**(하루 두 번 수업하면 반을 따로 만든다, 결정 3-3) → 최대 7칸.
+ * 편집은 "요일 고르기 → 시간 하나(기본)", "요일마다 다름"이면 고른 요일마다 시간(`ScheduleDraft`).
+ * 다른 반·강의실끼리는 검사하지 않는다(견적서 4-2).
  */
 
-export const MAX_SCHEDULE_SLOTS = 14;
+export const MAX_SCHEDULE_SLOTS = 7;
 export const WEEKDAYS = [1, 2, 3, 4, 5, 6, 7] as const;
 export const WEEKDAY_LABELS: Record<number, string> = {
   1: "월",
@@ -64,47 +64,96 @@ export function groupSchedule(slots: readonly AcademyClassScheduleSlot[]): Sched
   );
 }
 
-/** 편집 줄 → 칸(요일 × 시간대, 정렬). 똑같은 칸이 여러 줄에 있으면 그대로 둘 다 남긴다(검사가 막음) */
-export function expandScheduleGroups(groups: readonly ScheduleGroup[]): AcademyClassScheduleSlot[] {
-  return sortSlots(groups.flatMap((g) => g.weekdays.map((weekday) => ({ weekday, start: g.start, end: g.end }))));
+export type TimeRange = { start: string; end: string };
+
+/** 편집 상태 — 고른 요일, 요일마다 다름 여부, 공통 시간, 요일별 시간 */
+export type ScheduleDraft = {
+  weekdays: number[];
+  perDay: boolean;
+  common: TimeRange;
+  byDay: Record<number, TimeRange>;
+};
+
+const DEFAULT_TIME: TimeRange = { start: "16:00", end: "17:00" };
+
+/** 같은 요일에 두 칸 이상(2-I 이전에 저장된 반) */
+export function hasDuplicateWeekday(slots: readonly AcademyClassScheduleSlot[]): boolean {
+  return new Set(slots.map((s) => s.weekday)).size !== slots.length;
 }
 
-/** 저장을 막는 오류(서버 `parseSchedule`과 같은 조건) — 없으면 null */
-export function scheduleBlockingError(groups: readonly ScheduleGroup[]): string | null {
-  for (const [i, g] of groups.entries()) {
-    const label = groups.length > 1 ? `수업 시간 ${i + 1}: ` : "";
-    if (g.weekdays.length === 0) return `${label}요일을 하나 이상 골라 주세요.`;
-    if (!TIME_RE.test(g.start) || !TIME_RE.test(g.end)) return `${label}시작·끝 시간을 입력해 주세요.`;
-    if (g.start >= g.end) return `${label}끝 시간은 시작 시간보다 늦어야 합니다.`;
+/** 두 칸 이상인 요일의 칸 전부(요일·시작 순) — 수정 시트 안내용 */
+export function duplicateWeekdaySlots(slots: readonly AcademyClassScheduleSlot[]): AcademyClassScheduleSlot[] {
+  const count = new Map<number, number>();
+  slots.forEach((s) => count.set(s.weekday, (count.get(s.weekday) ?? 0) + 1));
+  return sortSlots(slots.filter((s) => (count.get(s.weekday) ?? 0) > 1));
+}
+
+/** 저장된 칸 → 편집 상태. 요일마다 첫 칸만 쓰고(예전 중복 데이터), 시간이 모두 같으면 기본 형태 */
+export function draftFromSchedule(slots: readonly AcademyClassScheduleSlot[]): ScheduleDraft {
+  const byDay: Record<number, TimeRange> = {};
+  for (const s of sortSlots(slots)) {
+    if (!byDay[s.weekday]) byDay[s.weekday] = { start: s.start, end: s.end };
   }
-  const slots = expandScheduleGroups(groups);
-  const seen = new Set<string>();
-  for (const s of slots) {
-    const k = `${s.weekday}|${s.start}|${s.end}`;
-    if (seen.has(k)) {
-      return `같은 수업 시간(${WEEKDAY_LABELS[s.weekday]} ${s.start}–${s.end})이 두 번 들어 있습니다.`;
-    }
-    seen.add(k);
+  const weekdays = Object.keys(byDay).map(Number).sort((a, b) => a - b);
+  const times = weekdays.map((d) => byDay[d]!);
+  const first = times[0] ?? DEFAULT_TIME;
+  const perDay = times.some((t) => t.start !== first.start || t.end !== first.end);
+  return { weekdays, perDay, common: { ...first }, byDay };
+}
+
+/** 편집 상태 → 칸(요일 순) */
+export function draftToSlots(draft: ScheduleDraft): AcademyClassScheduleSlot[] {
+  return [...draft.weekdays]
+    .sort((a, b) => a - b)
+    .map((weekday) => {
+      const t = draft.perDay ? draft.byDay[weekday] ?? draft.common : draft.common;
+      return { weekday, start: t.start, end: t.end };
+    });
+}
+
+/** "요일마다 다름" 켜기·끄기 — 켜면 공통 시간을 각 요일에 복사, 끄면 첫 요일 시간으로 맞춤 */
+export function setDraftPerDay(draft: ScheduleDraft, perDay: boolean): ScheduleDraft {
+  if (perDay === draft.perDay) return draft;
+  if (perDay) {
+    const byDay: Record<number, TimeRange> = { ...draft.byDay };
+    draft.weekdays.forEach((d) => {
+      byDay[d] = { ...draft.common };
+    });
+    return { ...draft, perDay, byDay };
   }
-  if (slots.length > MAX_SCHEDULE_SLOTS) {
-    return `수업 시간은 요일별로 최대 ${MAX_SCHEDULE_SLOTS}칸까지 등록할 수 있습니다(지금 ${slots.length}칸).`;
+  const firstDay = [...draft.weekdays].sort((a, b) => a - b)[0];
+  const common = firstDay !== undefined && draft.byDay[firstDay] ? { ...draft.byDay[firstDay]! } : draft.common;
+  return { ...draft, perDay, common };
+}
+
+/** "요일마다 다름"을 끌 때 시간이 서로 달라 하나로 맞춰지는지 */
+export function draftPerDayDiffers(draft: ScheduleDraft): boolean {
+  const times = draft.weekdays.map((d) => draft.byDay[d] ?? draft.common);
+  return times.some((t) => t.start !== times[0]!.start || t.end !== times[0]!.end);
+}
+
+/** 요일 켜기·끄기 — 새로 켠 요일은 공통 시간(요일마다 다름이면 마지막 요일 시간)으로 */
+export function toggleDraftWeekday(draft: ScheduleDraft, day: number): ScheduleDraft {
+  if (draft.weekdays.includes(day)) {
+    return { ...draft, weekdays: draft.weekdays.filter((d) => d !== day) };
+  }
+  const weekdays = [...draft.weekdays, day].sort((a, b) => a - b);
+  const byDay = { ...draft.byDay };
+  if (!byDay[day]) {
+    const prev = [...draft.weekdays].sort((a, b) => a - b).filter((d) => d < day).pop();
+    byDay[day] = { ...(draft.perDay && prev !== undefined ? draft.byDay[prev] ?? draft.common : draft.common) };
+  }
+  return { ...draft, weekdays, byDay };
+}
+
+/** 저장을 막는 오류(서버와 같은 조건 — 요일당 1칸은 편집 형태가 보장) — 없으면 null */
+export function scheduleDraftError(draft: ScheduleDraft): string | null {
+  for (const s of draftToSlots(draft)) {
+    const label = draft.perDay ? `${WEEKDAY_LABELS[s.weekday]}요일 ` : "";
+    if (!TIME_RE.test(s.start) || !TIME_RE.test(s.end)) return `${label}시작·끝 시간을 입력해 주세요.`;
+    if (s.start >= s.end) return `${label}끝 시간은 시작 시간보다 늦어야 합니다.`;
   }
   return null;
-}
-
-/** 한 반 안에서 같은 요일 칸끼리 시간이 겹치는지(경고만 — 똑같은 칸은 따로 막음) */
-export function scheduleHasOverlap(slots: readonly AcademyClassScheduleSlot[]): boolean {
-  const sorted = sortSlots(slots);
-  for (let i = 0; i < sorted.length; i++) {
-    for (let j = i + 1; j < sorted.length; j++) {
-      const a = sorted[i]!;
-      const b = sorted[j]!;
-      if (a.weekday !== b.weekday) break;
-      if (a.start === b.start && a.end === b.end) continue;
-      if (b.start < a.end && a.start < b.end) return true;
-    }
-  }
-  return false;
 }
 
 /** "월·수 16:00–17:00 · 금 18:00–19:30" — 없으면 빈 문자열 */

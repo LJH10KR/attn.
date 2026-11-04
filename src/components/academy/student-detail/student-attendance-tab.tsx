@@ -7,8 +7,11 @@ import { AbsenceRecordModal } from "@/components/academy/absence-record-modal";
 import { formatRecordDate, seoulDateString } from "@/lib/academy/attendance-records";
 import {
   loadStudentAttendance,
+  loadStudentClassAttendance,
   type StudentAttendanceRow,
+  type StudentClassAttendanceRow,
 } from "@/lib/academy/student-detail/attendance-source";
+import { formatSeoulHHmm } from "@/lib/academy/attendance-rules";
 import { ABSENCE_REASON_LABELS } from "@/lib/firebase/attn-schema";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
 
@@ -33,8 +36,8 @@ const smallBtn =
   "rounded-[8px] border border-neutral-300/70 bg-white/70 px-2.5 py-1 text-[11px] font-medium text-neutral-700 hover:bg-white/90 disabled:opacity-40";
 
 /**
- * 출결 탭 — 월별 출결 기록(예전 출결 기록 모달을 옮김). 읽기 `lessons.attendance`·`billing.invoices`,
- * 결석 기록·사유 정정·삭제는 `lessons.attendance`(`canRecord`).
+ * 출결 탭(2-I) — 월별로 날짜마다 위에 등원/미등원(사유·등원 시각), 아래에 반별 출석/결석.
+ * 읽기 `lessons.attendance`·`billing.invoices`, 결석(미등원) 기록·사유 정정·삭제는 `lessons.attendance`(`canRecord`).
  */
 export function StudentAttendanceTab({
   academyId,
@@ -51,6 +54,7 @@ export function StudentAttendanceTab({
 }) {
   const [{ year, month }, setYm] = useState(currentYearMonth);
   const [rows, setRows] = useState<StudentAttendanceRow[]>([]);
+  const [classRows, setClassRows] = useState<StudentClassAttendanceRow[]>([]);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [confirmDate, setConfirmDate] = useState<string | null>(null);
@@ -63,9 +67,16 @@ export function StudentAttendanceTab({
     setError(null);
     try {
       const key = monthKey(year, month);
-      setRows(await loadStudentAttendance(academyId, studentId, { from: `${key}-01`, to: `${key}-31` }));
+      const range = { from: `${key}-01`, to: `${key}-31` };
+      const [arrivals, classes] = await Promise.all([
+        loadStudentAttendance(academyId, studentId, range),
+        loadStudentClassAttendance(academyId, studentId, range),
+      ]);
+      setRows(arrivals);
+      setClassRows(classes);
     } catch (e) {
       setRows([]);
+      setClassRows([]);
       setError(e instanceof Error ? e.message : "출결 기록을 불러오지 못했습니다.");
     } finally {
       setBusy(false);
@@ -101,7 +112,7 @@ export function StudentAttendanceTab({
       await httpsCallable(getFirebaseFunctions(), "deleteStudentAttendanceRecord")({ academyId, studentId, date });
       setRows((prev) => prev.filter((r) => r.date !== date));
       setConfirmDate(null);
-      onNoticeAction(`${studentName} ${formatRecordDate(date)} 출결 기록을 삭제했습니다.`);
+      onNoticeAction(`${studentName} ${formatRecordDate(date)} 등원 기록을 삭제했습니다.`);
     } catch (e) {
       setError(e instanceof FirebaseError && e.message ? e.message : "삭제에 실패했습니다.");
     } finally {
@@ -110,6 +121,11 @@ export function StudentAttendanceTab({
   };
 
   const absences = rows.filter((r) => r.status === "absent");
+  // 날짜 목록 = 등원 기록 ∪ 반 출결(최근 날짜부터)
+  const dates = [...new Set([...rows.map((r) => r.date), ...classRows.map((c) => c.date)])].sort((a, b) =>
+    b.localeCompare(a),
+  );
+  const rowByDate = new Map(rows.map((r) => [r.date, r]));
   const deductibleCount = absences.filter((r) => r.reason === "illness" || r.reason === "academy").length;
   const billedCount = absences.filter((r) => r.billedInvoicePeriod).length;
 
@@ -146,101 +162,142 @@ export function StudentAttendanceTab({
       <p className="text-[11px] text-neutral-500">
         {busy
           ? "불러오는 중…"
-          : `결석 ${absences.length}일 (차감 대상 ${deductibleCount}일, 청구 반영 ${billedCount}일)`}
+          : `미등원 ${absences.length}일 (차감 대상 ${deductibleCount}일, 청구 반영 ${billedCount}일)`}
       </p>
 
       {error ? <p className="rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p> : null}
 
-      {busy ? null : rows.length === 0 ? (
+      {busy ? null : dates.length === 0 ? (
         <p className="py-10 text-center text-sm text-neutral-400">이 달의 출결 기록이 없습니다.</p>
       ) : (
         <ul className="space-y-1.5">
-          {rows.map((r) => {
-            const deductible = r.reason === "illness" || r.reason === "academy";
-            const confirming = confirmDate === r.date;
+          {dates.map((date) => {
+            const r = rowByDate.get(date);
+            const classesOfDay = classRows.filter((c) => c.date === date);
+            const deductible = r?.reason === "illness" || r?.reason === "academy";
+            const confirming = confirmDate === date;
             return (
               <li
-                key={r.date}
-                className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 ${
+                key={date}
+                className={`rounded-xl px-3 py-2.5 ${
                   deductible ? "bg-amber-50/80 ring-1 ring-amber-200/70" : "bg-white/50"
                 }`}
               >
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-xs font-medium text-foreground">{formatRecordDate(r.date)}</span>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                        r.status === "present"
-                          ? "bg-emerald-500/15 text-emerald-900"
-                          : "bg-neutral-500/15 text-neutral-800"
-                      }`}
-                    >
-                      {r.status === "present" ? "출석" : "결석"}
-                    </span>
-                    {r.reason ? (
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                          deductible ? "bg-amber-500/25 text-amber-950" : "bg-neutral-500/10 text-neutral-600"
-                        }`}
-                      >
-                        {ABSENCE_REASON_LABELS[r.reason]}
-                      </span>
-                    ) : null}
-                    {r.billedInvoicePeriod ? (
-                      <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-semibold text-sky-900">
-                        {Number(r.billedInvoicePeriod.slice(5))}월 청구 반영
-                      </span>
-                    ) : null}
-                    <span className="text-[10px] text-neutral-500">{roleLabel(r.recordedByRole)}</span>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-xs font-medium text-foreground">{formatRecordDate(date)}</span>
+                      {r ? (
+                        <>
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                              r.status === "present"
+                                ? "bg-emerald-500/15 text-emerald-900"
+                                : "bg-neutral-500/15 text-neutral-800"
+                            }`}
+                          >
+                            {r.status === "present" ? "등원" : "미등원"}
+                          </span>
+                          {r.status === "present" && r.arrivedAtMs ? (
+                            <span className="text-[10px] text-neutral-500">
+                              {formatSeoulHHmm(new Date(r.arrivedAtMs))}
+                            </span>
+                          ) : null}
+                          {r.reason ? (
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                deductible ? "bg-amber-500/25 text-amber-950" : "bg-neutral-500/10 text-neutral-600"
+                              }`}
+                            >
+                              {ABSENCE_REASON_LABELS[r.reason]}
+                            </span>
+                          ) : null}
+                          {r.billedInvoicePeriod ? (
+                            <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-semibold text-sky-900">
+                              {Number(r.billedInvoicePeriod.slice(5))}월 청구 반영
+                            </span>
+                          ) : null}
+                          <span className="text-[10px] text-neutral-500">{roleLabel(r.recordedByRole)}</span>
+                        </>
+                      ) : (
+                        <span className="text-[10px] text-neutral-500">등원 기록 없음</span>
+                      )}
+                    </div>
+                    {r?.note ? <p className="mt-0.5 truncate text-[11px] text-neutral-600">{r.note}</p> : null}
                   </div>
-                  {r.note ? <p className="mt-0.5 truncate text-[11px] text-neutral-600">{r.note}</p> : null}
-                </div>
-                {canRecord ? (
-                  <div className="flex shrink-0 gap-1.5">
-                    {r.billedInvoicePeriod ? (
-                      <span className="text-[10px] text-neutral-500">수정 잠금</span>
-                    ) : confirming ? (
-                      <>
-                        <button
-                          type="button"
-                          disabled={deleteBusy}
-                          className={smallBtn}
-                          onClick={() => setConfirmDate(null)}
-                        >
-                          아니요
-                        </button>
-                        <button
-                          type="button"
-                          disabled={deleteBusy}
-                          className="rounded-[8px] bg-red-500 px-2.5 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
-                          onClick={() => void deleteRecord(r.date)}
-                        >
-                          {deleteBusy ? "삭제 중…" : "삭제"}
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        {r.status === "absent" ? (
+                  {canRecord && r ? (
+                    <div className="flex shrink-0 gap-1.5">
+                      {r.billedInvoicePeriod ? (
+                        <span className="text-[10px] text-neutral-500">수정 잠금</span>
+                      ) : confirming ? (
+                        <>
                           <button
                             type="button"
                             disabled={deleteBusy}
                             className={smallBtn}
-                            onClick={() => setEditTarget(r)}
+                            onClick={() => setConfirmDate(null)}
                           >
-                            사유
+                            아니요
                           </button>
+                          <button
+                            type="button"
+                            disabled={deleteBusy}
+                            className="rounded-[8px] bg-red-500 px-2.5 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
+                            onClick={() => void deleteRecord(date)}
+                          >
+                            {deleteBusy ? "삭제 중…" : "삭제"}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          {r.status === "absent" ? (
+                            <button
+                              type="button"
+                              disabled={deleteBusy}
+                              className={smallBtn}
+                              onClick={() => setEditTarget(r)}
+                            >
+                              사유
+                            </button>
+                          ) : null}
+                          {/* 반 출결이 있는 날의 등원 기록은 지울 수 없다(서버도 거부, 2-I ★7) */}
+                          {classesOfDay.length === 0 ? (
+                            <button
+                              type="button"
+                              disabled={deleteBusy}
+                              className="rounded-[8px] border border-red-200/80 bg-white/70 px-2.5 py-1 text-[11px] font-medium text-red-600 disabled:opacity-40"
+                              onClick={() => setConfirmDate(date)}
+                            >
+                              삭제
+                            </button>
+                          ) : null}
+                        </>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+                {classesOfDay.length > 0 ? (
+                  <ul className="mt-1.5 space-y-1 border-t border-neutral-200/60 pt-1.5">
+                    {classesOfDay.map((c) => (
+                      <li key={c.classId} className="flex items-center gap-1.5 text-[11px]">
+                        <span className="min-w-0 truncate text-neutral-700">{c.className}</span>
+                        {c.slots.length > 0 ? (
+                          <span className="shrink-0 text-[10px] text-neutral-400">
+                            {c.slots.map((x) => `${x.start}~${x.end}`).join(", ")}
+                          </span>
                         ) : null}
-                        <button
-                          type="button"
-                          disabled={deleteBusy}
-                          className="rounded-[8px] border border-red-200/80 bg-white/70 px-2.5 py-1 text-[11px] font-medium text-red-600 disabled:opacity-40"
-                          onClick={() => setConfirmDate(r.date)}
+                        <span
+                          className={`ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            c.status === "present"
+                              ? "bg-emerald-500/15 text-emerald-900"
+                              : "bg-amber-500/20 text-amber-950"
+                          }`}
                         >
-                          삭제
-                        </button>
-                      </>
-                    )}
-                  </div>
+                          {c.status === "present" ? "출석" : "결석"}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
                 ) : null}
               </li>
             );

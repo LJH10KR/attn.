@@ -1,7 +1,7 @@
 "use client";
 
 import { collection, getDocs } from "firebase/firestore";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
 import { useAcademyShell } from "@/components/academy/academy-shell";
 import {
@@ -25,12 +25,14 @@ import {
   type GradeFilter,
 } from "@/lib/academy/student-filters";
 import {
+  isActiveStudent,
   STUDENT_STATUSES,
   STUDENT_STATUS_LABELS,
   type StudentStatus,
 } from "@/lib/academy/student-profile";
 import { useAcademyClasses, type AcademyClassBrief } from "@/lib/academy/use-academy-classes";
 import { useAcademyOptionList } from "@/lib/academy/use-academy-option-list";
+import { useAttendanceActions } from "@/lib/academy/use-attendance-actions";
 import { useStudentAccess } from "@/lib/academy/use-student-access";
 import { academyStudentsPath, type AcademyOptionItem } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
@@ -140,6 +142,32 @@ export function AcademyStudentsScreen() {
   }, [students, statusFilter, classFilter, gradeFilter, queryText]);
 
   const showNotice = useCallback((message: string) => setNotice(message), []);
+
+  // 등원·미등원(2-I ★1) — 오늘 상태는 읽지 않고, 누른 결과만 그 카드에 잠깐 보여 준다
+  const [cardResults, setCardResults] = useState<Record<string, { text: string; ok: boolean }>>({});
+  const resultTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const onArrivalDone = useCallback((text: string, ok: boolean, studentId: string) => {
+    setCardResults((prev) => ({ ...prev, [studentId]: { text, ok } }));
+    const timers = resultTimers.current;
+    const prevTimer = timers.get(studentId);
+    if (prevTimer) clearTimeout(prevTimer);
+    timers.set(
+      studentId,
+      setTimeout(() => {
+        timers.delete(studentId);
+        setCardResults((prev) => {
+          const next = { ...prev };
+          delete next[studentId];
+          return next;
+        });
+      }, 8000),
+    );
+  }, []);
+  useEffect(() => {
+    const timers = resultTimers.current;
+    return () => timers.forEach((t) => clearTimeout(t));
+  }, []);
+  const attendance = useAttendanceActions(academyId, onArrivalDone);
 
   const exportCsv = async () => {
     setMenuOpen(false);
@@ -324,12 +352,15 @@ export function AcademyStudentsScreen() {
           filtered.map((s) => {
             const g = primaryGuardian(s);
             const classChips = s.classIds.flatMap((id) => classById.get(id) ?? []);
+            const markable = access.canMarkArrival(s);
+            const active = isActiveStudent(s);
+            const result = cardResults[s.id];
             return (
-              <li key={s.id}>
+              <li key={s.id} className="glass-card overflow-hidden">
                 <button
                   type="button"
                   onClick={() => detail.open(s.id)}
-                  className="glass-card block w-full px-4 py-3 text-left transition hover:bg-white/45 active:bg-white/55"
+                  className="block w-full px-4 py-3 text-left transition hover:bg-white/45 active:bg-white/55"
                 >
                   <div className="flex items-center gap-2">
                     <span className="min-w-0 truncate font-medium text-foreground">{s.name}</span>
@@ -365,6 +396,40 @@ export function AcademyStudentsScreen() {
                     ) : null}
                   </div>
                 </button>
+                {markable ? (
+                  <div className="flex items-center gap-2 border-t border-neutral-200/60 px-4 py-2">
+                    <span
+                      className={`min-w-0 flex-1 break-keep text-[11px] leading-snug ${
+                        result ? (result.ok ? "text-emerald-800" : "text-red-700") : "text-neutral-500"
+                      }`}
+                      role={result ? "status" : undefined}
+                      title={result?.text}
+                    >
+                      {result ? result.text : active ? "오늘 등원" : "재원 아님"}
+                    </span>
+                    {(["present", "absent"] as const).map((status) => (
+                      <button
+                        key={status}
+                        type="button"
+                        disabled={!active || attendance.busyKey !== null}
+                        onClick={() => void attendance.markArrival(s.id, status, "student_list")}
+                        className={`shrink-0 rounded-[8px] border px-2.5 py-1.5 text-[11px] font-medium disabled:cursor-not-allowed ${
+                          !active
+                            ? "border-neutral-300/60 bg-neutral-100/60 text-neutral-400"
+                            : status === "present"
+                              ? "border-emerald-400/60 bg-emerald-500/15 text-emerald-950 hover:bg-emerald-500/25 disabled:opacity-50"
+                              : "border-neutral-400/60 bg-white/60 text-neutral-800 hover:bg-white disabled:opacity-50"
+                        }`}
+                      >
+                        {attendance.busyKey === `${s.id}:arrival:${status}`
+                          ? "기록 중…"
+                          : status === "present"
+                            ? "등원"
+                            : "미등원"}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </li>
             );
           })

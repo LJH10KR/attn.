@@ -50,8 +50,17 @@ export type StudentAccess = {
   payments: boolean;
   /** 반 이름(classes 읽기 — 원장·활성 직원) */
   readClasses: boolean;
-  /** 출석 알림 — 출결 권한 또는 담당 반 학생, 그리고 재원 */
+  /** 학생 상세 "등원 알림" — 등원 처리 권한 + 재원 */
   notifyPresent: (s: StudentAccessTarget) => boolean;
+  /** 등원·미등원 처리(`recordStudentArrival`) — 출결 권한 또는 담당 학생(재원 여부는 버튼 상태로) */
+  canMarkArrival: (s: StudentAccessTarget) => boolean;
+  /** 반 출석·결석(`recordClassAttendance`) — 출결 권한 또는 그 반 선생님(반 teacherUids) */
+  canMarkClass: (cls: { teacherUids: readonly string[] }) => boolean;
+  /**
+   * 그 반 오늘 출결 읽기(규칙과 같게) — 출결·청구서 권한 또는 그 반 선생님.
+   * 이 값이 false면 구독하지 않는다(규칙 거부 문서 구독은 SDK 내부 오류 위험, 2-I B1).
+   */
+  readClassAttendance: (cls: { teacherUids: readonly string[] }) => boolean;
   /** 보여 줄 상세 탭(순서대로) */
   tabs: (s: StudentAccessTarget) => StudentDetailTab[];
 };
@@ -97,6 +106,10 @@ export function studentAccess(can: HasAny, viewerUid: string | null): StudentAcc
     payments: can(["billing.payments", "billing.collections", "billing.refunds"]),
     readClasses: isMember,
     notifyPresent: (s) => (can("lessons.attendance") || assigned(s)) && isActiveStudent(s),
+    canMarkArrival: (s) => can("lessons.attendance") || assigned(s),
+    canMarkClass: (cls) => can("lessons.attendance") || (viewerUid !== null && cls.teacherUids.includes(viewerUid)),
+    readClassAttendance: (cls) =>
+      attendanceTab || (viewerUid !== null && cls.teacherUids.includes(viewerUid)),
     tabs: (s) => {
       if (!canReadStudent(s)) return [];
       const list: StudentDetailTab[] = ["info"];

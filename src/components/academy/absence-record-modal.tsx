@@ -27,7 +27,7 @@ const inputClass =
   "min-w-0 w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-3 py-2 text-sm text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50 focus:bg-white/70";
 
 const REASON_HINTS: Record<AbsenceReason, string> = {
-  general: "학생·가정 사정 등 일반 결석입니다.",
+  general: "학생·가정 사정 등 기타 사유의 결석입니다. 원비 차감 대상이 아닙니다.",
   illness: "전염성 질병 등으로 학원이 등원을 제한한 결석입니다. 원비 차감 대상으로 표시됩니다.",
   academy: "휴원 등 학원 사정으로 수업이 없었던 날입니다. 원비 차감 대상으로 표시됩니다.",
 };

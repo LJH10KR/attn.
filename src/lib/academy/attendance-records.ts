@@ -53,7 +53,7 @@ export function formatRecordDate(dateStr: string): string {
 
 export type AttendanceNotifyResult = {
   sent?: number;
-  reason?: "no_parent" | "parent_opt_out" | "no_token" | "cooldown" | "failed";
+  reason?: "no_parent" | "parent_opt_out" | "no_token" | "cooldown" | "daily_limit" | "unchanged" | "failed";
 } | null;
 
 /** 알림 결과를 기록 완료 문구 뒤에 붙일 설명으로 변환 */
@@ -63,6 +63,8 @@ export function describeNotifyResult(result: AttendanceNotifyResult): string {
   switch (result.reason) {
     case "cooldown":
       return " 알림은 같은 학생에게 연달아 보낼 수 없어 생략했습니다.";
+    case "daily_limit":
+      return " 오늘 이 학생에게 보낸 알림이 너무 많아 알림은 생략했습니다.";
     case "no_parent":
       return " 연결된 학부모가 없어 알림은 보내지 않았습니다.";
     case "parent_opt_out":
@@ -75,19 +77,46 @@ export function describeNotifyResult(result: AttendanceNotifyResult): string {
   }
 }
 
-/** 출석·결석 버튼(`sendStudentAttendanceNotification`) 결과 문구 */
-export function attendanceButtonResultMessage(
-  kind: "present" | "absent",
-  result: AttendanceNotifyResult,
-): string {
-  const label = kind === "present" ? "출석" : "결석";
-  return `${label}으로 기록했습니다.${describeNotifyResult(result)}`;
+/** `recordStudentArrival`·`recordClassAttendance` 응답 */
+export type AttendanceActionResult = {
+  ok?: boolean;
+  status?: "present" | "absent";
+  changed?: boolean;
+  notification?: AttendanceNotifyResult;
+};
+
+/**
+ * 등원·반 출결 버튼 결과 문구.
+ * @param label "등원"·"미등원"·"A반 출석" 등 기록한 상태 이름
+ */
+export function attendanceActionMessage(label: string, result: AttendanceActionResult): string {
+  if (result.changed === false) return `이미 ${label}${withEuro(label)} 기록되어 있습니다.`;
+  return `${label}${withEuro(label)} 기록했습니다.${describeNotifyResult(result.notification ?? null)}`;
 }
 
-/** 출석·결석 버튼 실패 문구 — 배포 전 구버전 Functions는 쿨다운을 오류로 반환 */
-export function attendanceButtonErrorMessage(e: unknown): string {
-  if (e instanceof FirebaseError && e.code === "functions/resource-exhausted") {
-    return "같은 학생에게 너무 자주 보낼 수 없습니다. 잠시 후 다시 시도해 주세요.";
+/** 받침에 따라 "으로"/"로" — 받침 없거나 ㄹ 받침이면 "로" */
+function withEuro(word: string): string {
+  const last = word.charCodeAt(word.length - 1);
+  if (last < 0xac00 || last > 0xd7a3) return "(으)로";
+  const jong = (last - 0xac00) % 28;
+  return jong === 0 || jong === 8 ? "로" : "으로";
+}
+
+/** 등원·반 출결 버튼 실패 문구 — 서버의 조건·권한 문구를 그대로 보여 준다 */
+export function attendanceActionErrorMessage(e: unknown): string {
+  if (e instanceof FirebaseError) {
+    if (e.code === "functions/resource-exhausted") {
+      return "같은 학생에게 너무 자주 보낼 수 없습니다. 잠시 후 다시 시도해 주세요.";
+    }
+    if (
+      (e.code === "functions/failed-precondition" ||
+        e.code === "functions/permission-denied" ||
+        e.code === "functions/not-found" ||
+        e.code === "functions/invalid-argument") &&
+      e.message
+    ) {
+      return e.message;
+    }
   }
   return "출결을 기록하지 못했습니다. 잠시 후 다시 시도해 주세요.";
 }

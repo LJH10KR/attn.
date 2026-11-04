@@ -364,6 +364,7 @@ export function AcademyClassesScreen() {
           studentsError={studentsError}
           teacherNames={teacherNamesOf(openClass)}
           roomLabel={roomLabel(openClass)}
+          permissions={permissions}
           escapeBlocked={studentOpen || form !== null || assignClass !== null}
           onEditAction={() => setForm({ kind: "edit", cls: openClass })}
           onAssignAction={() => {

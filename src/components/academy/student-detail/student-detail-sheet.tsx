@@ -13,9 +13,9 @@ import {
 } from "@/components/academy/student-detail/student-form-sheet";
 import { StudentInfoTab } from "@/components/academy/student-detail/student-info-tab";
 import {
-  attendanceButtonErrorMessage,
-  attendanceButtonResultMessage,
-  type AttendanceNotifyResult,
+  attendanceActionErrorMessage,
+  attendanceActionMessage,
+  type AttendanceActionResult,
 } from "@/lib/academy/attendance-records";
 import { docToStudent, type StudentVM } from "@/lib/academy/student-row";
 import { STUDENT_STATUS_LABELS, type StudentStatus } from "@/lib/academy/student-profile";
@@ -72,7 +72,7 @@ export type StudentDetailSheetProps = {
 
 /**
  * 학생 상세 전체 화면 시트(9-1) — 어느 화면이든 `useStudentDetailParam()` + 이 시트만 두면 된다.
- * 헤더(이름·학년·상태·반·출석 알림·⋯) + 탭(정보·출결·결제). 탭은 처음 열 때 읽고, 권한 없는 탭은 숨긴다.
+ * 헤더(이름·학년·상태·반·등원 알림·⋯) + 탭(정보·출결·결제). 탭은 처음 열 때 읽고, 권한 없는 탭은 숨긴다.
  * 노출 판단은 모두 `studentAccess`(4-4절). 학생 문서를 읽지 못하면(없음·권한 없음) 같은 안내를 보여 준다.
  */
 export function StudentDetailSheet({
@@ -190,14 +190,16 @@ export function StudentDetailSheet({
     if (!student) return;
     setNotifyBusy(true);
     try {
-      const res = await httpsCallable(getFirebaseFunctions(), "sendStudentAttendanceNotification")({
+      // 등원 처리(2-I) — 이미 등원이면 기록·알림 그대로 "이미 등원으로 기록되어 있습니다"
+      const res = await httpsCallable(getFirebaseFunctions(), "recordStudentArrival")({
         academyId,
         studentId: student.id,
-        kind: "present",
+        status: "present",
+        via: "student_detail",
       });
-      showNotice(attendanceButtonResultMessage("present", res.data as AttendanceNotifyResult));
+      showNotice(attendanceActionMessage("등원", res.data as AttendanceActionResult));
     } catch (e) {
-      showNotice(attendanceButtonErrorMessage(e));
+      showNotice(attendanceActionErrorMessage(e));
     } finally {
       setNotifyBusy(false);
     }
@@ -312,7 +314,7 @@ export function StudentDetailSheet({
                       onClick={() => void sendPresent()}
                       className="shrink-0 rounded-2xl bg-[#222] px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
                     >
-                      {notifyBusy ? "전송 중…" : "출석 알림"}
+                      {notifyBusy ? "전송 중…" : "등원 알림"}
                     </button>
                   ) : null}
                 </div>

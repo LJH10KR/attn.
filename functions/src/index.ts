@@ -89,6 +89,7 @@ export {
   recordStudentAbsences,
   deleteStudentAttendanceRecord,
 } from "./attendance-records";
+export { recordStudentArrival, recordClassAttendance } from "./attendance";
 export {
   addTuitionInvoiceAdjustment,
   applyAbsenceDeduction,

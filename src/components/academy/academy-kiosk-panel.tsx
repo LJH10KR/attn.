@@ -53,9 +53,12 @@ const CHECK_IN_AUTO_CLOSE_SEC = 5;
 
 function CheckInSuccessModal({
   student,
+  alreadyArrived,
   onClose,
 }: {
   student: KioskStudentRow;
+  /** 오늘 이미 등원한 학생의 재체크인(2-I) — 기록·알림은 그대로 */
+  alreadyArrived: boolean;
   onClose: () => void;
 }) {
   const [remaining, setRemaining] = useState(CHECK_IN_AUTO_CLOSE_SEC);
@@ -96,11 +99,11 @@ function CheckInSuccessModal({
             <path d="M5 13l4 4L19 7" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
-        <p className="text-xl font-bold text-foreground">출석 완료</p>
+        <p className="text-xl font-bold text-foreground">{alreadyArrived ? "이미 등원 처리되었습니다" : "등원 완료"}</p>
         <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
           <span className="font-semibold text-foreground">{student.name}</span> 학생
         </p>
-        <p className="mt-1 text-xs text-neutral-400">{nowStr} 출석 처리됨</p>
+        {alreadyArrived ? null : <p className="mt-1 text-xs text-neutral-400">{nowStr} 등원 처리됨</p>}
         <button
           type="button"
           onClick={onClose}
@@ -131,6 +134,7 @@ export function AcademyKioskPanel({
   const [pinError, setPinError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [checkInSuccessStudent, setCheckInSuccessStudent] = useState<KioskStudentRow | null>(null);
+  const [checkInAlreadyArrived, setCheckInAlreadyArrived] = useState(false);
 
   const trimmedQuery = query.trim();
   const showResults = trimmedQuery.length > 0;
@@ -176,7 +180,7 @@ export function AcademyKioskPanel({
       setPinError(null);
       try {
         const fn = httpsCallable(getFirebaseFunctions(), "submitKioskCheckIn");
-        await fn({
+        const res = await fn({
           academyId,
           studentId: student.studentId,
           ...(checkInPin ? { checkInPin } : {}),
@@ -184,10 +188,11 @@ export function AcademyKioskPanel({
         setConfirmStudent(null);
         setPinStudent(null);
         setQuery("");
+        setCheckInAlreadyArrived((res.data as { alreadyArrived?: boolean } | null)?.alreadyArrived === true);
         setCheckInSuccessStudent(student);
         onCheckInDoneAction?.();
       } catch (err) {
-        const msg = callableMessage(err, "출석 처리에 실패했습니다.");
+        const msg = callableMessage(err, "등원 처리에 실패했습니다.");
         if (pinStudent) {
           setPinError(msg);
         } else {
@@ -310,6 +315,7 @@ export function AcademyKioskPanel({
       {checkInSuccessStudent ? (
         <CheckInSuccessModal
           student={checkInSuccessStudent}
+          alreadyArrived={checkInAlreadyArrived}
           onClose={() => setCheckInSuccessStudent(null)}
         />
       ) : null}
@@ -364,10 +370,10 @@ export function AcademyKioskPanel({
           aria-modal="true"
         >
           <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-xl dark:bg-neutral-900">
-            <p className="text-lg font-semibold text-foreground">출석 확인</p>
+            <p className="text-lg font-semibold text-foreground">등원 확인</p>
             <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
               <span className="font-medium text-foreground">{confirmStudent.name}</span> 학생을
-              출석 처리할까요?
+              등원 처리할까요?
             </p>
             <div className="mt-6 flex gap-2">
               <button
@@ -384,7 +390,7 @@ export function AcademyKioskPanel({
                 onClick={() => void submitCheckIn(confirmStudent)}
                 className="flex-1 rounded-2xl bg-[#222] py-3 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-950"
               >
-                출석
+                등원
               </button>
             </div>
           </div>
@@ -402,7 +408,7 @@ export function AcademyKioskPanel({
         }
         error={pinError}
         busy={busy}
-        busyTitle="출석 처리 중..."
+        busyTitle="등원 처리 중..."
         busyDescription="잠시만 기다려 주세요."
         onCloseAction={() => {
           if (!busy) {

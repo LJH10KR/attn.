@@ -176,7 +176,7 @@ const notify = await call("sendStudentAttendanceNotification", { academyId: A, s
 assert.equal(notify.reason, "no_parent", "담당 반 학생은 보낼 수 있음(보호자 없음)");
 await assert.rejects(
   call("sendStudentAttendanceNotification", { academyId: A, studentId: s4, kind: "present" }),
-  /담당 반 학생에게만/,
+  /담당 반 학생만/,
 );
 
 // --- 선생님 변경 → 트리거가 학생 teacherUids를 맞춘다. 학생 트리거 3개는 바로 끝남(연결·결제·잔여 그대로) ---
