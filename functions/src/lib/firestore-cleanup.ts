@@ -265,8 +265,9 @@ export async function deleteAcademyFirestoreCascade(
       db.doc(`academies/${academyId}/parents/${p.docId}/secrets/login`),
     );
   }
-  // 학생 문서와 하위 기록·메모(남은 메모 문서까지)
-  await deleteStudentDocs(db, academyId, studentsSnap.docs.map((s) => s.id));
+  // 학생 문서와 하위 기록·메모(남은 메모 문서까지). 반 출결은 학생마다 조회하지 않고 컬렉션을 한 번에(B6)
+  await deleteStudentDocs(db, academyId, studentsSnap.docs.map((s) => s.id), { classAttendance: "skip" });
+  await deleteCollectionDocs(db, `academies/${academyId}/attendance`);
   await deleteCollectionDocs(db, `academies/${academyId}/studentNotes`);
   await deleteCollectionDocs(db, `academies/${academyId}/parentPhones`);
   await deleteCollectionDocs(db, `academies/${academyId}/classes`);
@@ -303,14 +304,25 @@ export async function deleteAcademyFirestoreCascade(
 /** 학생 하위 기록 컬렉션 — 학생·학원 삭제 때 함께 지운다 */
 const STUDENT_SUBCOLLECTIONS = ["attendanceRecords", "tuitionInvoices", "sessionLogs"] as const;
 
-/** 학생 문서 + serverSecrets + 하위 기록 + 학원 메모(studentNotes) 삭제 */
+/**
+ * 학생 문서 + serverSecrets + 하위 기록 + 학원 메모(studentNotes) + 반 출결(`attendance`, 2-I) 삭제.
+ * 학원 전체 삭제는 반 출결 컬렉션을 따로 한 번에 지우므로 `classAttendance: "skip"`.
+ */
 export async function deleteStudentDocs(
   db: admin.firestore.Firestore,
   academyId: string,
   studentIds: string[],
+  opts: { classAttendance: "per_student" | "skip" } = { classAttendance: "per_student" },
 ): Promise<void> {
   const refs: DocumentReference[] = [];
   for (const studentId of studentIds) {
+    if (opts.classAttendance === "per_student") {
+      const att = await db
+        .collection(`academies/${academyId}/attendance`)
+        .where("studentId", "==", studentId)
+        .get();
+      refs.push(...att.docs.map((d) => d.ref));
+    }
     refs.push(db.doc(`academies/${academyId}/studentNotes/${studentId}`));
     for (const sub of STUDENT_SUBCOLLECTIONS) {
       const subSnap = await db

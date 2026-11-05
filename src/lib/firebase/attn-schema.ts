@@ -493,8 +493,9 @@ export type AbsenceReason = "general" | "illness" | "academy";
 
 export const ABSENCE_REASONS: readonly AbsenceReason[] = ["general", "illness", "academy"];
 
+/** 화면 이름 — 내부 값 general은 그대로, 이름만 "기타"(2-I ★4) */
 export const ABSENCE_REASON_LABELS: Record<AbsenceReason, string> = {
-  general: "일반",
+  general: "기타",
   illness: "질병",
   academy: "학원 사정",
 };
@@ -504,9 +505,11 @@ export function isAbsenceReason(raw: unknown): raw is AbsenceReason {
 }
 
 /**
- * `academies/{academyId}/students/{studentId}/attendanceRecords/{YYYY-MM-DD}` — 학생·날짜당 1건.
- * 쓰기는 Functions(`sendStudentAttendanceNotification`, `submitKioskCheckIn`, `recordStudentAbsences`,
- * `deleteStudentAttendanceRecord`)만, 읽기는 학원(오너·포털)만.
+ * **등원 기록**(2-I) `academies/{academyId}/students/{studentId}/attendanceRecords/{YYYY-MM-DD}` — 학생·날짜당 1건,
+ * present = 등원, absent = 미등원(사유 있는 미등원은 월정액 차감 근거).
+ * 쓰기는 Functions(`recordStudentArrival`, `submitKioskCheckIn`, `recordStudentAbsences`,
+ * `deleteStudentAttendanceRecord`, 예전 `sendStudentAttendanceNotification`)만,
+ * 읽기는 출결·청구서 권한과 담당 선생님(학생 `teacherUids`).
  */
 export type AttendanceRecordDoc = {
   /** 서울 기준 날짜 — 문서 ID와 동일 */
@@ -524,9 +527,50 @@ export type AttendanceRecordDoc = {
    */
   billedInvoicePeriod?: string;
   billedAdjustmentId?: string;
+  /** 2-I부터 새로 쓰는 문서에만 */
+  academyId?: string;
+  studentId?: string;
+  /** 등원으로 바뀐 시각(키오스크 포함) */
+  arrivedAt?: Timestamp;
+  statusChangedAt?: Timestamp;
+  /** 처리 경로(기록용) */
+  via?: string;
+  /** 자리만(3단계) — 하원 시각 */
+  leftAt?: Timestamp;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 };
+
+/**
+ * **반 출결**(2-I) `academies/{academyId}/attendance/{date}_{classId}_{studentId}` — present = 출석, absent = 결석.
+ * 쓰기는 `recordClassAttendance`만, 읽기는 출결·청구서 권한과 그 반 선생님(반 `teacherUids`, `classId ==` 목록 조회).
+ */
+export type ClassAttendanceDoc = {
+  academyId: string;
+  date: string;
+  classId: string;
+  studentId: string;
+  status: AttendanceStatus;
+  /** 처리할 때의 반 이름·그날 수업 시간 */
+  className: string;
+  slots: { start: string; end: string }[];
+  markedByUid: string;
+  markedByRole: "owner" | "teacher";
+  source: string;
+  via: string;
+  statusChangedAt: Timestamp;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  /** 자리만(3단계·원비 연결) — 지각 분, 사유·코멘트, 회차 자동 차감 연결 */
+  lateMinutes?: number | null;
+  reason?: AbsenceReason | null;
+  comment?: string;
+  sessionDeduction?: { ledgerId: string; at: Timestamp } | null;
+};
+
+export function academyClassAttendancePath(academyId: string): string {
+  return `academies/${academyId}/attendance`;
+}
 
 export function academyStudentAttendanceRecordsPath(academyId: string, studentId: string): string {
   return `${academyStudentsPath(academyId)}/${studentId}/attendanceRecords`;

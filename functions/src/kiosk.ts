@@ -4,8 +4,8 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { assertFourDigitPin, hashPin, verifyPin } from "./pin-utils";
 import { countUserDashboardBellItems } from "./app-badge-count";
-import { sendStudentAttendanceNotificationCore } from "./attendance-send-core";
-import { upsertTodayAttendanceRecord } from "./attendance-records";
+import { sendArrivalNotification, writeArrival } from "./attendance";
+import { seoulDateString } from "./lib/attendance-rules";
 import { actorHasPermission, assertPermission, resolveAcademyActor } from "./lib/academy-access";
 import { readUidList, resolveParentRecipients } from "./lib/parent-recipients";
 import { isActiveStudent } from "./lib/student-profile";
@@ -302,20 +302,36 @@ export const submitKioskCheckIn = onCall(async (request) => {
     role: "student_kiosk" as const,
     actorUid: request.auth.uid,
     source: "student_kiosk" as const,
-    canBypassCooldown: false,
   };
 
-  await upsertTodayAttendanceRecord(db, { academyId, studentId, status: "present", sender });
-
-  const result = await sendStudentAttendanceNotificationCore(db, {
+  // 등원 기록(2-I): 이미 등원이면 기록·알림 그대로("이미 등원 처리되었습니다"),
+  // 차감 잠금 날짜면 기록은 그대로 두고 등원 알림은 보낸다(안전 알림 우선, ★8)
+  const date = seoulDateString();
+  const result = await writeArrival(db, {
     academyId,
     studentId,
-    kind: "present",
+    status: "present",
+    sender,
+    via: "kiosk",
+    mode: "kiosk",
+    date,
+  });
+  if (!result.changed && !result.billedKept) {
+    return {
+      ok: true as const,
+      alreadyArrived: true as const,
+      attendance: { ok: true as const, sent: 0, reason: "unchanged" as const },
+    };
+  }
+  const attendance = await sendArrivalNotification(db, {
+    academyId,
+    studentId,
+    status: "present",
     sender,
     studentData,
+    date,
   });
-
-  return { ok: true as const, attendance: result };
+  return { ok: true as const, alreadyArrived: false as const, attendance };
 });
 
 async function maybeSendPinSetupReminder(

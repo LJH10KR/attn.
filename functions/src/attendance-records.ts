@@ -8,11 +8,17 @@ import {
   sendStudentAttendanceNotificationCore,
   type AttendanceSender,
 } from "./attendance-send-core";
+import {
+  billedLockError,
+  classAttendanceOnDatesQuery,
+  isBilledRecord as isBilled,
+} from "./attendance";
 
 /**
- * 학생 출결 기록 — `academies/{academyId}/students/{studentId}/attendanceRecords/{YYYY-MM-DD}`
- * 문서 ID가 서울 기준 날짜라 학생·날짜당 1건만 존재. 쓰기는 Functions(Admin SDK)만.
- * 알림(`attendanceNotifications`)과 별개로, 원비 차감 등 날짜 단위 판단의 근거로 사용.
+ * 등원 기록(2-I) — `academies/{academyId}/students/{studentId}/attendanceRecords/{YYYY-MM-DD}`,
+ * present = 등원, absent = 미등원. 문서 ID가 서울 기준 날짜라 학생·날짜당 1건만 존재. 쓰기는 Functions(Admin SDK)만.
+ * 이 파일은 원장·출결 권한의 기간 결석(사유 있는 미등원) 기록·기록 삭제 — 등원·미등원 버튼은 `attendance.ts`.
+ * 알림(`attendanceNotifications`)과 별개로, 월정액 결석 차감 등 날짜 단위 판단의 근거로 사용.
  */
 
 export type AttendanceStatus = "present" | "absent";
@@ -22,11 +28,8 @@ export type AbsenceReason = "general" | "illness" | "academy";
 
 const ABSENCE_REASONS: readonly AbsenceReason[] = ["general", "illness", "academy"];
 
-/** 원장·포털만 지정 가능한 사유 — 선생님 결석 버튼이 덮어쓰지 않음 */
-const DEDUCTIBLE_ABSENCE_REASONS: readonly AbsenceReason[] = ["illness", "academy"];
-
 const ABSENCE_REASON_LABELS: Record<AbsenceReason, string> = {
-  general: "일반",
+  general: "기타",
   illness: "질병",
   academy: "학원 사정",
 };
@@ -69,74 +72,25 @@ function isAbsenceReason(raw: unknown): raw is AbsenceReason {
   return typeof raw === "string" && (ABSENCE_REASONS as readonly string[]).includes(raw);
 }
 
-function isDeductibleReason(raw: unknown): boolean {
-  return typeof raw === "string" && (DEDUCTIBLE_ABSENCE_REASONS as readonly string[]).includes(raw);
-}
-
-/** 청구서 결석 차감에 반영된 기록(`applyAbsenceDeduction`이 설정) */
-function isBilled(data: FirebaseFirestore.DocumentData | undefined): boolean {
-  return typeof data?.billedInvoicePeriod === "string" && data.billedInvoicePeriod.length > 0;
-}
-
-function billedLockError(dates: string[], period: string): HttpsError {
-  const [, m] = period.split("-").map(Number);
-  return new HttpsError(
-    "failed-precondition",
-    `${dates.map(formatDateLabel).join(", ")} 기록은 ${m}월 청구서 결석 차감에 반영되어 있어 변경할 수 없습니다. ` +
-      "청구서에서 해당 차감을 먼저 삭제해 주세요.",
-  );
-}
-
 function formatDateLabel(dateStr: string): string {
   const [, m, d] = dateStr.split("-").map(Number);
   return `${m}월 ${d}일`;
 }
 
-/**
- * 오늘자 출결 기록 — 출석·결석 버튼(선생님·학원)과 키오스크 출석에서 알림 전송 전에 호출.
- * - 출석: 항상 덮어씀(실제 등원이 확인된 것이므로 학원 측 결석 사유보다 우선).
- * - 결석(일반): 이미 원장·포털이 차감 대상 사유(질병·학원 사정)로 기록했다면 사유를 유지.
- * 반환값은 저장된 결석 사유(출석이면 null) — 알림 기록에 실제 사유를 남기기 위함.
- */
-export async function upsertTodayAttendanceRecord(
+/** 그 날짜들 중 반 출결이 있는 날짜(정렬) — `in`은 30개까지라 나눠 조회 */
+async function classAttendanceDatesTx(
+  tx: FirebaseFirestore.Transaction,
   db: admin.firestore.Firestore,
-  params: {
-    academyId: string;
-    studentId: string;
-    status: AttendanceStatus;
-    sender: AttendanceSender;
-  },
-): Promise<AbsenceReason | null> {
-  const { academyId, studentId, status, sender } = params;
-  const date = seoulDateString();
-  const ref = attendanceRecordRef(db, academyId, studentId, date);
-
-  return db.runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    const prev = snap.exists ? snap.data() ?? {} : {};
-
-    // 청구서 차감에 반영된 기록은 잠금 — 버튼·키오스크 출석으로도 바꾸지 않음(알림은 그대로 발송)
-    if (isBilled(prev)) {
-      logger.info("upsertTodayAttendanceRecord: billed record kept", { academyId, studentId, date });
-      return prev.status === "absent" && isAbsenceReason(prev.reason) ? prev.reason : null;
-    }
-
-    if (status === "absent" && prev.status === "absent" && isDeductibleReason(prev.reason)) {
-      return prev.reason as AbsenceReason;
-    }
-
-    tx.set(ref, {
-      date,
-      status,
-      ...(status === "absent" ? { reason: "general" satisfies AbsenceReason } : {}),
-      recordedByUid: sender.actorUid,
-      recordedByRole: sender.role,
-      source: sender.source,
-      createdAt: snap.exists && prev.createdAt ? prev.createdAt : FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-    return status === "absent" ? "general" : null;
-  });
+  academyId: string,
+  studentId: string,
+  dates: readonly string[],
+): Promise<string[]> {
+  const found = new Set<string>();
+  for (let i = 0; i < dates.length; i += 30) {
+    const snap = await tx.get(classAttendanceOnDatesQuery(db, academyId, studentId, dates.slice(i, i + 30)));
+    snap.docs.forEach((d) => found.add(d.get("date") as string));
+  }
+  return [...found].sort();
 }
 
 /** 학원 화면의 작업 주체 → 기록자 역할(권한을 위임받은 직원은 teacher) */
@@ -145,7 +99,6 @@ export function academySenderForActor(actor: AcademyActor): AttendanceSender {
     role: actor.kind === "staff" ? "teacher" : "owner",
     actorUid: actor.uid,
     source: "academy_dashboard",
-    canBypassCooldown: false,
   };
 }
 
@@ -223,17 +176,29 @@ export const recordStudentAbsences = onCall(async (request) => {
         billed[0]!.get("billedInvoicePeriod") as string,
       );
     }
+    // 그날 반 출결이 있으면 미등원으로 바꾸지 않는다(등원 → 미등원은 반 출결 0건일 때만, 2-I ★7)
+    const classDates = await classAttendanceDatesTx(tx, db, academyId, studentId, dates);
+    if (classDates.length > 0) {
+      throw new HttpsError(
+        "failed-precondition",
+        `${classDates.map(formatDateLabel).join(", ")}에는 수업 출결 기록이 있어 결석으로 기록할 수 없습니다.`,
+      );
+    }
     snaps.forEach((snap, i) => {
-      const prevCreatedAt = snap.exists ? snap.get("createdAt") : null;
+      const prev = snap.exists ? snap.data() ?? {} : {};
       tx.set(refs[i]!, {
         date: dates[i],
         status: "absent" satisfies AttendanceStatus,
         reason,
         ...(note ? { note } : {}),
+        academyId,
+        studentId,
         recordedByUid: sender.actorUid,
         recordedByRole: sender.role,
         source: sender.source,
-        createdAt: prevCreatedAt ?? FieldValue.serverTimestamp(),
+        via: "absence_period",
+        statusChangedAt: prev.status === "absent" && prev.statusChangedAt ? prev.statusChangedAt : FieldValue.serverTimestamp(),
+        createdAt: prev.createdAt ?? FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
     });
@@ -254,6 +219,7 @@ export const recordStudentAbsences = onCall(async (request) => {
   const body = `'${studentName}' 학생이 결석 처리되었습니다. (${dateLabel} · 사유: ${ABSENCE_REASON_LABELS[reason]})`;
 
   try {
+    // 기간 결석 요약 알림 — 등원 키를 같이 쓰되 60초 쿨다운(상태 바뀜 알림의 하루 횟수와 서로 막지 않음)
     const result = await sendStudentAttendanceNotificationCore(db, {
       academyId,
       studentId,
@@ -262,16 +228,12 @@ export const recordStudentAbsences = onCall(async (request) => {
       studentData,
       body,
       reason,
+      notify: { context: "arrival" },
+      limit: "cooldown",
+      date: dates[0]!,
     });
     return { ok: true as const, recordedCount: dates.length, notification: result };
   } catch (e) {
-    if (e instanceof HttpsError && e.code === "resource-exhausted") {
-      return {
-        ok: true as const,
-        recordedCount: dates.length,
-        notification: { ok: true as const, sent: 0, reason: "cooldown" as const },
-      };
-    }
     logger.error("recordStudentAbsences: notification failed", { academyId, studentId, e });
     return {
       ok: true as const,
@@ -299,13 +261,22 @@ export const deleteStudentAttendanceRecord = onCall(async (request) => {
   await assertPermission(db, academyId, request.auth.uid, request.auth.token, "lessons.attendance");
 
   const ref = attendanceRecordRef(db, academyId, studentId, date);
-  const snap = await ref.get();
-  if (!snap.exists) {
-    throw new HttpsError("not-found", "출결 기록을 찾을 수 없습니다.");
-  }
-  if (isBilled(snap.data())) {
-    throw billedLockError([date], snap.get("billedInvoicePeriod") as string);
-  }
-  await ref.delete();
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) {
+      throw new HttpsError("not-found", "출결 기록을 찾을 수 없습니다.");
+    }
+    if (isBilled(snap.data())) {
+      throw billedLockError([date], snap.get("billedInvoicePeriod") as string);
+    }
+    // 반 출결이 남아 있는 날의 등원 기록을 지우면 "등원 없이 출석"이 된다(2-I ★7)
+    if ((await classAttendanceDatesTx(tx, db, academyId, studentId, [date])).length > 0) {
+      throw new HttpsError(
+        "failed-precondition",
+        `${formatDateLabel(date)}에는 수업 출결 기록이 있어 등원 기록을 삭제할 수 없습니다.`,
+      );
+    }
+    tx.delete(ref);
+  });
   return { ok: true as const };
 });

@@ -17,7 +17,7 @@ import type { DashboardNotificationRow } from "@/components/dashboard/dashboard-
 import { getFirebaseDb } from "@/lib/firebase/client-app";
 import { setAppIconBadgeCount } from "@/lib/ios/app-badge";
 
-/** Cloud Functions `sendStudentAttendanceNotification`가 기록 — 클라이언트는 읽기만 */
+/** Cloud Functions(등원·반 출결·기간 결석 알림, `attendance-send-core.ts`)가 기록 — 클라이언트는 읽기만 */
 export const PARENT_USER_DASHBOARD_BELL_COLLECTION = "dashboardBellItems";
 
 function formatWhen(ts: Timestamp | undefined): string | undefined {

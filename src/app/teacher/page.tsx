@@ -3,12 +3,17 @@
 import { FirebaseError } from "firebase/app";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
-import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StudentDetailSheet } from "@/components/academy/student-detail/student-detail-sheet";
 import { useStudentDetailParam } from "@/components/academy/student-detail/use-student-detail-param";
 import { groupMyClasses, TeacherMyClasses } from "@/components/teacher/teacher-my-classes";
+import type { ClassAttendanceAction } from "@/components/academy/attendance/class-attendance-controls";
+import {
+  AttendanceCancelDialog,
+  type AttendanceCancelTarget,
+  type KnownClassRecord,
+} from "@/components/academy/attendance/attendance-cancel-dialog";
 import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardNotificationsModal } from "@/components/dashboard/dashboard-notifications-modal";
@@ -18,21 +23,16 @@ import { StudentListSectionSkeleton } from "@/components/dashboard/student-list-
 import {
   getFirebaseAuth,
   getFirebaseDb,
-  getFirebaseFunctions,
 } from "@/lib/firebase/client-app";
 import { useAttendanceNotificationLog } from "@/lib/firebase/use-attendance-notification-log";
-import {
-  attendanceButtonErrorMessage,
-  attendanceButtonResultMessage,
-  type AttendanceNotifyResult,
-} from "@/lib/academy/attendance-records";
 import { academyPath } from "@/lib/academy/academy-routes";
-import { seoulWeekday } from "@/lib/academy/class-schedule";
 import { staffDocHasAcademyMenus } from "@/lib/academy/staff-landing";
 import { docToStudent, type StudentVM } from "@/lib/academy/student-row";
 import { docToClassBrief, type AcademyClassBrief } from "@/lib/academy/use-academy-classes";
 import { useAcademyOptionList } from "@/lib/academy/use-academy-option-list";
 import { usePermissions } from "@/lib/academy/use-permissions";
+import { useAttendanceActions } from "@/lib/academy/use-attendance-actions";
+import { useSeoulToday } from "@/lib/academy/use-class-today-attendance";
 import { academyStudentsPath, COLLECTIONS } from "@/lib/firebase/attn-schema";
 import { setLastDashboardRoleHint } from "@/lib/auth/last-dashboard-role";
 import { useBootOverlay } from "@/components/boot/boot-overlay";
@@ -116,7 +116,6 @@ function TeacherDashboard() {
   });
   const [listRefreshBusy, setListRefreshBusy] = useState(false);
   const [notifyMessage, setNotifyMessage] = useState<string | null>(null);
-  const [notifyBusyKey, setNotifyBusyKey] = useState<string | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [listInitialLoading, setListInitialLoading] = useState(false);
 
@@ -273,30 +272,8 @@ function TeacherDashboard() {
     }
   }, [academyId]);
 
-  const sendAttendanceNotify = useCallback(
-    async (studentId: string, kind: "present" | "absent") => {
-      const aid = academyId;
-      if (!aid) return;
-      const key = `${studentId}-${kind}`;
-      setNotifyBusyKey(key);
-      setNotifyMessage(null);
-      try {
-        const fn = httpsCallable(
-          getFirebaseFunctions(),
-          "sendStudentAttendanceNotification",
-        );
-        const res = await fn({ academyId: aid, studentId, kind });
-        setNotifyMessage(
-          attendanceButtonResultMessage(kind, res.data as AttendanceNotifyResult),
-        );
-      } catch (e) {
-        setNotifyMessage(attendanceButtonErrorMessage(e));
-      } finally {
-        setNotifyBusyKey(null);
-      }
-    },
-    [academyId],
-  );
+  const onAttendanceDone = useCallback((message: string) => setNotifyMessage(message), []);
+  const attendanceActions = useAttendanceActions(academyId, onAttendanceDone);
 
   const {
     modalItems: sentLogItems,
@@ -359,10 +336,77 @@ function TeacherDashboard() {
     (roomId: string) => rooms.find((r) => r.id === roomId)?.label ?? null,
     [rooms],
   );
+  const today = useSeoulToday();
   const classGroups = useMemo(
-    () => groupMyClasses(myClasses.classes, myClasses.students, seoulWeekday()),
-    [myClasses],
+    () => groupMyClasses(myClasses.classes, myClasses.students, today.weekday),
+    [myClasses, today.weekday],
   );
+  // 등원 기록 읽기는 규칙과 같게 — 출결·청구서 권한 또는 학생 teacherUids에 본인(내 반 학생은 모두 해당)
+  const viewerUid = permissions.viewer?.uid ?? null;
+  const canReadAllArrivals = permissions.can(["lessons.attendance", "billing.invoices"]);
+  const canReadArrival = useCallback(
+    (s: StudentVM) => canReadAllArrivals || (viewerUid !== null && s.teacherUids.includes(viewerUid)),
+    [canReadAllArrivals, viewerUid],
+  );
+  const { markArrival, markClass, cancelClass, cancelArrival } = attendanceActions;
+  // 2-J 취소 확인 창 대상
+  const [cancelTarget, setCancelTarget] = useState<AttendanceCancelTarget | null>(null);
+  const onAttendanceAction = useCallback(
+    (student: StudentVM, cls: AcademyClassBrief, action: ClassAttendanceAction, known: KnownClassRecord[]) => {
+      if (action.kind === "cancel_class") {
+        setCancelTarget({
+          kind: "class",
+          studentId: student.id,
+          studentName: student.name,
+          classId: cls.id,
+          className: cls.name,
+          status: action.status,
+        });
+        return;
+      }
+      if (action.kind === "cancel_arrival") {
+        setCancelTarget({
+          kind: "arrival",
+          studentId: student.id,
+          studentName: student.name,
+          status: action.arrival.status,
+          reason: action.arrival.reason,
+          billed: action.arrival.billed,
+          knownClassRecords: known,
+        });
+        return;
+      }
+      setNotifyMessage(null);
+      if (action.kind === "arrive") {
+        void markArrival(student.id, "present", "teacher_my_classes", student.name);
+      } else {
+        void markClass(cls.id, cls.name, student.id, action.status, "teacher_my_classes", student.name);
+      }
+    },
+    [markArrival, markClass],
+  );
+  const confirmCancel = useCallback(() => {
+    if (!cancelTarget) return Promise.resolve(null);
+    setNotifyMessage(null);
+    const t = cancelTarget;
+    return t.kind === "class"
+      ? cancelClass({
+          classId: t.classId,
+          className: t.className,
+          studentId: t.studentId,
+          status: t.status,
+          date: today.date,
+          via: "teacher_my_classes",
+          studentName: t.studentName,
+        })
+      : cancelArrival({
+          studentId: t.studentId,
+          status: t.status,
+          date: today.date,
+          via: "teacher_my_classes",
+          studentName: t.studentName,
+        });
+  }, [cancelTarget, cancelClass, cancelArrival, today.date]);
 
   const headerProfile = useMemo(
     () =>
@@ -475,7 +519,7 @@ function TeacherDashboard() {
         ) : null}
 
         {notifyMessage ? (
-          <p className="mb-2 rounded-2xl bg-sky-500/10 px-3 py-2 text-center text-xs text-sky-900 ring-1 ring-sky-500/20">
+          <p role="status" className="sticky top-2 z-10 mb-2 break-keep rounded-2xl bg-sky-50 dark:bg-sky-950 px-3 py-2 text-center text-xs text-sky-900 dark:text-sky-100 ring-1 ring-sky-500/20">
             {notifyMessage}
           </p>
         ) : null}
@@ -497,10 +541,13 @@ function TeacherDashboard() {
             )
           ) : (
             <TeacherMyClasses
+              academyId={academyId ?? ""}
               groups={classGroups}
+              today={today}
               roomLabelOf={roomLabelOf}
-              notifyBusyKey={notifyBusyKey}
-              onNotifyAction={(id, kind) => void sendAttendanceNotify(id, kind)}
+              canReadArrival={canReadArrival}
+              busyKey={attendanceActions.busyKey}
+              onAttendanceAction={onAttendanceAction}
               onOpenStudentAction={(id) => detail.open(id)}
             />
           )}
@@ -516,6 +563,14 @@ function TeacherDashboard() {
           permissions={permissions}
           onTabChangeAction={detail.setTab}
           onCloseAction={detail.close}
+        />
+      ) : null}
+
+      {cancelTarget ? (
+        <AttendanceCancelDialog
+          target={cancelTarget}
+          onConfirmAction={confirmCancel}
+          onCloseAction={() => setCancelTarget(null)}
         />
       ) : null}
 

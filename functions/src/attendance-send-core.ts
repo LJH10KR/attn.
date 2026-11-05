@@ -6,41 +6,85 @@ import {
   createAttendancePushDeliveryDoc,
   deliverAttendancePushOnce,
 } from "./attendance-push-delivery";
+import { ATTENDANCE_DAILY_CHANGE_PUSH_LIMIT, seoulDateString } from "./lib/attendance-rules";
 import { resolveParentRecipients } from "./lib/parent-recipients";
 
+/** 기간 결석 요약 알림의 같은 원생 연속 전송 간격 */
 export const ATTENDANCE_COOLDOWN_MS = 60_000;
 
-const TEMP_TEACHER_ATTENDANCE_COOLDOWN_BYPASS_PER_UTC_DAY = 10;
-
-function utcDayKey(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function formatCheckInTimeLabel(date: Date): string {
-  try {
-    const parts = new Intl.DateTimeFormat("ko-KR", {
-      timeZone: "Asia/Seoul",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: false,
-    }).formatToParts(date);
-    const hour = parts.find((p) => p.type === "hour")?.value ?? String(date.getHours());
-    const minute = parts.find((p) => p.type === "minute")?.value ?? String(date.getMinutes()).padStart(2, "0");
-    return `${hour}시 ${minute}분`;
-  } catch {
-    const hh = String(date.getHours());
-    const mm = String(date.getMinutes()).padStart(2, "0");
-    return `${hh}시 ${mm}분`;
-  }
-}
-
+/** 처리한 사람 — role·source는 서버가 처리한 사람으로 정한다(화면·via와 무관) */
 export type AttendanceSender = {
   role: "teacher" | "owner" | "academy" | "student_kiosk";
   actorUid: string;
   source: "teacher_dashboard" | "academy_dashboard" | "student_kiosk";
-  canBypassCooldown: boolean;
 };
 
+/**
+ * 알림 맥락(2-I) — 등원(날짜 단위)·반 출결(날짜 × 반).
+ * 쿨다운·횟수 키도 맥락별: 등원 `attendance_{academy}_{student}`(기간 결석과 공유),
+ * 반 `class_attendance_{academy}_{class}_{student}`.
+ */
+export type AttendanceNotifyContext =
+  | { context: "arrival" }
+  | { context: "class"; classId: string; className: string };
+
+/**
+ * 전송 제한 방식
+ * - cooldown: 같은 키로 60초 안에 다시 보내지 않음(기간 결석 요약 알림)
+ * - daily_change: 상태가 실제로 바뀐 알림 — 60초 쿨다운 없이, 서울 날짜별 최대 10회(정정이 막히지 않게)
+ * 두 방식은 같은 키 문서의 다른 필드(`lastSentAt` / `changeDay`·`changeCount`)만 읽고 쓰므로 서로 막지 않는다(B5).
+ */
+export type AttendanceNotifyLimit = "cooldown" | "daily_change";
+
+export type AttendanceNotifyOutcome =
+  | { ok: true; sent: number; failureCount?: number; reason?: undefined }
+  | {
+      ok: true;
+      sent: 0;
+      reason: "no_parent" | "parent_opt_out" | "no_token" | "cooldown" | "daily_limit";
+    };
+
+function rateLimitRef(
+  db: admin.firestore.Firestore,
+  academyId: string,
+  studentId: string,
+  ctx: AttendanceNotifyContext,
+) {
+  return ctx.context === "class"
+    ? db.doc(`_pushRateLimits/class_attendance_${academyId}_${ctx.classId}_${studentId}`)
+    : db.doc(`_pushRateLimits/attendance_${academyId}_${studentId}`);
+}
+
+/** 전송 자격 확보 — 못 보내면 이유, 보내면 null */
+async function claimSend(
+  db: admin.firestore.Firestore,
+  ref: FirebaseFirestore.DocumentReference,
+  limit: AttendanceNotifyLimit,
+  meta: Record<string, unknown>,
+): Promise<"cooldown" | "daily_limit" | null> {
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const now = Date.now();
+    if (limit === "cooldown") {
+      const last = (snap.get("lastSentAt") as Timestamp | undefined)?.toMillis() ?? 0;
+      if (now - last < ATTENDANCE_COOLDOWN_MS) return "cooldown" as const;
+      tx.set(ref, { ...meta, lastSentAt: FieldValue.serverTimestamp() }, { merge: true });
+      return null;
+    }
+    const today = seoulDateString(new Date(now));
+    const sameDay = snap.get("changeDay") === today;
+    const count = sameDay && typeof snap.get("changeCount") === "number" ? (snap.get("changeCount") as number) : 0;
+    if (count >= ATTENDANCE_DAILY_CHANGE_PUSH_LIMIT) return "daily_limit" as const;
+    // 하루 횟수만 센다 — `lastSentAt`(기간 결석 60초 쿨다운)은 건드리지 않는다(B5: 서로 막지 않음)
+    tx.set(ref, { ...meta, changeDay: today, changeCount: count + 1 }, { merge: true });
+    return null;
+  });
+}
+
+/**
+ * 학부모 알림 1건 — 알림 기록(`attendanceNotifications`) + 보호자별 벨 + 푸시.
+ * 기록(등원·반 출결 문서)은 호출한 쪽이 먼저 저장한다. 전송 제한에 걸리면 기록 없이 이유만 돌려준다.
+ */
 export async function sendStudentAttendanceNotificationCore(
   db: admin.firestore.Firestore,
   params: {
@@ -49,95 +93,54 @@ export async function sendStudentAttendanceNotificationCore(
     kind: "present" | "absent";
     sender: AttendanceSender;
     studentData: Record<string, unknown>;
-    /** 미지정 시 kind별 기본 문구 — 기간 결석 등 요약 문구가 필요할 때 지정 */
-    body?: string;
-    /** 결석 사유(`attendance-records.ts`의 AbsenceReason) — 알림 기록에 함께 저장 */
+    body: string;
+    notify: AttendanceNotifyContext;
+    limit: AttendanceNotifyLimit;
+    /** 서울 기준 날짜(기록한 날) */
+    date: string;
+    /** 미등원 사유(`attendance-records.ts`의 AbsenceReason) — 알림 기록에 함께 저장 */
     reason?: string;
+    /**
+     * 2-J 기록 취소 정정 알림이면 "cancel" — 알림 기록·벨에 `action: "cancel"`(kind = 취소한 기록의 상태).
+     * 없으면 기록 알림(예전 문서와 같음).
+     */
+    action?: "cancel";
+    /** 취소 경로(기록용, 2-J) — 삭제된 문서 대신 알림 기록에 남김 */
+    via?: string;
   },
-): Promise<
-  | { ok: true; sent: number; failureCount?: number; reason?: undefined }
-  | { ok: true; sent: 0; reason: "no_parent" | "parent_opt_out" | "no_token" }
-> {
-  const { academyId, studentId, kind, sender, studentData, reason } = params;
+): Promise<AttendanceNotifyOutcome> {
+  const { academyId, studentId, kind, sender, studentData, reason, body, notify, limit, date, action, via } = params;
+  const actionFields = action ? { action } : {};
 
   const recipients = await resolveParentRecipients(db, academyId, studentData.parentUids);
   if (recipients.length === 0) {
     return { ok: true as const, sent: 0, reason: "no_parent" as const };
   }
 
-  const rateRef = db.doc(`_pushRateLimits/attendance_${academyId}_${studentId}`);
-  const dayKey = utcDayKey();
-  const cooldownBypassRef =
-    sender.canBypassCooldown && TEMP_TEACHER_ATTENDANCE_COOLDOWN_BYPASS_PER_UTC_DAY > 0
-      ? db.doc(
-        `_pushRateLimits/attendance_cooldown_bypass_${academyId}_${sender.actorUid}_${dayKey}`,
-      )
-      : null;
-
-  await db.runTransaction(async (tx) => {
-    const rateSnap = await tx.get(rateRef);
-    const lastMillis = rateSnap.exists
-      ? (rateSnap.get("lastSentAt") as Timestamp | undefined)?.toMillis() ?? 0
-      : 0;
-    const now = Date.now();
-    const tooSoon = now - lastMillis < ATTENDANCE_COOLDOWN_MS;
-
-    if (tooSoon) {
-      if (!cooldownBypassRef || TEMP_TEACHER_ATTENDANCE_COOLDOWN_BYPASS_PER_UTC_DAY <= 0) {
-        throw new HttpsError(
-          "resource-exhausted",
-          "같은 학생에게 알림을 너무 자주 보낼 수 없습니다. 잠시 후 다시 시도해 주세요.",
-        );
-      }
-      const bypassSnap = await tx.get(cooldownBypassRef);
-      const used =
-        bypassSnap.exists && typeof bypassSnap.get("used") === "number"
-          ? (bypassSnap.get("used") as number)
-          : 0;
-      if (used >= TEMP_TEACHER_ATTENDANCE_COOLDOWN_BYPASS_PER_UTC_DAY) {
-        throw new HttpsError(
-          "resource-exhausted",
-          "같은 학생에게 알림을 너무 자주 보낼 수 없습니다. 잠시 후 다시 시도해 주세요.",
-        );
-      }
-      tx.set(
-        cooldownBypassRef,
-        {
-          used: FieldValue.increment(1),
-          actorUid: sender.actorUid,
-          actorRole: sender.role,
-          academyId,
-          dayKey,
-          updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true },
-      );
-    }
-
-    tx.set(
-      rateRef,
-      {
-        lastSentAt: FieldValue.serverTimestamp(),
-        actorUid: sender.actorUid,
-        actorRole: sender.role,
-        studentId,
-        academyId,
-      },
-      { merge: true },
-    );
+  const blocked = await claimSend(db, rateLimitRef(db, academyId, studentId, notify), limit, {
+    actorUid: sender.actorUid,
+    actorRole: sender.role,
+    studentId,
+    academyId,
+    ...(notify.context === "class" ? { classId: notify.classId } : {}),
   });
+  if (blocked) {
+    return { ok: true as const, sent: 0, reason: blocked };
+  }
 
   const studentName =
     typeof studentData.name === "string" && studentData.name ? studentData.name : "학생";
-  const timeLabel = formatCheckInTimeLabel(new Date());
-  const body =
-    params.body ??
-    (kind === "present"
-      ? `'${studentName}' 학생이 안전하게 등원 했습니다. (등원 시간: ${timeLabel})`
-      : `'${studentName}' 학생이 결석 처리되었습니다. (${timeLabel})`);
+  const contextFields =
+    notify.context === "class"
+      ? { context: "class" as const, classId: notify.classId, className: notify.className }
+      : { context: "arrival" as const };
 
   const notifRef = await db.collection(`academies/${academyId}/attendanceNotifications`).add({
     kind,
+    ...contextFields,
+    ...actionFields,
+    ...(via ? { via } : {}),
+    date,
     ...(reason ? { reason } : {}),
     academyId,
     studentId,
@@ -149,12 +152,19 @@ export async function sendStudentAttendanceNotificationCore(
     createdAt: FieldValue.serverTimestamp(),
   });
 
+  const bellKind =
+    notify.context === "class"
+      ? kind === "present" ? "class_present" : "class_absent"
+      : kind === "present" ? "attendance_present" : "attendance_absent";
+
   // 연결된 활성 보호자마다 벨 + 푸시(전달 문서는 수신자별 — 재시도도 수신자별)
   const outcomes = await Promise.all(
     recipients.map(async (recipientUid) => {
       const userRef = db.doc(`users/${recipientUid}`);
       await userRef.collection("dashboardBellItems").add({
-        kind: kind === "present" ? "attendance_present" : "attendance_absent",
+        kind: bellKind,
+        ...contextFields,
+        ...actionFields,
         academyId,
         studentId,
         studentName,

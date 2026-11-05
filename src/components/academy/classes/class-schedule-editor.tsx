@@ -1,140 +1,142 @@
 "use client";
 
 import {
-  expandScheduleGroups,
-  MAX_SCHEDULE_SLOTS,
-  newScheduleGroupKey,
-  scheduleBlockingError,
-  scheduleHasOverlap,
+  draftPerDayDiffers,
+  scheduleDraftError,
+  setDraftPerDay,
+  toggleDraftWeekday,
   WEEKDAYS,
   WEEKDAY_LABELS,
-  type ScheduleGroup,
+  type ScheduleDraft,
+  type TimeRange,
 } from "@/lib/academy/class-schedule";
 
 const timeInputClass =
   "min-w-0 flex-1 rounded-xl border border-neutral-300/60 bg-white/60 px-3 py-2 text-sm text-foreground outline-none focus:border-[#4a90e2]/50 disabled:opacity-60";
 
+function TimeRow({
+  label,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: TimeRange;
+  disabled: boolean;
+  onChange: (next: TimeRange) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-8 shrink-0 text-xs font-medium text-neutral-600">{label}</span>
+      <input
+        type="time"
+        step={300}
+        value={value.start}
+        disabled={disabled}
+        onChange={(e) => onChange({ ...value, start: e.target.value })}
+        className={timeInputClass}
+        aria-label={`${label} 시작`}
+      />
+      <span className="text-xs text-neutral-500">~</span>
+      <input
+        type="time"
+        step={300}
+        value={value.end}
+        disabled={disabled}
+        onChange={(e) => onChange({ ...value, end: e.target.value })}
+        className={timeInputClass}
+        aria-label={`${label} 끝`}
+      />
+    </div>
+  );
+}
+
 /**
- * 수업 시간 편집 — 줄마다 요일 칩(여러 개) + 시작·끝. 저장 때 요일 × 시간대 칸으로 풀린다.
- * 막는 조건(서버와 같음)은 부모가 `scheduleBlockingError`로 다시 검사하고, 여기서는 바로 보여 준다.
- * 한 반 안의 겹침은 경고만, 다른 반·강의실과는 비교하지 않는다.
+ * 수업 시간 편집(2-I) — 한 반은 요일당 1칸. 요일 칩을 고르고 시간 하나(기본),
+ * "요일마다 다름"을 켜면 고른 요일마다 시간 줄. 하루에 두 번 수업하면 반을 따로 만든다.
+ * 막는 조건(서버와 같음)은 부모가 `scheduleDraftError`로 다시 검사하고, 여기서는 바로 보여 준다.
  */
 export function ClassScheduleEditor({
-  groups,
+  draft,
   onChangeAction,
   disabled = false,
 }: {
-  groups: ScheduleGroup[];
-  onChangeAction: (next: ScheduleGroup[]) => void;
+  draft: ScheduleDraft;
+  onChangeAction: (next: ScheduleDraft) => void;
   disabled?: boolean;
 }) {
-  const slots = expandScheduleGroups(groups);
-  const blocking = groups.length > 0 ? scheduleBlockingError(groups) : null;
-  const overlap = !blocking && scheduleHasOverlap(slots);
-
-  const update = (key: string, patch: Partial<ScheduleGroup>) =>
-    onChangeAction(groups.map((g) => (g.key === key ? { ...g, ...patch } : g)));
-
-  const toggleDay = (g: ScheduleGroup, day: number) =>
-    update(g.key, {
-      weekdays: g.weekdays.includes(day)
-        ? g.weekdays.filter((d) => d !== day)
-        : [...g.weekdays, day].sort((a, b) => a - b),
-    });
-
-  const addRow = () => {
-    const last = groups[groups.length - 1];
-    onChangeAction([
-      ...groups,
-      { key: newScheduleGroupKey(), weekdays: [], start: last?.start ?? "16:00", end: last?.end ?? "17:00" },
-    ]);
-  };
+  const days = [...draft.weekdays].sort((a, b) => a - b);
+  const blocking = days.length > 0 ? scheduleDraftError(draft) : null;
+  const willMerge = draft.perDay && days.length > 1 && draftPerDayDiffers(draft);
 
   return (
-    <div className="space-y-2">
-      {groups.length === 0 ? (
-        <p className="rounded-2xl border border-dashed border-neutral-300 px-3 py-4 text-center text-xs text-neutral-500">
-          수업 시간이 없습니다. 아래에서 추가해 주세요.
+    <div className="space-y-2 rounded-2xl border border-neutral-200/80 bg-white/40 p-3">
+      <div className="flex gap-1" role="group" aria-label="수업 요일">
+        {WEEKDAYS.map((d) => {
+          const on = draft.weekdays.includes(d);
+          return (
+            <button
+              key={d}
+              type="button"
+              aria-pressed={on}
+              disabled={disabled}
+              onClick={() => onChangeAction(toggleDraftWeekday(draft, d))}
+              className={`h-9 flex-1 rounded-xl border text-xs font-medium transition ${
+                on ? "border-[#222] bg-[#222] text-white" : "border-neutral-300/70 bg-white/60 text-neutral-700"
+              }`}
+            >
+              {WEEKDAY_LABELS[d]}
+            </button>
+          );
+        })}
+      </div>
+
+      {days.length === 0 ? (
+        <p className="py-2 text-center text-xs text-neutral-500">수업 요일을 고르면 시간을 정할 수 있습니다.</p>
+      ) : draft.perDay ? (
+        <div className="space-y-2">
+          {days.map((d) => (
+            <TimeRow
+              key={d}
+              label={WEEKDAY_LABELS[d]!}
+              value={draft.byDay[d] ?? draft.common}
+              disabled={disabled}
+              onChange={(next) => onChangeAction({ ...draft, byDay: { ...draft.byDay, [d]: next } })}
+            />
+          ))}
+        </div>
+      ) : (
+        <TimeRow
+          label="시간"
+          value={draft.common}
+          disabled={disabled}
+          onChange={(next) => onChangeAction({ ...draft, common: next })}
+        />
+      )}
+
+      {days.length > 0 ? (
+        <label className="flex items-center gap-2 text-xs text-neutral-700">
+          <input
+            type="checkbox"
+            checked={draft.perDay}
+            disabled={disabled}
+            onChange={(e) => onChangeAction(setDraftPerDay(draft, e.target.checked))}
+            className="h-4 w-4 accent-[#222]"
+          />
+          요일마다 다름
+        </label>
+      ) : null}
+      {willMerge ? (
+        <p className="break-keep text-[11px] text-neutral-500">
+          체크를 끄면 모든 요일이 {WEEKDAY_LABELS[days[0]!]}요일 시간으로 맞춰집니다.
         </p>
       ) : null}
-      <ul className="space-y-2">
-        {groups.map((g, i) => (
-          <li key={g.key} className="rounded-2xl border border-neutral-200/80 bg-white/40 p-3">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-[11px] font-medium text-neutral-600">수업 시간 {i + 1}</span>
-              <button
-                type="button"
-                disabled={disabled}
-                onClick={() => onChangeAction(groups.filter((x) => x.key !== g.key))}
-                className="rounded-[8px] border border-red-200/80 px-2 py-1 text-[11px] font-medium text-red-600 disabled:opacity-50"
-                aria-label={`수업 시간 ${i + 1} 삭제`}
-              >
-                삭제
-              </button>
-            </div>
-            <div className="flex gap-1" role="group" aria-label={`수업 시간 ${i + 1} 요일`}>
-              {WEEKDAYS.map((d) => {
-                const on = g.weekdays.includes(d);
-                return (
-                  <button
-                    key={d}
-                    type="button"
-                    aria-pressed={on}
-                    disabled={disabled}
-                    onClick={() => toggleDay(g, d)}
-                    className={`h-9 flex-1 rounded-xl border text-xs font-medium transition ${
-                      on ? "border-[#222] bg-[#222] text-white" : "border-neutral-300/70 bg-white/60 text-neutral-700"
-                    }`}
-                  >
-                    {WEEKDAY_LABELS[d]}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="mt-2 flex items-center gap-2">
-              <input
-                type="time"
-                step={300}
-                value={g.start}
-                disabled={disabled}
-                onChange={(e) => update(g.key, { start: e.target.value })}
-                className={timeInputClass}
-                aria-label={`수업 시간 ${i + 1} 시작`}
-              />
-              <span className="text-xs text-neutral-500">~</span>
-              <input
-                type="time"
-                step={300}
-                value={g.end}
-                disabled={disabled}
-                onChange={(e) => update(g.key, { end: e.target.value })}
-                className={timeInputClass}
-                aria-label={`수업 시간 ${i + 1} 끝`}
-              />
-            </div>
-          </li>
-        ))}
-      </ul>
-      <button
-        type="button"
-        onClick={addRow}
-        disabled={disabled}
-        className="w-full rounded-2xl border border-dashed border-neutral-300 py-2.5 text-sm text-neutral-600 disabled:opacity-50"
-      >
-        + 수업 시간 추가
-      </button>
-      <p
-        className={`text-right text-[11px] ${slots.length > MAX_SCHEDULE_SLOTS ? "font-semibold text-red-700" : "text-neutral-400"}`}
-      >
-        요일별 {slots.length}/{MAX_SCHEDULE_SLOTS}칸
+      <p className="break-keep text-[11px] text-neutral-400">
+        한 반은 요일마다 수업 시간이 하나입니다. 하루에 두 번 수업하면 반을 따로 만들어 주세요.
       </p>
       {blocking ? (
         <p className="break-keep text-xs text-red-700" role="alert">
           {blocking}
-        </p>
-      ) : overlap ? (
-        <p className="break-keep rounded-xl bg-amber-500/12 px-3 py-2 text-xs text-amber-950" role="status">
-          이 반 안에 겹치는 수업 시간이 있습니다. 확인 후 그대로 저장해도 됩니다.
         </p>
       ) : null}
     </div>

@@ -7,11 +7,13 @@ import { ClassScheduleEditor } from "@/components/academy/classes/class-schedule
 import { EditableOptionSelect } from "@/components/ui/editable-option-select";
 import { ModalPortal } from "@/components/ui/modal-portal";
 import {
-  expandScheduleGroups,
-  groupSchedule,
+  draftFromSchedule,
+  draftToSlots,
+  duplicateWeekdaySlots,
   sameSchedule,
-  scheduleBlockingError,
-  type ScheduleGroup,
+  scheduleDraftError,
+  WEEKDAY_LABELS,
+  type ScheduleDraft,
 } from "@/lib/academy/class-schedule";
 import type { AcademyClassBrief } from "@/lib/academy/use-academy-classes";
 import type { ClassTeacherCandidate } from "@/lib/academy/use-class-teacher-candidates";
@@ -68,6 +70,8 @@ type ClassFormSheetProps = {
  * 반 추가·수정 전체 화면 시트 — 저장은 `saveClass`(권한 `operations.classes`).
  * 수정은 **바뀐 필드만** 보낸다(서버도 빠진 필드 = 기존 값 유지). 비교 기준은 시트를 연 순간의 반 값으로 고정 —
  * 시트를 열어 둔 사이 다른 곳에서 바꾼 선생님·시간을 이름만 고친 저장이 되돌리지 않게.
+ * 2-I: 같은 요일 두 칸이 이미 저장된 반은 "수업 시간 다시 정하기"를 누르기 전까지 **어떤 저장도 막는다**(결정 3-3, B8).
+ * 서버는 수업 시간을 보내지 않은 수정을 그대로 통과시키므로 막는 것은 화면 몫이다.
  */
 export function ClassFormSheet({
   academyId,
@@ -87,7 +91,11 @@ export function ClassFormSheet({
   const [base] = useState<AcademyClassBrief | null>(() => target);
   const [name, setName] = useState(base?.name ?? "");
   const [status, setStatus] = useState<AcademyClassStatus>(base?.status ?? "active");
-  const [groups, setGroups] = useState<ScheduleGroup[]>(() => groupSchedule(base?.schedule ?? []));
+  const [draft, setDraft] = useState<ScheduleDraft>(() => draftFromSchedule(base?.schedule ?? []));
+  /** 예전 데이터 — 같은 요일 두 칸(연 순간 기준) */
+  const [legacyDuplicates] = useState(() => duplicateWeekdaySlots(base?.schedule ?? []));
+  const [scheduleReset, setScheduleReset] = useState(false);
+  const scheduleLocked = legacyDuplicates.length > 0 && !scheduleReset;
   const [teacherUids, setTeacherUids] = useState<string[]>(base?.teacherUids ?? []);
   const [roomId, setRoomId] = useState<string | null>(base?.roomId ?? null);
   const [capacity, setCapacity] = useState(base?.capacity != null ? String(base.capacity) : "");
@@ -125,7 +133,10 @@ export function ClassFormSheet({
   const validate = (): { error: string } | { capacity: number | null } => {
     const n = name.trim();
     if (!n || n.length > NAME_MAX) return { error: `반 이름을 1~${NAME_MAX}자로 입력해 주세요.` };
-    const scheduleError = scheduleBlockingError(groups);
+    if (scheduleLocked) {
+      return { error: "같은 요일에 수업 시간이 두 개 있습니다. \"수업 시간 다시 정하기\"로 고친 뒤 저장해 주세요." };
+    }
+    const scheduleError = scheduleDraftError(draft);
     if (scheduleError) return { error: scheduleError };
     if (teacherUids.length > MAX_TEACHERS) return { error: `반 선생님은 최대 ${MAX_TEACHERS}명까지 지정할 수 있습니다.` };
     const c = capacity.trim();
@@ -143,7 +154,7 @@ export function ClassFormSheet({
       setError(v.error);
       return;
     }
-    const schedule = expandScheduleGroups(groups);
+    const schedule = draftToSlots(draft);
     const sortedTeachers = [...teacherUids].sort();
     const fields: Record<string, unknown> = {};
     if (!base) {
@@ -262,15 +273,43 @@ export function ClassFormSheet({
 
             <section>
               <span className={labelClass}>수업 시간</span>
-              <ClassScheduleEditor
-                groups={groups}
-                onChangeAction={(next) => {
-                  setGroups(next);
-                  // 수업 시간 오류는 편집기가 바로 보여 주므로, 저장 때 띄운 문구는 고치는 순간 지운다
-                  setError(null);
-                }}
-                disabled={busy}
-              />
+              {scheduleLocked ? (
+                <div className="space-y-2 rounded-2xl bg-amber-500/12 px-3 py-3 text-xs text-amber-950" role="status">
+                  <p className="break-keep">
+                    이 반은 같은 요일에 수업 시간이 두 개 있습니다(
+                    {legacyDuplicates.map((x) => `${WEEKDAY_LABELS[x.weekday]} ${x.start}–${x.end}`).join(", ")}). 이제
+                    한 반은 요일마다 수업 시간이 하나입니다. 하루에 두 번 수업하면 반을 따로 만들어 주세요.
+                  </p>
+                  <p className="break-keep">수업 시간을 다시 정하기 전에는 이 반을 저장할 수 없습니다.</p>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setScheduleReset(true);
+                      setDraft({ ...draftFromSchedule(base?.schedule ?? []), perDay: true });
+                      setError(null);
+                    }}
+                    className="w-full rounded-xl bg-[#222] py-2.5 text-sm font-medium text-white disabled:opacity-50"
+                  >
+                    수업 시간 다시 정하기
+                  </button>
+                </div>
+              ) : (
+                <ClassScheduleEditor
+                  draft={draft}
+                  onChangeAction={(next) => {
+                    setDraft(next);
+                    // 수업 시간 오류는 편집기가 바로 보여 주므로, 저장 때 띄운 문구는 고치는 순간 지운다
+                    setError(null);
+                  }}
+                  disabled={busy}
+                />
+              )}
+              {legacyDuplicates.length > 0 && scheduleReset ? (
+                <p className="mt-1 break-keep text-[11px] text-neutral-500">
+                  요일마다 첫 수업 시간으로 채웠습니다. 확인한 뒤 저장해 주세요.
+                </p>
+              ) : null}
             </section>
 
             <section>
@@ -412,11 +451,11 @@ export function ClassFormSheet({
           <div className="mx-auto flex max-w-lg">
             <button
               type="button"
-              disabled={busy}
+              disabled={busy || scheduleLocked}
               onClick={() => void onSubmit()}
               className="flex-1 rounded-2xl bg-[#222] py-3 text-sm font-medium text-white disabled:opacity-50"
             >
-              {busy ? "저장 중…" : "저장"}
+              {busy ? "저장 중…" : scheduleLocked ? "수업 시간을 먼저 정해 주세요" : "저장"}
             </button>
           </div>
         </footer>

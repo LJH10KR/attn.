@@ -2,15 +2,27 @@
 
 import { FirebaseError } from "firebase/app";
 import { httpsCallable } from "firebase/functions";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  AttendanceCancelDialog,
+  type AttendanceCancelTarget,
+} from "@/components/academy/attendance/attendance-cancel-dialog";
+import {
+  ClassAttendanceControls,
+  type ClassAttendanceAction,
+} from "@/components/academy/attendance/class-attendance-controls";
 import {
   CLASS_STATUS_BADGE_CLASS,
   CLASS_STATUS_LABELS,
 } from "@/components/academy/classes/class-form-sheet";
 import { STUDENT_STATUS_BADGE_CLASS } from "@/components/academy/student-detail/student-detail-sheet";
 import { ModalPortal } from "@/components/ui/modal-portal";
-import { scheduleSummary } from "@/lib/academy/class-schedule";
-import { STUDENT_STATUS_LABELS } from "@/lib/academy/student-profile";
+import { scheduleSummary, slotsOnWeekday } from "@/lib/academy/class-schedule";
+import { isActiveStudent, STUDENT_STATUS_LABELS } from "@/lib/academy/student-profile";
+import { rowBusyFor, useAttendanceActions } from "@/lib/academy/use-attendance-actions";
+import { useClassTodayAttendance, useSeoulToday } from "@/lib/academy/use-class-today-attendance";
+import type { AcademyPermissionState } from "@/lib/academy/use-permissions";
+import { useStudentAccess } from "@/lib/academy/use-student-access";
 import type { StudentVM } from "@/lib/academy/student-row";
 import type { AcademyClassBrief } from "@/lib/academy/use-academy-classes";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
@@ -21,6 +33,8 @@ const sectionClass = "rounded-2xl border border-neutral-200/80 bg-white/40 px-4 
 /**
  * 반 상세 시트(가벼운 형태 — 0장 2-F 결정 1): 요약 정보, 원생 목록(누르면 학생 상세 시트),
  * 수정·원생 배정·삭제 버튼까지만. URL 연동·변경 이력 표시는 없음.
+ * 2-I: 출결 권한·그 반 선생님이면 원생마다 오늘 출석·결석(조건이 안 맞으면 옅게 + 이유).
+ * 오늘 출결 구독은 읽기 권한이 있을 때만(B1 — 반 관리 권한만 있는 직원은 버튼·구독 없음).
  */
 export function ClassDetailSheet({
   academyId,
@@ -30,6 +44,7 @@ export function ClassDetailSheet({
   studentsError,
   teacherNames,
   roomLabel,
+  permissions,
   escapeBlocked = false,
   onEditAction,
   onAssignAction,
@@ -47,6 +62,8 @@ export function ClassDetailSheet({
   studentsError: string | null;
   teacherNames: string[];
   roomLabel: string | null;
+  /** 학원 화면 `useAcademyShell().permissions` */
+  permissions: Pick<AcademyPermissionState, "can" | "viewer">;
   escapeBlocked?: boolean;
   onEditAction: () => void;
   onAssignAction: () => void;
@@ -60,17 +77,63 @@ export function ClassDetailSheet({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
+
+  // 오늘 출결(2-I)
+  const access = useStudentAccess(permissions);
+  const today = useSeoulToday();
+  const viewerUid = permissions.viewer?.uid ?? null;
+  const canMark = access.canMarkClass(cls);
+  const ended = cls.status === "ended";
+  const todaySlots = slotsOnWeekday(cls.schedule, today.weekday);
+  const hasLessonToday = todaySlots.length > 0;
+  const watch = canMark && access.readClassAttendance(cls) && hasLessonToday && !ended && studentsReady;
+  const canReadArrival = useCallback(
+    (s: StudentVM) => access.attendanceTab || (viewerUid !== null && s.teacherUids.includes(viewerUid)),
+    [access.attendanceTab, viewerUid],
+  );
+  const arrivalIds = useMemo(
+    () => (watch ? members.filter((s) => isActiveStudent(s) && canReadArrival(s)).map((s) => s.id) : []),
+    [watch, members, canReadArrival],
+  );
+  const todayState = useClassTodayAttendance({
+    academyId,
+    classId: cls.id,
+    date: today.date,
+    enabled: watch,
+    arrivalStudentIds: arrivalIds,
+  });
+  const onAttendanceDone = useCallback((text: string, ok: boolean) => setNotice({ text, ok }), []);
+  const { busyKey, markClass, cancelClass } = useAttendanceActions(academyId, onAttendanceDone);
+  const [cancelTarget, setCancelTarget] = useState<AttendanceCancelTarget | null>(null);
+  const onAttendance = (s: StudentVM, action: ClassAttendanceAction) => {
+    if (action.kind === "cancel_class") {
+      // 2-J: 이미 선택된 출석·결석 다시 누름 → 취소 확인 창
+      setCancelTarget({
+        kind: "class",
+        studentId: s.id,
+        studentName: s.name,
+        classId: cls.id,
+        className: cls.name,
+        status: action.status,
+      });
+      return;
+    }
+    if (action.kind !== "class") return;
+    setNotice(null);
+    void markClass(cls.id, cls.name, s.id, action.status, "class_detail", s.name);
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || escapeBlocked || deleting) return;
+      if (e.key !== "Escape" || escapeBlocked || deleting || cancelTarget) return;
       if (confirmOpen) setConfirmOpen(false);
       else if (menuOpen) setMenuOpen(false);
       else onCloseAction();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [escapeBlocked, deleting, confirmOpen, menuOpen, onCloseAction]);
+  }, [escapeBlocked, deleting, confirmOpen, menuOpen, onCloseAction, cancelTarget]);
 
   const onDelete = async () => {
     setDeleting(true);
@@ -203,6 +266,30 @@ export function ClassDetailSheet({
               <h2 className="mb-2 text-xs font-semibold text-foreground">
                 원생 {studentsReady ? members.length : ""}
               </h2>
+              {canMark ? (
+                <p className="-mt-1 mb-2 break-keep text-[11px] text-neutral-500">
+                  {ended
+                    ? "종강한 반이라 출결을 기록할 수 없습니다."
+                    : hasLessonToday
+                      ? `오늘 수업 ${todaySlots.map((x) => `${x.start}–${x.end}`).join(", ")} · 등원한 원생만 출석·결석을 기록할 수 있습니다.`
+                      : "오늘은 이 반 수업이 없어 출결을 기록할 수 없습니다."}
+                </p>
+              ) : null}
+              {notice ? (
+                <p
+                  role="status"
+                  className={`mb-2 break-keep rounded-xl px-3 py-2 text-xs ${
+                    notice.ok ? "bg-emerald-500/10 text-emerald-900" : "bg-red-500/10 text-red-800"
+                  }`}
+                >
+                  {notice.text}
+                </p>
+              ) : null}
+              {watch && todayState.error ? (
+                <p className="mb-2 break-keep text-[11px] text-red-700" role="alert">
+                  {todayState.error}
+                </p>
+              ) : null}
               {studentsError ? (
                 <p className="text-xs text-red-800">
                   {studentsError}{" "}
@@ -217,11 +304,11 @@ export function ClassDetailSheet({
               ) : (
                 <ul className="-mx-1 divide-y divide-neutral-200/70">
                   {members.map((s) => (
-                    <li key={s.id}>
+                    <li key={s.id} className="flex items-center gap-2">
                       <button
                         type="button"
                         onClick={() => onOpenStudentAction(s.id)}
-                        className="flex w-full items-center gap-2 rounded-xl px-1 py-2.5 text-left hover:bg-black/[0.03]"
+                        className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-1 py-2.5 text-left hover:bg-black/[0.03]"
                       >
                         <span className="min-w-0 truncate text-sm text-foreground">{s.name || "(이름 없음)"}</span>
                         {s.gradeLabel ? <span className="shrink-0 text-[11px] text-neutral-500">{s.gradeLabel}</span> : null}
@@ -232,10 +319,29 @@ export function ClassDetailSheet({
                             {STUDENT_STATUS_LABELS[s.status]}
                           </span>
                         ) : null}
-                        <span aria-hidden className="ml-auto shrink-0 text-neutral-400">
-                          ›
-                        </span>
+                        {canMark ? null : (
+                          <span aria-hidden className="ml-auto shrink-0 text-neutral-400">
+                            ›
+                          </span>
+                        )}
                       </button>
+                      {canMark ? (
+                        <ClassAttendanceControls
+                          studentActive={isActiveStudent(s)}
+                          classEnded={ended}
+                          hasLessonToday={hasLessonToday}
+                          arrival={todayState.arrivals.get(s.id)}
+                          record={todayState.records.get(s.id)}
+                          stateError={
+                            Boolean(todayState.error) ||
+                            (isActiveStudent(s) && hasLessonToday && !ended && !canReadArrival(s))
+                          }
+                          allowArrive={false}
+                          busy={rowBusyFor(busyKey, s.id, cls.id)}
+                          disabled={busyKey !== null}
+                          onAction={(action) => onAttendance(s, action)}
+                        />
+                      ) : null}
                     </li>
                   ))}
                 </ul>
@@ -292,6 +398,25 @@ export function ClassDetailSheet({
             </div>
           </div>
         </div>
+      ) : null}
+
+      {cancelTarget && cancelTarget.kind === "class" ? (
+        <AttendanceCancelDialog
+          target={cancelTarget}
+          onConfirmAction={() => {
+            setNotice(null);
+            return cancelClass({
+              classId: cancelTarget.classId,
+              className: cancelTarget.className,
+              studentId: cancelTarget.studentId,
+              status: cancelTarget.status,
+              date: today.date,
+              via: "class_detail",
+              studentName: cancelTarget.studentName,
+            });
+          }}
+          onCloseAction={() => setCancelTarget(null)}
+        />
       ) : null}
     </ModalPortal>
   );

@@ -9,6 +9,14 @@
       ]
     },
     {
+      "collectionGroup": "attendance",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "studentId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "attendanceNotifications",
       "queryScope": "COLLECTION",
       "fields": [

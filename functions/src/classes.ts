@@ -18,6 +18,7 @@ import {
   type ClassHistoryType,
   type ClassStatus,
 } from "./lib/class-teachers";
+import { parseSchedule, readSchedule, type ScheduleSlot } from "./lib/class-schedule";
 import { readUidList } from "./lib/parent-recipients";
 import { isRetriableError, MAX_TRIGGER_RETRY_AGE_MS, triggerEventAgeMs } from "./lib/trigger-retry";
 
@@ -29,14 +30,10 @@ import { isRetriableError, MAX_TRIGGER_RETRY_AGE_MS, triggerEventAgeMs } from ".
  */
 
 const MAX_NAME_LENGTH = 40;
-const MAX_SCHEDULE_SLOTS = 14;
 const MAX_CLASS_TEACHERS = 10;
 const MAX_CAPACITY = 500;
 const MAX_ASSIGN_PER_CALL = 100;
 const MAX_CLASSES_PER_ACADEMY = 300;
-const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
-
-type ScheduleSlot = { weekday: number; start: string; end: string };
 
 function requireId(raw: unknown, message = "요청이 올바르지 않습니다."): string {
   const s = typeof raw === "string" ? raw.trim() : "";
@@ -58,37 +55,6 @@ function parseName(raw: unknown): string {
     throw new HttpsError("invalid-argument", `반 이름을 1~${MAX_NAME_LENGTH}자로 입력해 주세요.`);
   }
   return name;
-}
-
-/** 요일(월=1~일=7)별 시간대 — 시작 < 끝, 같은 시간대 중복 불가, 요일·시작 순으로 정렬해 저장 */
-function parseSchedule(raw: unknown): ScheduleSlot[] {
-  if (raw === undefined || raw === null) return [];
-  if (!Array.isArray(raw)) throw new HttpsError("invalid-argument", "수업 시간이 올바르지 않습니다.");
-  if (raw.length > MAX_SCHEDULE_SLOTS) {
-    throw new HttpsError("invalid-argument", `수업 시간은 최대 ${MAX_SCHEDULE_SLOTS}개까지 등록할 수 있습니다.`);
-  }
-  const seen = new Set<string>();
-  const slots = raw.map((x): ScheduleSlot => {
-    const s = (x ?? {}) as Record<string, unknown>;
-    const weekday = s.weekday;
-    const start = s.start;
-    const end = s.end;
-    if (
-      typeof weekday !== "number" || !Number.isInteger(weekday) || weekday < 1 || weekday > 7 ||
-      typeof start !== "string" || !TIME_RE.test(start) ||
-      typeof end !== "string" || !TIME_RE.test(end)
-    ) {
-      throw new HttpsError("invalid-argument", "수업 시간이 올바르지 않습니다.");
-    }
-    if (start >= end) {
-      throw new HttpsError("invalid-argument", "수업 끝 시간은 시작 시간보다 늦어야 합니다.");
-    }
-    const key = `${weekday}|${start}|${end}`;
-    if (seen.has(key)) throw new HttpsError("invalid-argument", "같은 수업 시간이 두 번 들어 있습니다.");
-    seen.add(key);
-    return { weekday, start, end };
-  });
-  return slots.sort((a, b) => a.weekday - b.weekday || a.start.localeCompare(b.start) || a.end.localeCompare(b.end));
 }
 
 function parseTeacherUids(raw: unknown): string[] {
@@ -116,17 +82,6 @@ function parseClassStatus(raw: unknown): ClassStatus {
   if (raw === undefined || raw === null) return "active";
   if (isClassStatus(raw)) return raw;
   throw new HttpsError("invalid-argument", "반 상태가 올바르지 않습니다.");
-}
-
-/** 저장된 시간표(화면이 만든 형식)를 비교용으로 */
-function readSchedule(raw: unknown): ScheduleSlot[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.flatMap((x) => {
-    const s = x as Record<string, unknown> | null;
-    return s && typeof s.weekday === "number" && typeof s.start === "string" && typeof s.end === "string"
-      ? [{ weekday: s.weekday, start: s.start, end: s.end }]
-      : [];
-  });
 }
 
 /** 새로 고른 강의실만 검사 — 선택지에 없으면(삭제됨) 거부 */

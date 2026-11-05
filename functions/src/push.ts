@@ -2,60 +2,15 @@ import * as crypto from "node:crypto";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { sendStudentAttendanceNotificationCore } from "./attendance-send-core";
-import { upsertTodayAttendanceRecord } from "./attendance-records";
+import {
+  assertArrivalAccess,
+  sendArrivalNotification,
+  writeArrival,
+} from "./attendance";
+import { seoulDateString } from "./lib/attendance-rules";
 import { pruneStalePushSubscriptions } from "./push-subscription-delivery";
 import { actorHasPermission, resolveAcademyActor } from "./lib/academy-access";
 import { readUidList } from "./lib/parent-recipients";
-import { isActiveStudent } from "./lib/student-profile";
-
-/** 반 담당 선생님(학생 `teacherUids`, 반에서 서버가 계산)인지 */
-function studentTaughtByTeacher(data: Record<string, unknown>, teacherUid: string): boolean {
-  return readUidList(data.teacherUids).includes(teacherUid);
-}
-
-type AttendanceSender = {
-  role: "teacher" | "owner";
-  actorUid: string;
-  source: "teacher_dashboard" | "academy_dashboard";
-  canBypassCooldown: boolean;
-};
-
-async function resolveAttendanceSender(params: {
-  db: FirebaseFirestore.Firestore;
-  academyId: string;
-  callerUid: string;
-  studentData: Record<string, unknown>;
-}): Promise<AttendanceSender> {
-  const { db, academyId, callerUid, studentData } = params;
-  const actor = await resolveAcademyActor(db, academyId, callerUid);
-  if (!actor) {
-    throw new HttpsError("permission-denied", "출석/결석 알림을 보낼 권한이 없습니다.");
-  }
-
-  if (actor.kind === "owner") {
-    return {
-      role: "owner",
-      actorUid: callerUid,
-      source: "academy_dashboard",
-      canBypassCooldown: false,
-    };
-  }
-
-  // 활성 직원 — 출결관리 권한이 없으면 담당 반 학생만
-  if (
-    !actorHasPermission(actor, "lessons.attendance") &&
-    !studentTaughtByTeacher(studentData, callerUid)
-  ) {
-    throw new HttpsError("permission-denied", "담당 반 학생에게만 알림을 보낼 수 있습니다.");
-  }
-  return {
-    role: "teacher",
-    actorUid: callerUid,
-    source: "teacher_dashboard",
-    canBypassCooldown: true,
-  };
-}
 
 /**
  * 학부모 푸시 구독 동기화 — 토큰 저장/삭제는 Admin만 수행해 클라이언트 규칙과 무관하게 일관되게 유지합니다.
@@ -159,64 +114,42 @@ async function syncParentPushSummary(
 }
 
 /**
- * 전담 선생님·학원이 오늘자 출결을 기록하고 학부모에게 출석/결석 알림(FCM data 메시지)을 보냅니다.
- * 결석 사유는 "일반"으로 기록 — 질병·학원 사정은 `recordStudentAbsences`(학원 전용)로 지정.
- * 알림이 쿨다운에 걸려도 기록은 저장되므로 reason: "cooldown"으로 정상 응답합니다.
+ * **예전 PWA 호환용(2-I) — 3단계 배포 때 삭제.** 2-I 이전 화면(선생님 출석·결석 버튼, 학생 상세 "출석 알림")이
+ * 캐시된 채로 부를 수 있어 남긴다. 새 화면은 `recordStudentArrival`·`recordClassAttendance`를 쓴다.
+ * - present → 등원(같은 상태면 그대로, 응답 reason "unchanged")
+ * - absent → "기록 없음 → 미등원"만. 이미 등원한 날은 거부(예전 버튼의 결석 = 수업 결석이었음, B3)
+ * 응답 형식은 예전 그대로 `{ ok, sent, reason? }`.
  */
 export const sendStudentAttendanceNotification = onCall(async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
   }
-  const callerUid = request.auth.uid;
   const academyId =
     typeof request.data?.academyId === "string" ? request.data.academyId.trim() : "";
   const studentId =
     typeof request.data?.studentId === "string" ? request.data.studentId.trim() : "";
   const kindRaw = request.data?.kind;
   const kind = kindRaw === "absent" ? "absent" : kindRaw === "present" ? "present" : "";
-  if (!academyId || !studentId || !kind) {
+  if (!academyId || !studentId || academyId.includes("/") || studentId.includes("/") || !kind) {
     throw new HttpsError("invalid-argument", "요청이 올바르지 않습니다.");
   }
 
   const db = admin.firestore();
-  const studentRef = db.doc(`academies/${academyId}/students/${studentId}`);
-  const studentSnap = await studentRef.get();
-  if (!studentSnap.exists) {
-    throw new HttpsError("not-found", "학생을 찾을 수 없습니다.");
-  }
-  const studentData = studentSnap.data() as Record<string, unknown>;
-  if (!isActiveStudent(studentData)) {
-    throw new HttpsError("failed-precondition", "재원 중인 원생에게만 출결 알림을 보낼 수 있습니다.");
-  }
-  const sender = await resolveAttendanceSender({
-    db,
-    academyId,
-    callerUid,
-    studentData,
-  });
-
-  const reason = await upsertTodayAttendanceRecord(db, {
+  const { studentData, sender } = await assertArrivalAccess(db, academyId, studentId, request.auth.uid);
+  const date = seoulDateString();
+  const result = await writeArrival(db, {
     academyId,
     studentId,
     status: kind,
     sender,
+    via: "legacy",
+    mode: "legacy",
+    date,
   });
-
-  try {
-    return await sendStudentAttendanceNotificationCore(db, {
-      academyId,
-      studentId,
-      kind,
-      sender,
-      studentData,
-      ...(reason ? { reason } : {}),
-    });
-  } catch (e) {
-    if (e instanceof HttpsError && e.code === "resource-exhausted") {
-      return { ok: true as const, sent: 0, reason: "cooldown" as const };
-    }
-    throw e;
+  if (!result.changed) {
+    return { ok: true as const, sent: 0, reason: "unchanged" as const };
   }
+  return sendArrivalNotification(db, { academyId, studentId, status: kind, sender, studentData, date });
 });
 
 function clampInt(raw: unknown, fallback: number, min: number, max: number): number {
@@ -278,6 +211,10 @@ export const listAttendanceNotifications = onCall(async (request) => {
     const x = d.data() as {
       academyId?: unknown;
       kind?: unknown;
+      context?: unknown;
+      classId?: unknown;
+      className?: unknown;
+      action?: unknown;
       reason?: unknown;
       studentId?: unknown;
       studentName?: unknown;
@@ -291,6 +228,12 @@ export const listAttendanceNotifications = onCall(async (request) => {
       id: d.id,
       academyId: typeof x.academyId === "string" ? x.academyId : "",
       kind: (x.kind === "absent" ? "absent" : "present") as "present" | "absent",
+      // 2-I 이전 기록은 context 없음 = 등원 맥락
+      context: (x.context === "class" ? "class" : "arrival") as "arrival" | "class",
+      classId: typeof x.classId === "string" ? x.classId : null,
+      className: typeof x.className === "string" ? x.className : null,
+      // 2-J 기록 취소 정정 알림 — 없는 문서는 기록 알림
+      action: (x.action === "cancel" ? "cancel" : "record") as "record" | "cancel",
       reason: typeof x.reason === "string" ? x.reason : null,
       studentId: typeof x.studentId === "string" ? x.studentId : "",
       studentName: typeof x.studentName === "string" ? x.studentName : "",

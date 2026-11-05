@@ -10,7 +10,13 @@ export type AttendanceLogItem = {
   id: string;
   academyId: string;
   kind: "present" | "absent";
-  /** 결석 사유(AbsenceReason) — 사유 도입 이전 기록은 null */
+  /** 2-I: 등원(arrival)·반 출결(class) — 그 전 기록은 arrival */
+  context?: "arrival" | "class";
+  classId?: string | null;
+  className?: string | null;
+  /** 2-J: 기록 취소 정정 알림이면 "cancel"(kind = 취소한 기록의 상태) — 그 전 기록은 record */
+  action?: "record" | "cancel";
+  /** 미등원 사유(AbsenceReason) — 사유 도입 이전 기록은 null */
   reason?: string | null;
   studentId: string;
   studentName: string;
@@ -24,13 +30,29 @@ export type AttendanceLogItem = {
   createdAtMillis: number | null;
 };
 
-/** "출석" / "결석" / "결석(질병)" — 일반 결석은 사유를 생략 */
-export function attendanceKindLabel(kind: "present" | "absent", reason?: string | null): string {
-  if (kind === "present") return "출석";
-  if (isAbsenceReason(reason) && reason !== "general") {
-    return `결석(${ABSENCE_REASON_LABELS[reason]})`;
+/**
+ * 알림 기록 이름(2-I 결정 4장) — 등원 / 미등원 / 미등원(질병) / 수업 출석 · A반 / 수업 결석 · A반.
+ * 기타(general) 사유는 생략.
+ * 2-J 취소 정정 알림: 등원 취소 / 미등원 취소 / 수업 출석 취소 · A반 / 수업 결석 취소 · A반.
+ */
+export function attendanceKindLabel(item: {
+  kind: "present" | "absent";
+  reason?: string | null;
+  context?: "arrival" | "class";
+  className?: string | null;
+  action?: "record" | "cancel";
+}): string {
+  const cancel = item.action === "cancel";
+  if (item.context === "class") {
+    const name = item.className ? ` · ${item.className}` : "";
+    return `${item.kind === "present" ? "수업 출석" : "수업 결석"}${cancel ? " 취소" : ""}${name}`;
   }
-  return "결석";
+  if (cancel) return item.kind === "present" ? "등원 취소" : "미등원 취소";
+  if (item.kind === "present") return "등원";
+  if (isAbsenceReason(item.reason) && item.reason !== "general") {
+    return `미등원(${ABSENCE_REASON_LABELS[item.reason]})`;
+  }
+  return "미등원";
 }
 
 function formatWhen(ms: number | null): string {
@@ -158,7 +180,7 @@ export function useAttendanceNotificationLog(params: {
     () =>
       visibleItems.map((x) => ({
         id: x.id,
-        title: `${attendanceKindLabel(x.kind, x.reason)} · ${x.studentName || x.studentId}`,
+        title: `${attendanceKindLabel(x)} · ${x.studentName || x.studentId}`,
         detail: `${formatWhen(x.createdAtMillis)} · ${x.senderDisplayName} · ${x.parentDisplayName} 학부모`,
       })),
     [visibleItems],
