@@ -4,6 +4,10 @@ import { FirebaseError } from "firebase/app";
 import { httpsCallable } from "firebase/functions";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  AttendanceCancelDialog,
+  type AttendanceCancelTarget,
+} from "@/components/academy/attendance/attendance-cancel-dialog";
+import {
   ClassAttendanceControls,
   type ClassAttendanceAction,
 } from "@/components/academy/attendance/class-attendance-controls";
@@ -100,8 +104,21 @@ export function ClassDetailSheet({
     arrivalStudentIds: arrivalIds,
   });
   const onAttendanceDone = useCallback((text: string, ok: boolean) => setNotice({ text, ok }), []);
-  const { busyKey, markClass } = useAttendanceActions(academyId, onAttendanceDone);
+  const { busyKey, markClass, cancelClass } = useAttendanceActions(academyId, onAttendanceDone);
+  const [cancelTarget, setCancelTarget] = useState<AttendanceCancelTarget | null>(null);
   const onAttendance = (s: StudentVM, action: ClassAttendanceAction) => {
+    if (action.kind === "cancel_class") {
+      // 2-J: 이미 선택된 출석·결석 다시 누름 → 취소 확인 창
+      setCancelTarget({
+        kind: "class",
+        studentId: s.id,
+        studentName: s.name,
+        classId: cls.id,
+        className: cls.name,
+        status: action.status,
+      });
+      return;
+    }
     if (action.kind !== "class") return;
     setNotice(null);
     void markClass(cls.id, cls.name, s.id, action.status, "class_detail", s.name);
@@ -109,14 +126,14 @@ export function ClassDetailSheet({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || escapeBlocked || deleting) return;
+      if (e.key !== "Escape" || escapeBlocked || deleting || cancelTarget) return;
       if (confirmOpen) setConfirmOpen(false);
       else if (menuOpen) setMenuOpen(false);
       else onCloseAction();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [escapeBlocked, deleting, confirmOpen, menuOpen, onCloseAction]);
+  }, [escapeBlocked, deleting, confirmOpen, menuOpen, onCloseAction, cancelTarget]);
 
   const onDelete = async () => {
     setDeleting(true);
@@ -381,6 +398,25 @@ export function ClassDetailSheet({
             </div>
           </div>
         </div>
+      ) : null}
+
+      {cancelTarget && cancelTarget.kind === "class" ? (
+        <AttendanceCancelDialog
+          target={cancelTarget}
+          onConfirmAction={() => {
+            setNotice(null);
+            return cancelClass({
+              classId: cancelTarget.classId,
+              className: cancelTarget.className,
+              studentId: cancelTarget.studentId,
+              status: cancelTarget.status,
+              date: today.date,
+              via: "class_detail",
+              studentName: cancelTarget.studentName,
+            });
+          }}
+          onCloseAction={() => setCancelTarget(null)}
+        />
       ) : null}
     </ModalPortal>
   );

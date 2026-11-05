@@ -214,6 +214,7 @@ export const listAttendanceNotifications = onCall(async (request) => {
       context?: unknown;
       classId?: unknown;
       className?: unknown;
+      action?: unknown;
       reason?: unknown;
       studentId?: unknown;
       studentName?: unknown;
@@ -231,6 +232,8 @@ export const listAttendanceNotifications = onCall(async (request) => {
       context: (x.context === "class" ? "class" : "arrival") as "arrival" | "class",
       classId: typeof x.classId === "string" ? x.classId : null,
       className: typeof x.className === "string" ? x.className : null,
+      // 2-J 기록 취소 정정 알림 — 없는 문서는 기록 알림
+      action: (x.action === "cancel" ? "cancel" : "record") as "record" | "cancel",
       reason: typeof x.reason === "string" ? x.reason : null,
       studentId: typeof x.studentId === "string" ? x.studentId : "",
       studentName: typeof x.studentName === "string" ? x.studentName : "",

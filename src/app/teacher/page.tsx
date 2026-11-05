@@ -9,6 +9,11 @@ import { StudentDetailSheet } from "@/components/academy/student-detail/student-
 import { useStudentDetailParam } from "@/components/academy/student-detail/use-student-detail-param";
 import { groupMyClasses, TeacherMyClasses } from "@/components/teacher/teacher-my-classes";
 import type { ClassAttendanceAction } from "@/components/academy/attendance/class-attendance-controls";
+import {
+  AttendanceCancelDialog,
+  type AttendanceCancelTarget,
+  type KnownClassRecord,
+} from "@/components/academy/attendance/attendance-cancel-dialog";
 import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardNotificationsModal } from "@/components/dashboard/dashboard-notifications-modal";
@@ -343,9 +348,34 @@ function TeacherDashboard() {
     (s: StudentVM) => canReadAllArrivals || (viewerUid !== null && s.teacherUids.includes(viewerUid)),
     [canReadAllArrivals, viewerUid],
   );
-  const { markArrival, markClass } = attendanceActions;
+  const { markArrival, markClass, cancelClass, cancelArrival } = attendanceActions;
+  // 2-J 취소 확인 창 대상
+  const [cancelTarget, setCancelTarget] = useState<AttendanceCancelTarget | null>(null);
   const onAttendanceAction = useCallback(
-    (student: StudentVM, cls: AcademyClassBrief, action: ClassAttendanceAction) => {
+    (student: StudentVM, cls: AcademyClassBrief, action: ClassAttendanceAction, known: KnownClassRecord[]) => {
+      if (action.kind === "cancel_class") {
+        setCancelTarget({
+          kind: "class",
+          studentId: student.id,
+          studentName: student.name,
+          classId: cls.id,
+          className: cls.name,
+          status: action.status,
+        });
+        return;
+      }
+      if (action.kind === "cancel_arrival") {
+        setCancelTarget({
+          kind: "arrival",
+          studentId: student.id,
+          studentName: student.name,
+          status: action.arrival.status,
+          reason: action.arrival.reason,
+          billed: action.arrival.billed,
+          knownClassRecords: known,
+        });
+        return;
+      }
       setNotifyMessage(null);
       if (action.kind === "arrive") {
         void markArrival(student.id, "present", "teacher_my_classes", student.name);
@@ -355,6 +385,28 @@ function TeacherDashboard() {
     },
     [markArrival, markClass],
   );
+  const confirmCancel = useCallback(() => {
+    if (!cancelTarget) return Promise.resolve(null);
+    setNotifyMessage(null);
+    const t = cancelTarget;
+    return t.kind === "class"
+      ? cancelClass({
+          classId: t.classId,
+          className: t.className,
+          studentId: t.studentId,
+          status: t.status,
+          date: today.date,
+          via: "teacher_my_classes",
+          studentName: t.studentName,
+        })
+      : cancelArrival({
+          studentId: t.studentId,
+          status: t.status,
+          date: today.date,
+          via: "teacher_my_classes",
+          studentName: t.studentName,
+        });
+  }, [cancelTarget, cancelClass, cancelArrival, today.date]);
 
   const headerProfile = useMemo(
     () =>
@@ -511,6 +563,14 @@ function TeacherDashboard() {
           permissions={permissions}
           onTabChangeAction={detail.setTab}
           onCloseAction={detail.close}
+        />
+      ) : null}
+
+      {cancelTarget ? (
+        <AttendanceCancelDialog
+          target={cancelTarget}
+          onConfirmAction={confirmCancel}
+          onCloseAction={() => setCancelTarget(null)}
         />
       ) : null}
 

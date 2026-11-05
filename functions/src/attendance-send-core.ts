@@ -100,9 +100,17 @@ export async function sendStudentAttendanceNotificationCore(
     date: string;
     /** 미등원 사유(`attendance-records.ts`의 AbsenceReason) — 알림 기록에 함께 저장 */
     reason?: string;
+    /**
+     * 2-J 기록 취소 정정 알림이면 "cancel" — 알림 기록·벨에 `action: "cancel"`(kind = 취소한 기록의 상태).
+     * 없으면 기록 알림(예전 문서와 같음).
+     */
+    action?: "cancel";
+    /** 취소 경로(기록용, 2-J) — 삭제된 문서 대신 알림 기록에 남김 */
+    via?: string;
   },
 ): Promise<AttendanceNotifyOutcome> {
-  const { academyId, studentId, kind, sender, studentData, reason, body, notify, limit, date } = params;
+  const { academyId, studentId, kind, sender, studentData, reason, body, notify, limit, date, action, via } = params;
+  const actionFields = action ? { action } : {};
 
   const recipients = await resolveParentRecipients(db, academyId, studentData.parentUids);
   if (recipients.length === 0) {
@@ -130,6 +138,8 @@ export async function sendStudentAttendanceNotificationCore(
   const notifRef = await db.collection(`academies/${academyId}/attendanceNotifications`).add({
     kind,
     ...contextFields,
+    ...actionFields,
+    ...(via ? { via } : {}),
     date,
     ...(reason ? { reason } : {}),
     academyId,
@@ -154,6 +164,7 @@ export async function sendStudentAttendanceNotificationCore(
       await userRef.collection("dashboardBellItems").add({
         kind: bellKind,
         ...contextFields,
+        ...actionFields,
         academyId,
         studentId,
         studentName,

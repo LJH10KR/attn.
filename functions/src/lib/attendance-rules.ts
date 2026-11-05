@@ -1,5 +1,5 @@
 /**
- * 2-I 등원·반 출결 판단 — 조건 코드, 상태 전환, 알림 문구, 서울 시각.
+ * 2-I 등원·반 출결 판단 — 조건 코드, 상태 전환, 알림 문구, 서울 시각(2-J: 취소 판단·취소 문구).
  * `src/lib/academy/attendance-rules.ts`와 같은 내용(student-profile·permissions처럼 두 곳을 함께 맞춘다).
  * 서버가 실제로 막고, 화면은 같은 코드로 버튼을 옅게 하고 이유를 붙인다.
  */
@@ -146,6 +146,58 @@ export function classPushBody(
 ): string {
   const verb = status === "present" ? "출석하였습니다" : "결석하였습니다";
   return `${studentName} 학생이 ${className} 수업에 ${verb}. (수업 시간 ${slotsLabel(slots)} / 알림 전송 시각 ${formatSeoulHHmm(at)})`;
+}
+
+/**
+ * 등원 기록 취소 판단(2-J) — 기록이 있을 때만 부른다. 검사 순서: 반 출결 → 차감 잠금 → 사유.
+ * - has_class_records: 그날 반 출결이 있음(출석·결석을 먼저 취소)
+ * - billed: 차감 잠금 날짜
+ * - reason_locked: 질병·학원 사정 미등원(월정액 차감 근거 — 출결 권한의 출결 탭에서만 정정)
+ * 등원, 기타(general)·사유 없는 예전 미등원은 null(취소 가능).
+ */
+export type ArrivalCancelBlock = "has_class_records" | "billed" | "reason_locked";
+
+export function arrivalCancelBlock(params: {
+  status: AttendanceStatus;
+  reason: string | null;
+  billed: boolean;
+  classRecordCount: number;
+}): ArrivalCancelBlock | null {
+  if (params.classRecordCount > 0) return "has_class_records";
+  if (params.billed) return "billed";
+  if (params.status === "absent" && (params.reason === "illness" || params.reason === "academy")) {
+    return "reason_locked";
+  }
+  return null;
+}
+
+/** 질병·학원 사정 미등원 등원 취소 거부 문구(2-J ★7) */
+export const ARRIVAL_CANCEL_REASON_LOCKED_MESSAGE =
+  "질병·학원 사정 미등원은 여기서 취소할 수 없습니다. 출결 권한이 있는 분이 학생 상세 출결 탭에서 정정해 주세요.";
+
+/** 반 출결이 있어 등원 취소를 막을 때 문구 */
+export function arrivalCancelClassRecordsMessage(count: number): string {
+  return `오늘 수업 출결이 ${count}건 있어 등원 기록을 취소할 수 없습니다. 출석·결석 기록을 먼저 취소해 주세요.`;
+}
+
+/** 오늘이 아닌 날짜 취소 거부 문구(2-J ★2) */
+export const CANCEL_NOT_TODAY_MESSAGE = "오늘 기록만 취소할 수 있습니다. 화면을 새로고침해 주세요.";
+
+/** 등원·미등원 기록 취소 알림 문구(2-J) */
+export function arrivalCancelPushBody(studentName: string, status: AttendanceStatus, at: Date): string {
+  const what = status === "present" ? "등원 기록" : "미등원 기록";
+  return `${studentName} 학생의 ${what}이 취소되었습니다. (알림 전송 시각 ${formatSeoulHHmm(at)})`;
+}
+
+/** 반 출석·결석 기록 취소 알림 문구(2-J) */
+export function classCancelPushBody(
+  studentName: string,
+  className: string,
+  status: AttendanceStatus,
+  at: Date,
+): string {
+  const what = status === "present" ? "수업 출석 기록" : "수업 결석 기록";
+  return `${studentName} 학생의 ${className} ${what}이 취소되었습니다. (알림 전송 시각 ${formatSeoulHHmm(at)})`;
 }
 
 /** 반 출결 문서 ID */

@@ -82,7 +82,9 @@ export function AcademyAttendanceLogPanel({
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span
                   className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                    r.context === "class"
+                    r.action === "cancel"
+                      ? "bg-neutral-500/15 text-neutral-700"
+                      : r.context === "class"
                       ? r.kind === "present"
                         ? "bg-sky-500/15 text-sky-900"
                         : "bg-orange-500/15 text-orange-900"

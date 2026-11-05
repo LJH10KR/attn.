@@ -1,10 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { KnownClassRecord } from "@/components/academy/attendance/attendance-cancel-dialog";
 import {
   ClassAttendanceControls,
   type ClassAttendanceAction,
 } from "@/components/academy/attendance/class-attendance-controls";
+import type { AttendanceStatus } from "@/lib/academy/attendance-rules";
 import { STUDENT_STATUS_BADGE_CLASS } from "@/components/academy/student-detail/student-detail-sheet";
 import { scheduleSummary, slotsOnWeekday } from "@/lib/academy/class-schedule";
 import { STUDENT_STATUS_LABELS, isActiveStudent } from "@/lib/academy/student-profile";
@@ -53,7 +55,13 @@ export function groupMyClasses(
   return groups;
 }
 
-/** 선생님 화면 "내 반" — 반별 학생, 학생을 누르면 학생 상세 시트(정보 탭). 오늘 수업 반은 출석·결석(등원 전·미등원은 "등원 처리") */
+type ClassRecordsReport = { className: string; records: ReadonlyMap<string, AttendanceStatus> };
+
+/**
+ * 선생님 화면 "내 반" — 반별 학생, 학생을 누르면 학생 상세 시트(정보 탭). 오늘 수업 반은 출석·결석(등원 전·미등원은 "등원 처리").
+ * 2-J: 등원 취소(`cancel_arrival`)를 넘길 때 화면이 구독 중인 **그 학생의 모든 반** 출결을 함께 넘긴다
+ * (구독하지 않는 반의 기록은 서버가 거부 문구로 안내).
+ */
 export function TeacherMyClasses({
   academyId,
   groups,
@@ -72,9 +80,37 @@ export function TeacherMyClasses({
   canReadArrival: (s: StudentVM) => boolean;
   /** `useAttendanceActions().busyKey` */
   busyKey: string | null;
-  onAttendanceAction: (student: StudentVM, cls: AcademyClassBrief, action: ClassAttendanceAction) => void;
+  onAttendanceAction: (
+    student: StudentVM,
+    cls: AcademyClassBrief,
+    action: ClassAttendanceAction,
+    knownClassRecords: KnownClassRecord[],
+  ) => void;
   onOpenStudentAction: (studentId: string) => void;
 }) {
+  const [recordsByClass, setRecordsByClass] = useState<ReadonlyMap<string, ClassRecordsReport>>(() => new Map());
+  const reportRecords = useCallback((classId: string, report: ClassRecordsReport | null) => {
+    setRecordsByClass((prev) => {
+      if (!report && !prev.has(classId)) return prev;
+      const next = new Map(prev);
+      if (report) next.set(classId, report);
+      else next.delete(classId);
+      return next;
+    });
+  }, []);
+  const onAction = useCallback(
+    (student: StudentVM, cls: AcademyClassBrief, action: ClassAttendanceAction) => {
+      const known: KnownClassRecord[] =
+        action.kind === "cancel_arrival"
+          ? [...recordsByClass.values()].flatMap((r) => {
+              const status = r.records.get(student.id);
+              return status ? [{ className: r.className, status }] : [];
+            })
+          : [];
+      onAttendanceAction(student, cls, action, known);
+    },
+    [recordsByClass, onAttendanceAction],
+  );
   return (
     <div className="space-y-4">
       {groups.map((g) => (
@@ -86,7 +122,8 @@ export function TeacherMyClasses({
           roomLabelOf={roomLabelOf}
           canReadArrival={canReadArrival}
           busyKey={busyKey}
-          onAttendanceAction={onAttendanceAction}
+          onAttendanceAction={onAction}
+          onRecordsChange={reportRecords}
           onOpenStudentAction={onOpenStudentAction}
         />
       ))}
@@ -102,6 +139,7 @@ function TeacherClassSection({
   canReadArrival,
   busyKey,
   onAttendanceAction,
+  onRecordsChange,
   onOpenStudentAction,
 }: {
   academyId: string;
@@ -111,6 +149,7 @@ function TeacherClassSection({
   canReadArrival: (s: StudentVM) => boolean;
   busyKey: string | null;
   onAttendanceAction: (student: StudentVM, cls: AcademyClassBrief, action: ClassAttendanceAction) => void;
+  onRecordsChange: (classId: string, report: ClassRecordsReport | null) => void;
   onOpenStudentAction: (studentId: string) => void;
 }) {
   const c = g.cls;
@@ -130,6 +169,17 @@ function TeacherClassSection({
     enabled: watch,
     arrivalStudentIds: arrivalIds,
   });
+  // 구독 중인 반의 오늘 출결을 위로 알림(등원 취소 미리 확인용)
+  const classId = c?.id ?? null;
+  const className = c?.name ?? "";
+  useEffect(() => {
+    if (!classId) return;
+    onRecordsChange(classId, watch && state.recordsLoaded ? { className, records: state.records } : null);
+  }, [classId, className, watch, state.records, state.recordsLoaded, onRecordsChange]);
+  useEffect(() => {
+    if (!classId) return;
+    return () => onRecordsChange(classId, null);
+  }, [classId, onRecordsChange]);
 
   return (
     <section aria-label={c ? c.name : "그 밖의 담당 학생"}>

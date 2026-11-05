@@ -13,10 +13,22 @@ import {
 } from "@/components/academy/student-detail/student-form-sheet";
 import { StudentInfoTab } from "@/components/academy/student-detail/student-info-tab";
 import {
+  AttendanceCancelDialog,
+  type AttendanceCancelTarget,
+} from "@/components/academy/attendance/attendance-cancel-dialog";
+import {
   attendanceActionErrorMessage,
   attendanceActionMessage,
   type AttendanceActionResult,
 } from "@/lib/academy/attendance-records";
+import { arrivalCancelBlock, formatSeoulHHmm } from "@/lib/academy/attendance-rules";
+import { useAttendanceActions } from "@/lib/academy/use-attendance-actions";
+import {
+  useSeoulToday,
+  useStudentTodayArrival,
+  type TodayArrival,
+} from "@/lib/academy/use-class-today-attendance";
+import { ABSENCE_REASON_LABELS, isAbsenceReason } from "@/lib/firebase/attn-schema";
 import { docToStudent, type StudentVM } from "@/lib/academy/student-row";
 import { STUDENT_STATUS_LABELS, type StudentStatus } from "@/lib/academy/student-profile";
 import { useAcademyClasses } from "@/lib/academy/use-academy-classes";
@@ -173,7 +185,21 @@ export function StudentDetailSheet({
     setVisited((prev) => (prev.has(activeTab) ? prev : new Set(prev).add(activeTab)));
   }, [activeTab]);
 
-  const childOpen = formOpen || deleteOpen;
+  // 2-J 오늘 등원 기록 + 취소 — 등원 처리 권한(출결 권한·담당)일 때만 구독(규칙의 등원 기록 읽기에 포함)
+  const today = useSeoulToday();
+  const todayEnabled = Boolean(student && access.canMarkArrival(student));
+  const todayState = useStudentTodayArrival({
+    academyId,
+    studentId,
+    date: today.date,
+    enabled: todayEnabled,
+    withClassRecords: access.attendanceTab,
+  });
+  const [cancelTarget, setCancelTarget] = useState<AttendanceCancelTarget | null>(null);
+  const onCancelDone = useCallback((message: string) => showNotice(message), [showNotice]);
+  const { cancelArrival } = useAttendanceActions(academyId, onCancelDone);
+
+  const childOpen = formOpen || deleteOpen || cancelTarget !== null;
   /** 수정 시트는 메모 읽기가 끝난 뒤(성공·실패)에만 연다 — 읽는 중에 열면 메모 기준값이 비어 저장 때 덮어쓸 수 있음 */
   const noteReady = !readNotes || note !== "loading";
   useEffect(() => {
@@ -318,6 +344,27 @@ export function StudentDetailSheet({
                     </button>
                   ) : null}
                 </div>
+                {/* 등원 기록 구독 오류면 줄 전체를 숨김(마지막 값이 남지 않게) */}
+                {todayEnabled && !todayState.error && todayState.arrival ? (
+                  <StudentTodayArrivalLine
+                    arrival={todayState.arrival}
+                    classRecordCount={todayState.classRecords?.length ?? 0}
+                    classRecordsLoading={todayState.classRecordsLoading}
+                    onCancelAction={() => {
+                      const a = todayState.arrival;
+                      if (!a) return;
+                      setCancelTarget({
+                        kind: "arrival",
+                        studentId: student.id,
+                        studentName: student.name,
+                        status: a.status,
+                        reason: a.reason,
+                        billed: a.billed,
+                        knownClassRecords: todayState.classRecords ?? [],
+                      });
+                    }}
+                  />
+                ) : null}
                 {tabs.length > 1 ? (
                   <nav className="mt-3 flex gap-1" role="tablist" aria-label="원생 상세">
                     {tabs.map((t) => (
@@ -456,6 +503,69 @@ export function StudentDetailSheet({
           }}
         />
       ) : null}
+      {cancelTarget ? (
+        <AttendanceCancelDialog
+          target={cancelTarget}
+          onConfirmAction={() =>
+            cancelArrival({
+              studentId: cancelTarget.studentId,
+              status: cancelTarget.status,
+              date: today.date,
+              via: "student_detail",
+            })
+          }
+          onCloseAction={() => setCancelTarget(null)}
+        />
+      ) : null}
     </ModalPortal>
+  );
+}
+
+/**
+ * 학생 상세 헤더 아래 "오늘" 줄(2-J) — 오늘 등원 기록과 취소. 질병·학원 사정 미등원·차감 반영일은 버튼 없이 안내만
+ * (서버도 거부). 반 출결이 있는 날은 버튼을 누르면 확인 창이 이유를 보여 준다(권한 없는 담당 선생님은 서버 문구).
+ */
+function StudentTodayArrivalLine({
+  arrival,
+  classRecordCount,
+  classRecordsLoading,
+  onCancelAction,
+}: {
+  arrival: NonNullable<TodayArrival>;
+  classRecordCount: number;
+  /** 출결 권한자 시트에서 그날 반 출결 수를 아직 읽는 중 — 다 읽을 때까지 버튼을 막음 */
+  classRecordsLoading: boolean;
+  onCancelAction: () => void;
+}) {
+  const time = arrival.arrivedAtMs ? ` ${formatSeoulHHmm(new Date(arrival.arrivedAtMs))}` : "";
+  const reasonLabel =
+    arrival.status === "absent" && isAbsenceReason(arrival.reason) && arrival.reason !== "general"
+      ? `(${ABSENCE_REASON_LABELS[arrival.reason]})`
+      : "";
+  const label = arrival.status === "present" ? `오늘 등원${time}` : `오늘 미등원${reasonLabel}`;
+  const block = arrivalCancelBlock({
+    status: arrival.status,
+    reason: arrival.reason,
+    billed: arrival.billed,
+    classRecordCount,
+  });
+  return (
+    <div className="mt-2 flex items-center gap-2 rounded-xl bg-black/[0.03] px-3 py-1.5 text-[11px]">
+      <span className="min-w-0 flex-1 break-keep text-neutral-700">{label}</span>
+      {block === "reason_locked" ? (
+        <span className="shrink-0 break-keep text-neutral-500">출결 탭에서 정정</span>
+      ) : block === "billed" ? (
+        <span className="shrink-0 break-keep text-neutral-500">차감 반영일</span>
+      ) : (
+        <button
+          type="button"
+          disabled={classRecordsLoading}
+          onClick={onCancelAction}
+          className="shrink-0 rounded-[8px] border border-neutral-300/80 bg-white/70 px-2.5 py-1 font-medium text-neutral-800 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {arrival.status === "present" ? "등원 취소" : "미등원 취소"}
+        </button>
+      )}
+    </div>
   );
 }

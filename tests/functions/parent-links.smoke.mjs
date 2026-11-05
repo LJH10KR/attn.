@@ -146,6 +146,7 @@ assert.deepEqual((await studentDoc(s1)).parentUids, [mom.uid]);
 assert.equal((await studentDoc(s2)).guardians[0].linkedParentUid, mom.uid, "번호가 맞는 보호자 항목에 연결");
 assert.equal((await studentDoc(s2)).guardians.length, 2);
 await waitFor("연결 → active", async () => (await parentDoc(mom.uid)).get("status") === "active");
+await waitFor("요약 2명", async () => ((await parentDoc(mom.uid)).get("linkedStudentIds") ?? []).length === 2);
 momSnap = await parentDoc(mom.uid);
 assert.ok(momSnap.get("approvedAt"), "첫 연결 때 approvedAt 기록");
 assert.deepEqual(momSnap.get("linkedStudentIds"), sorted([s1, s2]));

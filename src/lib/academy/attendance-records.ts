@@ -102,8 +102,28 @@ function withEuro(word: string): string {
   return jong === 0 || jong === 8 ? "로" : "으로";
 }
 
+/** `cancelClassAttendance`·`cancelStudentArrival` 응답(2-J) */
+export type AttendanceCancelResult = {
+  ok?: boolean;
+  changed?: boolean;
+  cancelled?: "present" | "absent" | null;
+  notification?: AttendanceNotifyResult;
+};
+
+/**
+ * 출결 취소 결과 문구(2-J).
+ * @param label "A반 출석"·"등원"·"미등원" 등 취소한 기록 이름
+ */
+export function attendanceCancelMessage(label: string, result: AttendanceCancelResult): string {
+  if (result.changed === false) return "취소할 기록이 없습니다. 이미 취소되었을 수 있습니다.";
+  return `${label} 기록을 취소했습니다.${describeNotifyResult(result.notification ?? null)}`;
+}
+
 /** 등원·반 출결 버튼 실패 문구 — 서버의 조건·권한 문구를 그대로 보여 준다 */
-export function attendanceActionErrorMessage(e: unknown): string {
+export function attendanceActionErrorMessage(
+  e: unknown,
+  fallback = "출결을 기록하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+): string {
   if (e instanceof FirebaseError) {
     if (e.code === "functions/resource-exhausted") {
       return "같은 학생에게 너무 자주 보낼 수 없습니다. 잠시 후 다시 시도해 주세요.";
@@ -118,5 +138,5 @@ export function attendanceActionErrorMessage(e: unknown): string {
       return e.message;
     }
   }
-  return "출결을 기록하지 못했습니다. 잠시 후 다시 시도해 주세요.";
+  return fallback;
 }
