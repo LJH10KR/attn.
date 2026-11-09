@@ -16,6 +16,7 @@ import { EmailVerificationCodeModal } from "@/components/auth/email-verification
 import { LoginPasswordField } from "@/components/auth/login-password-field";
 import { GoogleMark } from "@/components/auth/google-mark";
 import { resolveStaffLanding } from "@/lib/academy/staff-landing";
+import { LegalLinks } from "@/components/legal/legal-links";
 import {
   LOGIN_ROLE_OPTIONS,
   type LoginRole,
@@ -85,7 +86,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
   const [sessionUser, setSessionUser] = useState<User | null>(null);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [otpModalOpen, setOtpModalOpen] = useState(false);
-  const [otpPurpose, setOtpPurpose] = useState<"owner" | "parent">("owner");
+  const [otpPurpose, setOtpPurpose] = useState<"owner">("owner");
   const [otpEmailHint, setOtpEmailHint] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [sessionBannerReady, setSessionBannerReady] = useState(false);
@@ -136,28 +137,6 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
       setAttnId(presetLoginId);
     }
   }, [searchParams, fixedRole]);
-
-  useEffect(() => {
-    if (!configured || (role !== "parent" && role !== "owner")) return;
-    const auth = getFirebaseAuth();
-    return onAuthStateChanged(auth, async (user) => {
-      if (!user || otpFlowRef.current) return;
-      try {
-        const token = await user.getIdTokenResult();
-        if (
-          role === "parent" &&
-          token.claims.membershipStatus === "pending_email_verification"
-        ) {
-          otpFlowRef.current = true;
-          setOtpPurpose("parent");
-          setOtpEmailHint(null);
-          setOtpModalOpen(true);
-        }
-      } catch {
-        /* ignore */
-      }
-    });
-  }, [configured, role]);
 
   /** 활성이면 착지 경로(학원 5탭 또는 선생님 화면, `staff-landing.ts`), 아니면 안내 화면으로 보내고 null */
   const checkTeacherActivationOrRedirect =
@@ -215,13 +194,6 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
 
       if (state === "pending_setup") {
         router.replace("/parent/setup");
-        return false;
-      }
-
-      if (state === "pending_email_verification") {
-        setOtpPurpose("parent");
-        setOtpEmailHint(getFirebaseAuth().currentUser?.email ?? null);
-        setOtpModalOpen(true);
         return false;
       }
 
@@ -347,7 +319,6 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
         const data = result.data as {
           customToken?: string;
           membershipStatus?: string;
-          contactEmail?: string;
         };
         if (!data?.customToken) {
           setError("로그인 응답이 올바르지 않습니다.");
@@ -355,13 +326,6 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
         }
         await signInWithCustomToken(auth, data.customToken);
         await auth.currentUser?.getIdToken(true);
-        if (role === "parent" && data.membershipStatus === "pending_email_verification") {
-          otpFlowRef.current = true;
-          setOtpPurpose("parent");
-          setOtpEmailHint(data.contactEmail ?? null);
-          setOtpModalOpen(true);
-          return;
-        }
         if (data.membershipStatus === "pending_setup") {
           router.replace(role === "teacher" ? "/teacher/setup" : "/parent/setup");
           return;
@@ -487,20 +451,16 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
       }
       await user.reload();
       await user.getIdToken(true);
-      if (otpPurpose === "owner") {
-        await upsertOwnerProfile(auth.currentUser!);
-        router.replace("/owner");
-        return;
-      }
-      const ok = await checkParentActivationOrRedirect();
-      if (ok) router.replace("/parent");
+      // 이메일 인증은 원장만(2-L — 학부모는 휴대폰 번호 확인)
+      await upsertOwnerProfile(auth.currentUser!);
+      router.replace("/owner");
     } catch (err) {
       const code = err instanceof FirebaseError ? err.code : "";
       setError(code ? authErrorMessage(code, role) : "인증 후 이동에 실패했습니다.");
     } finally {
       setBusy(false);
     }
-  }, [checkParentActivationOrRedirect, otpPurpose, role, router]);
+  }, [role, router]);
 
   const onGoogleLogin = useCallback(async () => {
     setError(null);
@@ -862,6 +822,8 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
           ) : null}
         </div>
       </div>
+
+      <LegalLinks className="mt-6" />
 
       {/* <p className="mt-8 text-center text-xs text-neutral-500">
         <Link href="/" className="underline-offset-2 hover:underline">

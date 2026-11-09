@@ -36,7 +36,7 @@ async function verifyMemberPassword(
   role: MemberKind,
   password: string,
   wrongMessage = LOGIN_FAILED_MSG,
-): Promise<{ status: string; contactEmail?: string }> {
+): Promise<{ status: string }> {
   const db = admin.firestore();
   await verifyLoginPasswordThrottled(
     db,
@@ -52,13 +52,7 @@ async function verifyMemberPassword(
     throw new HttpsError("not-found", "계정을 찾을 수 없습니다.");
   }
   const status = (memberSnap.get("status") as string) || "pending_setup";
-  const contactEmail =
-    role === "parent" && status === "pending_email_verification"
-      ? typeof memberSnap.get("contactEmail") === "string"
-        ? memberSnap.get("contactEmail")
-        : undefined
-      : undefined;
-  return { status, contactEmail };
+  return { status };
 }
 
 /**
@@ -148,7 +142,7 @@ async function signInMember(loginKey: string, password: string, role: MemberKind
     );
   }
 
-  const { status, contactEmail } = await verifyMemberPassword(
+  const { status } = await verifyMemberPassword(
     academyId,
     authUid,
     role,
@@ -169,7 +163,6 @@ async function signInMember(loginKey: string, password: string, role: MemberKind
     academyId,
     authUid,
     membershipStatus: status,
-    ...(contactEmail ? { contactEmail } : {}),
   };
 }
 

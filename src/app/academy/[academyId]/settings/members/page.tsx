@@ -280,6 +280,11 @@ function MembersInner({
                               게스트
                             </span>
                           ) : null}
+                          {m.accountStatus === "pending_registration" && m.phoneVerified ? (
+                            <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-900" data-phone-verified-badge>
+                              번호 확인됨
+                            </span>
+                          ) : null}
                           {matchesFor(m).length > 0 ? (
                             <span className="rounded-full bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-sky-900">
                               번호 일치

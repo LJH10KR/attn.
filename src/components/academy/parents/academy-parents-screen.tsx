@@ -318,6 +318,11 @@ export function AcademyParentsScreen() {
                       </div>
                       <p className="mt-0.5 text-[11px] text-neutral-600">{formatKrPhoneDisplayOrDash(a.phone)}</p>
                       <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                        {a.phoneVerified ? (
+                          <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-900" data-phone-verified-badge>
+                            번호 확인됨
+                          </span>
+                        ) : null}
                         {!a.phone ? (
                           <span className="rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] font-semibold text-red-800">
                             번호 없음
@@ -331,6 +336,11 @@ export function AcademyParentsScreen() {
                             {matched.length > 0 ? `번호 일치 원생 ${matched.length}명` : "번호 일치 원생 없음"}
                           </span>
                         )}
+                        {a.phoneVerified && matched.length > 0 ? (
+                          <span className="w-full break-keep text-[11px] text-neutral-600" data-phone-verified-candidates>
+                            번호 확인됨 · 일치 원생 {matched.map((s) => s.name).join(", ")}
+                          </span>
+                        ) : null}
                         {others.length > 0 ? (
                           <span
                             className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
@@ -350,7 +360,7 @@ export function AcademyParentsScreen() {
         </>
       ) : (
         <>
-          <AcademySignupLinkCard academyId={academyId} kind="parent" />
+          <AcademySignupLinkCard academyId={academyId} kind="parent" showAutoLinkSetting />
 
           <div className="flex items-center gap-2">
             <input

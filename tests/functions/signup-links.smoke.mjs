@@ -11,6 +11,7 @@ import { getFirestore as adminDb } from "firebase-admin/firestore";
 import { initializeApp } from "firebase/app";
 import { connectAuthEmulator, getAuth, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from "firebase/functions";
+import { CONSENTS } from "./_signup-token.mjs";
 
 const PROJECT = "demo-attn";
 initAdmin({ projectId: PROJECT });
@@ -58,12 +59,12 @@ const parentInput = () => {
   seq += 1;
   return {
     loginId: `plink${seq}`, displayName: `학부모${seq}`, password: "pw123456",
-    phone: "010-1111-2222", contactEmail: `plink${seq}@mail.dev`, agreeTerms: true,
+    phone: "010-1111-2222", consents: CONSENTS,
   };
 };
 const staffInput = () => {
   seq += 1;
-  return { method: "password", displayName: `직원${seq}`, phone: "010-2222-3333", loginId: `slink${seq}`, password: "pw123456" };
+  return { consents: CONSENTS, method: "password", displayName: `직원${seq}`, phone: "010-2222-3333", loginId: `slink${seq}`, password: "pw123456" };
 };
 
 /** 학부모 5개 + 직원 3개 함수가 이 입력으로 모두 거부되는지(로그인한 일반 계정으로 — Google 함수는 로그인 확인 다음 토큰 검사) */
@@ -73,7 +74,7 @@ async function assertAllRejected(tokenPart, re, label) {
     ["getParentSignupAcademyInfo", { ...tokenPart }],
     ["checkParentLoginIdAvailable", { ...tokenPart, loginId: "anyfree1" }],
     ["getParentSignupGoogleStatus", { ...tokenPart }],
-    ["registerParentGoogleSignup", { ...tokenPart, displayName: "구글", phone: "010-1234-5678", agreeTerms: true }],
+    ["registerParentGoogleSignup", { ...tokenPart, displayName: "구글", phone: "010-1234-5678", consents: CONSENTS }],
     ["registerParentSelfSignup", { ...tokenPart, ...parentInput() }],
     ["getStaffSignupInfo", { ...tokenPart }],
     ["checkStaffSignupLoginId", { ...tokenPart, loginId: "anyfree2" }],
@@ -137,7 +138,7 @@ await assertAllRejected({ token: "o11_a1" }, INVALID, "형식 틀림");
 await assertAllRejected({ token: "x".repeat(43) }, INVALID, "없는 토큰");
 await assert.rejects(call("getStaffSignupInfo", { token: p1.token }), INVALID, "학부모 토큰으로 직원 가입");
 await assert.rejects(call("getParentSignupAcademyInfo", { token: s1.token }), INVALID, "직원 토큰으로 학부모 가입");
-await assert.rejects(call("registerStaffSignup", { token: p1.token, ...staffInput() }), INVALID);
+await assert.rejects(call("registerStaffSignup", { consents: CONSENTS, token: p1.token, ...staffInput() }), INVALID);
 
 // --- 끄기 → 모두 거부("가입을 받지 않음"), 켜기 → 같은 토큰으로 다시 통과 ---
 await as("owner11@t.dev");
@@ -160,7 +161,7 @@ await call("getParentSignupAcademyInfo", { token: p1.token });
 // --- archived 학원 ---
 await db.doc(`academies/${A}`).update({ status: "archived" });
 await assert.rejects(call("getParentSignupAcademyInfo", { token: p1.token }), ARCHIVED);
-await assert.rejects(call("registerStaffSignup", { token: s1.token, ...staffInput() }), ARCHIVED);
+await assert.rejects(call("registerStaffSignup", { consents: CONSENTS, token: s1.token, ...staffInput() }), ARCHIVED);
 await db.doc(`academies/${A}`).update({ status: "active" });
 
 // --- 한도: 학부모 100 ---
@@ -185,9 +186,9 @@ assert.equal((await pHashRef.get()).get("rate.count"), 1);
 // --- 한도: 직원 20 ---
 const sHashRef = db.doc(`signupLinks/${sha(s1.token)}`);
 await sHashRef.update({ rate: { windowKey: W, count: 19, notifiedWindowKey: null } });
-await call("registerStaffSignup", { token: s1.token, ...staffInput() }); // 20번째
-await assert.rejects(call("registerStaffSignup", { token: s1.token, ...staffInput() }), LIMITED, "21번째");
-await assert.rejects(call("registerStaffSignup", { token: s1.token, ...staffInput() }), LIMITED, "22번째");
+await call("registerStaffSignup", { consents: CONSENTS, token: s1.token, ...staffInput() }); // 20번째
+await assert.rejects(call("registerStaffSignup", { consents: CONSENTS, token: s1.token, ...staffInput() }), LIMITED, "21번째");
+await assert.rejects(call("registerStaffSignup", { consents: CONSENTS, token: s1.token, ...staffInput() }), LIMITED, "22번째");
 const staffBells = await db
   .collection(`academies/${A}/adminInbox`)
   .where("kind", "==", "signup_rate_limited")
@@ -220,7 +221,7 @@ await signOut(auth);
 await assertAllRejected({ token: p1.token }, INVALID, "다시 만든 뒤 옛 학부모 토큰");
 await assert.rejects(call("getStaffSignupInfo", { token: s1.token }), INVALID, "다시 만든 뒤 옛 직원 토큰");
 await call("getParentSignupAcademyInfo", { token: p2.token });
-await call("registerStaffSignup", { token: s2.token, ...staffInput() });
+await call("registerStaffSignup", { consents: CONSENTS, token: s2.token, ...staffInput() });
 
 // --- 링크 문서·원문은 학원 삭제(원장)와 함께 정리 ---
 await as("owner11@t.dev");

@@ -191,8 +191,9 @@ async function resolveKnownSessionDashboardPath(user: User): Promise<string | nu
   const generation = cacheGeneration(uid);
   const decisionPromise = (async (): Promise<string | null> => {
     const { claims } = await user.getIdTokenResult();
+    // 2-L 이전 이메일 인증 가입의 남은 학부모 계정(더 이상 만들지 않음) — 안내 화면
     if (claims.membershipStatus === "pending_email_verification") {
-      return claims.role === "parent" ? "/login/parent" : null;
+      return claims.role === "parent" ? "/parent/session?state=pending_email_verification" : null;
     }
 
     const authEmail = user.email ?? "";

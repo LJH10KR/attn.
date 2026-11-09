@@ -9,6 +9,7 @@ import { academySeqMetaPath, formatStudentAttnId } from "./lib/attn-id";
 import { deleteStudentDocs } from "./lib/firestore-cleanup";
 import { parseOptionalKrPhone } from "./lib/kr-phone";
 import { refreshParentLinkSummary, syncStudentPaymentParents } from "./lib/parent-links";
+import { autoLinkNewGuardianPhones, newGuardianPhoneKeys } from "./lib/parent-auto-link";
 import { readUidList } from "./lib/parent-recipients";
 import {
   deriveGuardianFields,
@@ -243,7 +244,12 @@ export const onAcademyStudentParentLinksWritten = onDocumentWritten(
       ...before.filter((uid) => !after.includes(uid)),
       ...after.filter((uid) => !before.includes(uid)),
     ];
-    if (changed.length === 0) return;
+    // 2-L ★3 — 새로 생긴 보호자 번호(원생 추가·번호 입력·번호 변경, 2-M 여러 명 저장 포함). 연결 쓰기는 번호 목록을 바꾸지 않아
+    // 자동 연결이 이 트리거를 다시 깨워도 여기서 빈 목록 → 멈춤(재시도도 연결 "already"·벨 결정 ID로 한 번만)
+    const newKeys = event.data?.after?.exists
+      ? newGuardianPhoneKeys(event.data?.before?.get("guardianPhones"), event.data.after.get("guardianPhones"))
+      : [];
+    if (changed.length === 0 && newKeys.length === 0) return;
 
     const { academyId, studentId } = event.params;
     const eventAgeMs = triggerEventAgeMs(event.time);
@@ -257,8 +263,11 @@ export const onAcademyStudentParentLinksWritten = onDocumentWritten(
       for (const uid of changed) {
         await refreshParentLinkSummary(db, academyId, uid);
       }
-      if (event.data?.after?.exists) {
+      if (changed.length > 0 && event.data?.after?.exists) {
         await syncStudentPaymentParents(db, academyId, studentId);
+      }
+      if (newKeys.length > 0) {
+        await autoLinkNewGuardianPhones(db, academyId, studentId, newKeys);
       }
     } catch (e) {
       if (isRetriableError(e)) {

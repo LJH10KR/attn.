@@ -136,6 +136,11 @@ function hashFromRawToken(rawToken: unknown): string {
   return hashSignupToken(token);
 }
 
+/** 토큰의 해시 문서 ID(번호 확인 코드·증표를 같은 가입 링크에 묶을 때) — 형식이 틀리면 링크 무효 안내 */
+export function signupLinkHashFromToken(rawToken: unknown): string {
+  return hashFromRawToken(rawToken);
+}
+
 export type ResolvedSignupLink = {
   academyId: string;
   academyName: string;

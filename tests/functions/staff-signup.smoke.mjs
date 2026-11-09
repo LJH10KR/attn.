@@ -20,6 +20,7 @@ import {
   signOut,
 } from "firebase/auth";
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from "firebase/functions";
+import { CONSENTS } from "./_signup-token.mjs";
 
 const PROJECT = "demo-attn";
 initAdmin({ projectId: PROJECT });
@@ -87,14 +88,14 @@ const info = await call("getStaffSignupInfo", { token });
 assert.equal(info.academyName, "가입 학원");
 await call("checkStaffSignupLoginId", { token, loginId: "matchuser" });
 await assert.rejects(
-  call("registerStaffSignup", { token, method: "password", displayName: "", phone: "010-4000-1111", loginId: "x1234", password: "secret12" }),
+  call("registerStaffSignup", { consents: CONSENTS, token, method: "password", displayName: "", phone: "010-4000-1111", loginId: "x1234", password: "secret12" }),
   /이름/,
 );
 await assert.rejects(
-  call("registerStaffSignup", { token, method: "password", displayName: "번호 없음", loginId: "x1235", password: "secret12" }),
+  call("registerStaffSignup", { consents: CONSENTS, token, method: "password", displayName: "번호 없음", loginId: "x1235", password: "secret12" }),
   /전화번호/,
 );
-const accepted = await call("registerStaffSignup", {
+const accepted = await call("registerStaffSignup", { consents: CONSENTS,
   token, method: "password", displayName: "가입한 이름", phone: "01040001111", loginId: "matchuser", password: "secret12",
 });
 assert.equal(accepted.membershipStatus, "pending_registration");
@@ -121,7 +122,7 @@ await assert.rejects(
 await signOut(auth);
 
 // 번호가 다른 가입자
-await call("registerStaffSignup", {
+await call("registerStaffSignup", { consents: CONSENTS,
   token, method: "password", displayName: "다른 번호", phone: "010-4000-2222", loginId: "otheruser", password: "secret12",
 });
 const other = await staffByLogin("otheruser");
@@ -190,19 +191,19 @@ assert.equal(
 
 // --- Google 가입: 승인 대기 / 이미 가입 거부 / 원장 계정 거부 ---
 const g = await asGoogle("google-staff-1", "gstaff1@gmail.com");
-await call("registerStaffSignup", { token, method: "google", displayName: "구글 직원", phone: "010-4000-3333" });
+await call("registerStaffSignup", { consents: CONSENTS, token, method: "google", displayName: "구글 직원", phone: "010-4000-3333" });
 const gDoc = await db.doc(`academies/${A}/staff/${g.uid}`).get();
 assert.equal(gDoc.get("status"), "pending_registration");
 assert.equal(gDoc.get("authProvider"), "google");
 assert.equal(gDoc.get("phone"), "010-4000-3333");
 await assert.rejects(
-  call("registerStaffSignup", { token, method: "google", displayName: "구글 직원", phone: "010-4000-3333" }),
+  call("registerStaffSignup", { consents: CONSENTS, token, method: "google", displayName: "구글 직원", phone: "010-4000-3333" }),
   /이미 이 학원에 가입된 계정/,
 );
 const gOwner = await asGoogle("google-owner-1", "gowner1@gmail.com");
 await db.doc(`users/${gOwner.uid}`).set({ platformRole: "owner" });
 await assert.rejects(
-  call("registerStaffSignup", { token, method: "google", displayName: "원장", phone: "010-4000-4444" }),
+  call("registerStaffSignup", { consents: CONSENTS, token, method: "google", displayName: "원장", phone: "010-4000-4444" }),
   /원장 계정으로는/,
 );
 await signOut(auth);

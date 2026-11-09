@@ -16,7 +16,7 @@ import {
   signOut,
 } from "firebase/auth";
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from "firebase/functions";
-import { seedSignupToken } from "./_signup-token.mjs";
+import { CONSENTS, seedSignupToken } from "./_signup-token.mjs";
 
 const PROJECT = "demo-attn";
 initAdmin({ projectId: PROJECT });
@@ -152,7 +152,7 @@ await activeTeacher({ loginId: first.loginId, tempPassword: byManager.tempPasswo
 // 학부모 — 자가 가입 후 사용 중 처리, 초기화는 operations.parents
 await call("registerParentSelfSignup", {
   token: PARENT_TOKEN, loginId: "parent4", displayName: "학부모", password: "parentpw1",
-  phone: "010-3333-4444", contactEmail: "p4@t.dev", agreeTerms: true,
+  phone: "010-3333-4444", consents: CONSENTS,
 });
 const parentUid = (await db.collection(`academies/${A}/parents`).where("loginId", "==", "parent4").get()).docs[0].id;
 await db.doc(`academies/${A}/parents/${parentUid}`).update({ status: "active" });

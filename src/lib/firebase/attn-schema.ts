@@ -85,7 +85,15 @@ export type AcademyAdminInboxKind =
   | "parent_pending_approval"
   | "session_payment_received"
   /** 가입 QR 링크 시간당 한도 초과(2-K) — 링크·서울 시각 정시 창마다 1건, 문서 ID `signup-limit-{linkKind}-{windowKey}` */
-  | "signup_rate_limited";
+  | "signup_rate_limited"
+  /** 2-L 정보성 알림(30일 뒤 만료 `expiresAt`) — 번호 확인 자동 연결(학부모·원생마다 1건, ID `p-autolink-{parent}-{student}`) */
+  | "parent_auto_linked"
+  /** 학부모가 "내 자녀가 아니에요"(ID `p-decline-{parent}-{student}`) */
+  | "parent_child_declined"
+  /** 학부모 번호 변경(문자 확인) — `variant` self·corrected·reverted */
+  | "parent_phone_changed"
+  /** 직원 번호 확인 + 미리 등록 후보 1명 + 역할 → 바로 사용 중(ID `s-autoact-{uid}`) */
+  | "staff_auto_activated";
 
 export type AcademyAdminInboxDoc = {
   schemaVersion: typeof ACADEMY_ADMIN_INBOX_SCHEMA_VERSION;
@@ -102,8 +110,17 @@ export type AcademyAdminInboxDoc = {
   invitationExpiresAt?: Timestamp | null;
   /** kind가 "session_payment_received"일 때 사용 — 결제된 회차 수 */
   sessionCount?: number;
-  /** kind가 "session_payment_received"일 때 사용 — 결제한 학생 이름 */
+  /** kind가 "session_payment_received"·2-L 학부모 알림일 때 — 학생 이름 */
   studentName?: string;
+  /** 2-L 학부모 알림 — 원생 id */
+  studentId?: string;
+  /** 2-L `parent_phone_changed` — self(학부모가 바꿈)·corrected(학원 번호 대신 확인한 번호)·reverted(바꾸지 않았어요) */
+  variant?: "self" | "corrected" | "reverted";
+  /** 2-L `staff_auto_activated` — 부여된 역할 */
+  roleId?: string;
+  roleName?: string;
+  /** 2-L 정보성 알림 만료 시각 */
+  expiresAt?: Timestamp;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 };

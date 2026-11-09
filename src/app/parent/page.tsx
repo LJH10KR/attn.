@@ -42,7 +42,8 @@ import { useRoleLogout } from "@/lib/auth/use-role-logout";
 import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
-import { FirebaseError } from "firebase/app";
+import { FirebaseError } from "firebase/app";
+import { ParentDeclineChildButton } from "@/components/parent/parent-decline-child";
 
 const glassCard = "glass-card";
 
@@ -85,6 +86,8 @@ export default function ParentDashboardPage() {
   const [googleLinked, setGoogleLinked] = useState(false);
   const [googleEmail, setGoogleEmail] = useState<string | null>(null);
   const [students, setStudents] = useState<ParentChildVM[]>([]);
+  /** "내 자녀가 아니에요" 처리 뒤 안내(2-L) */
+  const [declineNotice, setDeclineNotice] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
   const { logout: onLogout, logoutBusy, logoutModal } = useRoleLogout({
@@ -603,6 +606,11 @@ export default function ParentDashboardPage() {
             {listError}
           </p>
         ) : null}
+        {declineNotice ? (
+          <p className="mb-2 rounded-2xl bg-emerald-500/10 px-3 py-2 text-center text-xs text-emerald-900" role="status">
+            {declineNotice}
+          </p>
+        ) : null}
 
         <div className="space-y-2">
           {listInitialLoading ? (
@@ -666,6 +674,14 @@ export default function ParentDashboardPage() {
                     onRefreshAction={refreshChildrenList}
                   />
                 ) : null}
+                <ParentDeclineChildButton
+                  studentId={s.id}
+                  studentName={s.name}
+                  onDeclinedAction={(message) => {
+                    setDeclineNotice(message);
+                    void refreshChildrenList();
+                  }}
+                />
               </div>
             ))
           )}

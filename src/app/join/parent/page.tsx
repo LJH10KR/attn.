@@ -8,12 +8,20 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { GoogleMark } from "@/components/auth/google-mark";
-import { SignupCompleteModal } from "@/components/auth/signup-complete-modal";
 import { ProcessStatusModal } from "@/components/ui/process-status-modal";
+import {
+  ConsentChecklist,
+  CONSENT_REQUIRED_MESSAGE,
+  consentComplete,
+  EMPTY_CONSENT,
+  type ConsentState,
+} from "@/components/legal/consent-checklist";
+import { PhoneVerificationStep } from "@/components/phone-verification/phone-verification-step";
 import { resolvePasswordConfirmHint } from "@/lib/ui/password-confirm-hint";
-import { ensureSignupAppCheck } from "@/lib/firebase/app-check";
+import { ensureAppCheck, oneShotCallable } from "@/lib/firebase/app-check";
 import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
+import { currentConsentPayload } from "@/lib/legal/legal-docs";
 import {
   formatKrPhoneInput,
   getKrPhoneValidationError,
@@ -27,6 +35,10 @@ import { readSignupToken, signupErrorMessage, SIGNUP_LINK_INVALID_MESSAGE } from
 
 const inputClass =
   "w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50";
+const labelClass = "mb-1.5 block text-xs font-medium text-neutral-600";
+const primaryBtn =
+  "w-full rounded-2xl bg-[#222] py-3.5 text-[15px] font-medium text-white disabled:opacity-60 dark:bg-neutral-100 dark:text-neutral-950";
+const secondaryBtn = "w-full rounded-2xl border border-neutral-300/70 py-3 text-sm font-medium text-neutral-700";
 
 function InlineSpinner({ className }: { className?: string }) {
   return (
@@ -50,12 +62,30 @@ function ClipboardIcon() {
   );
 }
 
-type SignupStep = "form" | "google_profile";
+type Method = "password" | "google";
+type Step = "profile" | "verify" | "finish";
+/** 번호 확인 결과 — 증표(확인됨) 또는 건너뜀 */
+type PhoneCheck = { phone: string; proof: string | null };
+type Done = { loginId: string; method: Method; phoneVerified: boolean; linkedCount: number };
+
+const PARENT_SKIP_NOTE = "번호 확인 없이 가입하면 학원이 확인한 뒤 자녀와 연결돼요.";
+
+/** 가입 완료 안내 — 번호 확인·자동 연결 결과별 */
+function parentSignupDoneMessage(d: Pick<Done, "phoneVerified" | "linkedCount">): string {
+  if (d.phoneVerified && d.linkedCount > 0) {
+    return `번호를 확인해 자녀 ${d.linkedCount}명과 연결했어요. 바로 이용할 수 있어요.`;
+  }
+  if (d.phoneVerified) {
+    return "번호를 확인했어요. 학원에 등록된 보호자 번호와 맞으면 자동으로 연결돼요.";
+  }
+  return "학원 승인 후 자녀가 연결됩니다. 연결 전에는 학부모 홈에 연결 대기 안내가 보입니다.";
+}
 
 /**
- * 학부모 가입(`/join/parent?token=…`, 2-K) — 학원이 공유한 가입 QR의 무작위 토큰으로만 가입한다.
- * 토큰이 없거나(예전 `?academyId=` 주소 포함) 형식이 틀리면 서버를 부르지 않고 바로 안내한다.
- * App Check는 로그인 ID 확인·가입 함수를 처음 부르기 직전에만 켠다(`ensureSignupAppCheck`).
+ * 학부모 가입(`/join/parent?token=…`, 2-K 토큰 + 2-L 번호 확인) — 학원이 공유한 가입 QR의 무작위 토큰으로만 가입한다.
+ * 단계: 이름·휴대폰 번호 → 휴대폰 번호 확인(OCTOMO, 건너뛰기 가능) → 로그인 ID·비밀번호·동의(Google은 동의만).
+ * 이메일·이메일 인증 코드는 받지 않는다. 토큰이 없거나(예전 `?academyId=` 주소 포함) 형식이 틀리면 서버를 부르지 않고 바로 안내.
+ * App Check는 로그인 ID 확인·번호 확인·가입 함수를 처음 부르기 직전에만 켠다(가입은 1회용 토큰).
  */
 function ParentJoinForm() {
   const router = useRouter();
@@ -64,9 +94,11 @@ function ParentJoinForm() {
 
   const [academyName, setAcademyName] = useState<string | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [method, setMethod] = useState<Method>("password");
+  const [step, setStep] = useState<Step>("profile");
   const [displayName, setDisplayName] = useState("");
-  const [contactEmail, setContactEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [phoneCheck, setPhoneCheck] = useState<PhoneCheck | null>(null);
   const [loginId, setLoginId] = useState("");
   const [loginIdStatus, setLoginIdStatus] = useState<
     "idle" | "checking" | "available" | "taken" | "invalid"
@@ -77,18 +109,16 @@ function ParentJoinForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [showPassword2, setShowPassword2] = useState(false);
   const [confirmBlurred, setConfirmBlurred] = useState(false);
-  const [agree, setAgree] = useState(false);
+  const [consent, setConsent] = useState<ConsentState>(EMPTY_CONSENT);
   const [error, setError] = useState<string | null>(null);
-  const [signupStep, setSignupStep] = useState<SignupStep>("form");
   const [googleLoginId, setGoogleLoginId] = useState("");
-  const [doneLoginId, setDoneLoginId] = useState<string | null>(null);
+  const [done, setDone] = useState<Done | null>(null);
   const [copied, setCopied] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
   const [loadingModal, setLoadingModal] = useState<{
     title: string;
     description?: string;
   } | null>(null);
-  const [signupCompleteOpen, setSignupCompleteOpen] = useState(false);
 
   useEffect(() => {
     if (!token || !isFirebaseConfigured()) {
@@ -123,6 +153,7 @@ function ParentJoinForm() {
   }, [token]);
 
   useEffect(() => {
+    if (method !== "password" || step !== "finish") return;
     const formatErr = getParentLoginIdFormatError(loginId);
     if (!loginId.trim()) {
       setLoginIdStatus("idle");
@@ -140,7 +171,7 @@ function ParentJoinForm() {
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
-          await ensureSignupAppCheck();
+          await ensureAppCheck();
           const fn = httpsCallable(getFirebaseFunctions(), "checkParentLoginIdAvailable");
           await fn({ token, loginId });
           if (!cancelled) {
@@ -150,13 +181,7 @@ function ParentJoinForm() {
         } catch (e) {
           if (!cancelled) {
             const msg = signupErrorMessage(e, "확인에 실패했습니다. 잠시 후 다시 시도해 주세요.");
-            if (e instanceof FirebaseError && e.code === "functions/already-exists") {
-              setLoginIdStatus("taken");
-            } else if (e instanceof FirebaseError && e.code === "functions/invalid-argument") {
-              setLoginIdStatus("invalid");
-            } else {
-              setLoginIdStatus("invalid");
-            }
+            setLoginIdStatus(e instanceof FirebaseError && e.code === "functions/already-exists" ? "taken" : "invalid");
             setLoginIdMessage(msg);
           }
         }
@@ -166,15 +191,32 @@ function ParentJoinForm() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [loginId, token]);
+  }, [loginId, token, method, step]);
 
   const passwordConfirmHint = resolvePasswordConfirmHint(password, password2, confirmBlurred);
+  const busy = loadingModal !== null;
+
+  /** 1단계 → 번호 확인 — 같은 번호를 이미 확인했으면 바로 마지막 단계 */
+  const onProfileNext = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    const name = displayName.trim();
+    if (!name) return setError("이름을 입력해 주세요.");
+    if (name.length > 60) return setError("이름은 60자 이하로 입력해 주세요.");
+    const phoneErr = getKrPhoneValidationError(phone);
+    if (phoneErr) return setError(phoneErr);
+    const formatted = formatKrPhoneInput(phone);
+    if (phoneCheck && phoneCheck.phone === formatted) {
+      setStep("finish");
+      return;
+    }
+    setPhoneCheck(null);
+    setStep("verify");
+  };
 
   const onGoogleSignup = useCallback(async () => {
     setError(null);
-    if (!token) {
-      return;
-    }
+    if (!token) return;
     setGoogleBusy(true);
     setLoadingModal({
       title: "Google 계정 연결 중",
@@ -182,8 +224,7 @@ function ParentJoinForm() {
     });
     try {
       const auth = getFirebaseAuth();
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      await signInWithPopup(auth, new GoogleAuthProvider());
       const statusFn = httpsCallable(getFirebaseFunctions(), "getParentSignupGoogleStatus");
       const statusRes = await statusFn({ token });
       const status = statusRes.data as {
@@ -203,8 +244,9 @@ function ParentJoinForm() {
         return;
       }
       setGoogleLoginId(status.loginId ?? "");
-      setDisplayName(status.suggestedDisplayName ?? "");
-      setSignupStep("google_profile");
+      setDisplayName((prev) => prev.trim() || status.suggestedDisplayName || "");
+      setMethod("google");
+      setStep("profile");
     } catch (err) {
       const auth = getFirebaseAuth();
       if (auth.currentUser) {
@@ -217,157 +259,89 @@ function ParentJoinForm() {
     }
   }, [token, router]);
 
-  const onGoogleProfileBack = useCallback(async () => {
+  const onGoogleCancel = useCallback(async () => {
     setError(null);
-    setSignupStep("form");
+    setMethod("password");
+    setStep("profile");
     setGoogleLoginId("");
-    try {
-      await signOut(getFirebaseAuth());
-    } catch {
-      /* ignore */
-    }
+    setPhoneCheck(null);
+    await signOut(getFirebaseAuth()).catch(() => undefined);
   }, []);
 
-  const onGoogleComplete = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      setError(null);
-      if (!displayName.trim()) {
-        setError("이름을 입력해 주세요.");
-        return;
-      }
-      if (displayName.trim().length > 60) {
-        setError("이름은 60자 이하로 입력해 주세요.");
-        return;
-      }
-      const phoneErr = getKrPhoneValidationError(phone);
-      if (phoneErr) {
-        setError(phoneErr);
-        return;
-      }
-      if (!agree) {
-        setError("서비스 이용에 동의해 주세요.");
-        return;
-      }
-      try {
-        setLoadingModal({
-          title: "학부모 계정 등록 중",
-          description: "이름·연락처를 저장하고 가입을 마무리하고 있어요.",
-        });
-        await ensureSignupAppCheck();
-        const fn = httpsCallable(getFirebaseFunctions(), "registerParentGoogleSignup");
-        const res = await fn({
-          token,
-          displayName: displayName.trim(),
-          phone: formatKrPhoneInput(phone),
-          agreeTerms: true,
-        });
-        const data = res.data as { loginId?: string };
-        setLoadingModal(null);
-        setDoneLoginId(data.loginId ?? googleLoginId);
-      } catch (err) {
-        setLoadingModal(null);
-        setError(signupErrorMessage(err, "가입에 실패했습니다."));
-      }
-    },
-    [token, agree, displayName, googleLoginId, phone],
-  );
-
   const onCopyLoginId = useCallback(async () => {
-    if (!doneLoginId) {
-      return;
-    }
+    if (!done) return;
     try {
-      await navigator.clipboard.writeText(doneLoginId);
+      await navigator.clipboard.writeText(done.loginId);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
       setCopied(false);
     }
-  }, [doneLoginId]);
+  }, [done]);
 
-  const onSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      setError(null);
-      if (!displayName.trim()) {
-        setError("이름을 입력해 주세요.");
-        return;
-      }
-      if (displayName.trim().length > 60) {
-        setError("이름은 60자 이하로 입력해 주세요.");
-        return;
-      }
-      const phoneErr = getKrPhoneValidationError(phone);
-      if (phoneErr) {
-        setError(phoneErr);
-        return;
-      }
-      const em = contactEmail.trim().toLowerCase();
-      if (!em || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
-        setError("이메일 형식을 확인해 주세요.");
-        return;
-      }
-      if (!loginId.trim()) {
-        setError("로그인 ID를 입력해 주세요.");
-        return;
-      }
+  /** 마지막 단계 — 가입 함수(1회용 App Check 토큰) */
+  const onFinish = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!phoneCheck) {
+      setStep("verify");
+      return;
+    }
+    if (method === "password") {
+      if (!loginId.trim()) return setError("로그인 ID를 입력해 주세요.");
       const formatErr = getParentLoginIdFormatError(loginId);
-      if (formatErr) {
-        setError(formatErr);
-        return;
+      if (formatErr) return setError(formatErr);
+      if (loginIdStatus !== "available") return setError("사용 가능한 로그인 ID를 입력해 주세요.");
+      if (!password) return setError("비밀번호를 입력해 주세요.");
+      if (password.length < 6) return setError("비밀번호는 6자 이상이어야 합니다.");
+      if (password !== password2) return setError("비밀번호가 서로 일치하지 않습니다.");
+    }
+    if (!consentComplete(consent)) return setError(CONSENT_REQUIRED_MESSAGE);
+
+    const common = {
+      token,
+      displayName: displayName.trim(),
+      phone: phoneCheck.phone,
+      consents: currentConsentPayload(),
+      ...(phoneCheck.proof ? { phoneProof: phoneCheck.proof } : {}),
+    };
+    try {
+      setLoadingModal({
+        title: "학부모 계정 만드는 중",
+        description: "계정 정보를 안전하게 등록하고 있어요.",
+      });
+      await ensureAppCheck();
+      type Res = { loginId?: string; phoneVerified?: boolean; linkedCount?: number };
+      const res =
+        method === "password"
+          ? await oneShotCallable<unknown, Res>("registerParentSelfSignup")({
+              ...common,
+              loginId: normalizeParentLoginId(loginId),
+              password,
+            })
+          : await oneShotCallable<unknown, Res>("registerParentGoogleSignup")(common);
+      setLoadingModal(null);
+      setDone({
+        loginId: res.data.loginId ?? (method === "password" ? normalizeParentLoginId(loginId) : googleLoginId),
+        method,
+        phoneVerified: res.data.phoneVerified === true,
+        linkedCount: typeof res.data.linkedCount === "number" ? res.data.linkedCount : 0,
+      });
+    } catch (err) {
+      setLoadingModal(null);
+      // 증표를 쓸 수 없으면(만료·이미 씀) 번호 확인부터 다시
+      if (err instanceof FirebaseError && /번호 확인을 다시/.test(err.message)) {
+        setPhoneCheck(null);
       }
-      if (loginIdStatus !== "available") {
-        setError("사용 가능한 로그인 ID를 입력해 주세요.");
-        return;
-      }
-      if (!password) {
-        setError("비밀번호를 입력해 주세요.");
-        return;
-      }
-      if (password.length < 6) {
-        setError("비밀번호는 6자 이상이어야 합니다.");
-        return;
-      }
-      if (password !== password2) {
-        setError("비밀번호가 서로 일치하지 않습니다.");
-        return;
-      }
-      if (!agree) {
-        setError("서비스 이용에 동의해 주세요.");
-        return;
-      }
-      try {
-        setLoadingModal({
-          title: "1단계 · 학부모 계정 생성 중",
-          description: "로그인 ID와 계정 정보를 안전하게 등록하고 있어요.",
-        });
-        await ensureSignupAppCheck();
-        const fn = httpsCallable(getFirebaseFunctions(), "registerParentSelfSignup");
-        const res = await fn({
-          token,
-          loginId: normalizeParentLoginId(loginId),
-          displayName: displayName.trim(),
-          contactEmail: em,
-          phone: formatKrPhoneInput(phone),
-          password,
-          agreeTerms: true,
-        });
-        const data = res.data as { loginId?: string };
-        setLoadingModal(null);
-        setDoneLoginId(data.loginId ?? normalizeParentLoginId(loginId));
-        setSignupCompleteOpen(true);
-      } catch (err) {
-        setLoadingModal(null);
-        setError(signupErrorMessage(err, "가입에 실패했습니다."));
-      }
-    },
-    [token, agree, contactEmail, displayName, loginId, loginIdStatus, password, password2, phone],
-  );
+      setError(signupErrorMessage(err, "가입에 실패했습니다."));
+    }
+  };
 
   if (!isFirebaseConfigured()) {
     return <p className="text-sm text-neutral-600">Firebase 설정이 필요합니다.</p>;
   }
+
+  const ready = !loadErr && token && academyName !== null;
 
   return (
     <>
@@ -375,17 +349,6 @@ function ParentJoinForm() {
         open={loadingModal !== null}
         title={loadingModal?.title ?? ""}
         description={loadingModal?.description}
-      />
-      <SignupCompleteModal
-        open={signupCompleteOpen}
-        title="회원가입 완료!"
-        description="회원님의 이메일 주소로 인증 코드를 발송했어요! 다음 로그인 시 인증 코드를 입력해 주세요. 학원 승인 후 자녀가 연결됩니다."
-        onConfirmAction={() => {
-          setSignupCompleteOpen(false);
-          const id = doneLoginId ?? normalizeParentLoginId(loginId);
-          const q = id ? `?loginId=${encodeURIComponent(id)}` : "";
-          router.replace(`/login/parent${q}`);
-        }}
       />
 
       {loadErr ? (
@@ -397,14 +360,14 @@ function ParentJoinForm() {
         </div>
       ) : null}
 
-      {!loadErr && token && academyName !== null && doneLoginId ? (
-        <div className="space-y-4 text-center">
+      {ready && done ? (
+        <div className="space-y-4 text-center" data-signup-done>
           <p className="text-lg font-semibold text-emerald-800">가입이 완료되었습니다</p>
           <p className="text-sm text-neutral-600">
             다음부터 로그인할 때 사용할 <strong>로그인 ID</strong>입니다. 꼭 메모해 두세요.
           </p>
           <div className="flex items-center gap-2 rounded-xl bg-white/60 px-3 py-3 ring-1 ring-black/5">
-            <p className="min-w-0 flex-1 break-all text-left font-mono text-sm">{doneLoginId}</p>
+            <p className="min-w-0 flex-1 break-all text-left font-mono text-sm">{done.loginId}</p>
             <button
               type="button"
               onClick={() => void onCopyLoginId()}
@@ -414,120 +377,53 @@ function ParentJoinForm() {
               <ClipboardIcon />
             </button>
           </div>
-          {copied ? (
-            <p className="text-xs text-emerald-600">클립보드에 복사했습니다.</p>
-          ) : null}
-          <p className="break-keep text-xs leading-relaxed text-neutral-500">
-            학원 승인 후 자녀가 연결됩니다. 연결 전에는 학부모 홈에 연결 대기 안내가 보입니다.
+          {copied ? <p className="text-xs text-emerald-600">클립보드에 복사했습니다.</p> : null}
+          <p className="break-keep text-xs leading-relaxed text-neutral-500" data-signup-done-message>
+            {parentSignupDoneMessage(done)}
           </p>
-          <button
-            type="button"
-            onClick={() => router.replace("/parent")}
-            className="w-full rounded-2xl bg-[#222] py-3.5 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-950"
-          >
-            학부모 홈으로
-          </button>
+          {done.method === "google" ? (
+            <button type="button" onClick={() => router.replace("/parent")} className={primaryBtn}>
+              학부모 홈으로
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => router.replace(`/login/parent?loginId=${encodeURIComponent(done.loginId)}`)}
+              className={primaryBtn}
+            >
+              로그인하러 가기
+            </button>
+          )}
         </div>
       ) : null}
 
-      {!loadErr && token && academyName !== null && !doneLoginId && signupStep === "google_profile" ? (
-        <form className="space-y-4" onSubmit={(e) => void onGoogleComplete(e)} noValidate>
+      {ready && !done && step === "profile" ? (
+        <form className="space-y-4" onSubmit={onProfileNext} noValidate data-signup-step="profile">
           <p className="text-center text-sm text-neutral-600">
-            <span className="font-medium text-foreground">{academyName}</span> · Google 가입
-          </p>
-          <p className="text-center text-xs text-neutral-500">
-            로그인 ID는 Google 이메일 주소로 자동 설정됩니다.
+            <span className="font-medium text-foreground">{academyName}</span>{" "}
+            {method === "google" ? "· Google 가입" : "학부모 회원 가입"}
           </p>
           {error ? (
-            <p className="rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-800" role="alert">
+            <p className="break-keep rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-800" role="alert">
               {error}
             </p>
           ) : null}
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-neutral-600" htmlFor="pj-google-login">
-              로그인 ID (Google 이메일)
-            </label>
-            <input
-              id="pj-google-login"
-              className={`${inputClass} bg-neutral-100/80 dark:bg-white/5`}
-              value={googleLoginId}
-              readOnly
-              disabled
-            />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-neutral-600" htmlFor="pj-g-name">
-              이름 <span className="text-red-600">*</span>
-            </label>
-            <input
-              id="pj-g-name"
-              className={inputClass}
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              maxLength={60}
-              autoComplete="name"
-              required
-              disabled={loadingModal !== null}
-            />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-neutral-600" htmlFor="pj-g-phone">
-              휴대폰 번호 <span className="text-red-600">*</span>
-            </label>
-            <input
-              id="pj-g-phone"
-              type="tel"
-              className={inputClass}
-              value={phone}
-              onChange={(e) => setPhone(formatKrPhoneInput(e.target.value))}
-              maxLength={KR_PHONE_INPUT_MAX_LENGTH}
-              autoComplete="tel"
-              inputMode="numeric"
-              required
-              disabled={loadingModal !== null}
-              placeholder="010-1234-5678"
-            />
-          </div>
-          <label className="flex items-start gap-2 text-xs text-neutral-600">
-            <input
-              type="checkbox"
-              checked={agree}
-              onChange={(e) => setAgree(e.target.checked)}
-              className="mt-0.5"
-              disabled={loadingModal !== null}
-            />
-            <span>attn. 학부모 서비스 이용 및 개인정보 처리에 동의합니다. (필수)</span>
-          </label>
-          <button
-            type="submit"
-            disabled={loadingModal !== null}
-            className="w-full rounded-2xl bg-[#222] py-3.5 text-[15px] font-medium text-white disabled:opacity-60 dark:bg-neutral-100 dark:text-neutral-950"
-          >
-            가입 완료
-          </button>
-          <button
-            type="button"
-            disabled={loadingModal !== null}
-            onClick={() => void onGoogleProfileBack()}
-            className="w-full rounded-2xl border border-neutral-300/70 py-3 text-sm font-medium text-neutral-700"
-          >
-            다른 방식으로 가입
-          </button>
-        </form>
-      ) : null}
-
-      {!loadErr && token && academyName !== null && !doneLoginId && signupStep === "form" ? (
-        <form className="space-y-4" onSubmit={(e) => void onSubmit(e)} noValidate>
-          <p className="text-center text-sm text-neutral-600">
-            <span className="font-medium text-foreground">{academyName}</span> 학부모 회원 가입
-          </p>
-          {error ? (
-            <p className="rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-800" role="alert">
-              {error}
-            </p>
+          {method === "google" ? (
+            <div>
+              <label className={labelClass} htmlFor="pj-google-login">
+                로그인 ID (Google 이메일)
+              </label>
+              <input
+                id="pj-google-login"
+                className={`${inputClass} bg-neutral-100/80 dark:bg-white/5`}
+                value={googleLoginId}
+                readOnly
+                disabled
+              />
+            </div>
           ) : null}
           <div>
-            <label className="mb-1.5 block text-xs font-medium text-neutral-600" htmlFor="pj-name">
+            <label className={labelClass} htmlFor="pj-name">
               이름 <span className="text-red-600">*</span>
             </label>
             <input
@@ -538,30 +434,11 @@ function ParentJoinForm() {
               maxLength={60}
               autoComplete="name"
               required
-              disabled={loadingModal !== null}
+              disabled={busy}
             />
           </div>
           <div>
-            <label className="mb-1.5 block text-xs font-medium text-neutral-600" htmlFor="pj-email">
-              이메일 <span className="text-red-600">*</span>
-            </label>
-            <input
-              id="pj-email"
-              type="email"
-              className={inputClass}
-              value={contactEmail}
-              onChange={(e) => setContactEmail(e.target.value)}
-              autoComplete="email"
-              required
-              disabled={loadingModal !== null}
-              placeholder="name@example.com"
-            />
-            <p className="mt-1 text-[11px] text-neutral-500">
-              가입 확인용 인증 코드가 발송됩니다.
-            </p>
-          </div>
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-neutral-600" htmlFor="pj-phone">
+            <label className={labelClass} htmlFor="pj-phone">
               휴대폰 번호 <span className="text-red-600">*</span>
             </label>
             <input
@@ -574,131 +451,181 @@ function ParentJoinForm() {
               autoComplete="tel"
               inputMode="numeric"
               required
-              disabled={loadingModal !== null}
+              disabled={busy}
               placeholder="010-1234-5678"
             />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-neutral-600" htmlFor="pj-login-id">
-              로그인 ID <span className="text-red-600">*</span>
-            </label>
-            <div className="relative">
-              <input
-                id="pj-login-id"
-                className={`${inputClass} ${loginIdStatus === "checking" ? "pr-11" : ""}`}
-                value={loginId}
-                onChange={(e) => setLoginId(e.target.value.toLowerCase())}
-                maxLength={20}
-                autoComplete="username"
-                autoCapitalize="none"
-                spellCheck={false}
-                required
-                disabled={loadingModal !== null}
-                placeholder="예: kim_mom"
-                aria-busy={loginIdStatus === "checking"}
-              />
-              {loginIdStatus === "checking" ? (
-                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">
-                  <InlineSpinner className="h-5 w-5" />
-                </span>
-              ) : null}
-            </div>
-            <p className="mt-1 text-[11px] text-neutral-500">
-              영문 소문자·숫자·밑줄(_), 4~20자. 전 서비스에서 유일해야 합니다.
+            <p className="mt-1 break-keep text-[11px] text-neutral-500">
+              학원에 등록된 보호자 번호와 같으면 문자 확인 뒤 자녀와 바로 연결돼요.
             </p>
-            {loginIdMessage ? (
-              <p
-                className={`mt-1 flex items-center gap-2 text-xs ${
-                  loginIdStatus === "available"
-                    ? "text-emerald-600"
-                    : loginIdStatus === "checking"
-                      ? "text-neutral-500"
-                      : "text-red-600"
-                }`}
+          </div>
+          <button type="submit" disabled={busy || googleBusy} className={primaryBtn}>
+            다음
+          </button>
+
+          {method === "google" ? (
+            <button type="button" disabled={busy} onClick={() => void onGoogleCancel()} className={secondaryBtn}>
+              다른 방식으로 가입
+            </button>
+          ) : (
+            <>
+              <div className="flex items-center gap-3 py-1">
+                <span className="h-px flex-1 bg-neutral-200 dark:bg-white/10" />
+                <span className="shrink-0 text-[11px] text-neutral-500">또는</span>
+                <span className="h-px flex-1 bg-neutral-200 dark:bg-white/10" />
+              </div>
+              <button
+                type="button"
+                disabled={busy || googleBusy}
+                onClick={() => void onGoogleSignup()}
+                className="flex w-full items-center justify-center gap-3 rounded-2xl border border-neutral-300/70 bg-white/60 py-3.5 text-[15px] font-medium text-foreground shadow-sm transition hover:bg-white/85 active:scale-[0.99] disabled:opacity-50 dark:border-white/12 dark:bg-white/10"
               >
-                {loginIdStatus === "checking" ? <InlineSpinner className="h-3.5 w-3.5" /> : null}
-                <span>{loginIdMessage}</span>
+                <GoogleMark />
+                Google로 학부모 가입
+              </button>
+              <p className="text-center text-xs text-neutral-500">
+                Google 가입 시 로그인 ID는 Gmail 주소가 됩니다.
               </p>
-            ) : null}
-          </div>
-          <PasswordInput
-            id="pj-pw"
-            label={
-              <>
-                비밀번호 <span className="text-red-600">*</span>
-              </>
-            }
-            value={password}
-            onChangeAction={setPassword}
-            visible={showPassword}
-            onToggleVisibleAction={() => setShowPassword((v) => !v)}
-            inputClassName={inputClass}
-            disabled={loadingModal !== null}
-            required
-            minLength={6}
-          />
-          <PasswordInput
-            id="pj-pw2"
-            label={
-              <>
-                비밀번호 확인 <span className="text-red-600">*</span>
-              </>
-            }
-            value={password2}
-            onChangeAction={setPassword2}
-            onBlurAction={() => setConfirmBlurred(true)}
-            visible={showPassword2}
-            onToggleVisibleAction={() => setShowPassword2((v) => !v)}
-            confirmHint={passwordConfirmHint}
-            inputClassName={inputClass}
-            disabled={loadingModal !== null}
-            required
-            minLength={6}
-          />
-          <label className="flex items-start gap-2 text-xs text-neutral-600">
-            <input
-              type="checkbox"
-              checked={agree}
-              onChange={(e) => setAgree(e.target.checked)}
-              className="mt-0.5"
-              disabled={loadingModal !== null}
-            />
-            <span>attn. 학부모 서비스 이용 및 개인정보 처리에 동의합니다. (필수)</span>
-          </label>
-          <button
-            type="submit"
-            disabled={loadingModal !== null || googleBusy}
-            className="w-full rounded-2xl bg-[#222] py-3.5 text-[15px] font-medium text-white disabled:opacity-60 dark:bg-neutral-100 dark:text-neutral-950"
-          >
-            가입하기
-          </button>
-
-          <div className="flex items-center gap-3 py-1">
-            <span className="h-px flex-1 bg-neutral-200 dark:bg-white/10" />
-            <span className="shrink-0 text-[11px] text-neutral-500">또는</span>
-            <span className="h-px flex-1 bg-neutral-200 dark:bg-white/10" />
-          </div>
-
-          <button
-            type="button"
-            disabled={loadingModal !== null || googleBusy}
-            onClick={() => void onGoogleSignup()}
-            className="flex w-full items-center justify-center gap-3 rounded-2xl border border-neutral-300/70 bg-white/60 py-3.5 text-[15px] font-medium text-foreground shadow-sm transition hover:bg-white/85 active:scale-[0.99] disabled:opacity-50 dark:border-white/12 dark:bg-white/10"
-          >
-            <GoogleMark />
-            Google로 학부모 가입
-          </button>
-
-          <p className="text-center text-xs text-neutral-500">
-            Google 가입 시 로그인 ID는 Gmail 주소가 됩니다. 이름·전화번호는 Google 로그인 후
-            입력합니다.
-          </p>
+            </>
+          )}
           <p className="text-center text-xs text-neutral-500">
             이미 계정이 있으신가요?{" "}
             <Link href="/login/parent" className="text-[#4a90e2] underline">
               로그인
             </Link>
           </p>
+        </form>
+      ) : null}
+
+      {ready && !done && step === "verify" ? (
+        <div data-signup-step="verify">
+          <PhoneVerificationStep
+            purpose="parent_signup"
+            token={token}
+            phone={formatKrPhoneInput(phone)}
+            allowSkip
+            skipNote={PARENT_SKIP_NOTE}
+            onVerifiedAction={(proof) => {
+              setPhoneCheck({ phone: formatKrPhoneInput(phone), proof });
+              setStep("finish");
+            }}
+            onSkipAction={() => {
+              setPhoneCheck({ phone: formatKrPhoneInput(phone), proof: null });
+              setStep("finish");
+            }}
+            onEditPhoneAction={() => setStep("profile")}
+          />
+        </div>
+      ) : null}
+
+      {ready && !done && step === "finish" ? (
+        <form className="space-y-4" onSubmit={(e) => void onFinish(e)} noValidate data-signup-step="finish">
+          <p className="text-center text-sm text-neutral-600">
+            <span className="font-medium text-foreground">{academyName}</span>{" "}
+            {method === "google" ? "· Google 가입" : "학부모 회원 가입"}
+          </p>
+          <p
+            className={`break-keep rounded-xl px-3 py-2 text-center text-xs ${
+              phoneCheck?.proof ? "bg-emerald-50 text-emerald-800" : "bg-neutral-100 text-neutral-600"
+            }`}
+            data-phone-verified={phoneCheck?.proof ? "yes" : "no"}
+          >
+            {phoneCheck?.proof
+              ? `${phoneCheck.phone} · 번호 확인됨`
+              : `${phoneCheck?.phone ?? ""} · 번호 확인 없이 가입(학원 확인 뒤 연결)`}
+          </p>
+          {error ? (
+            <p className="break-keep rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-800" role="alert">
+              {error}
+            </p>
+          ) : null}
+          {method === "password" ? (
+            <>
+              <div>
+                <label className={labelClass} htmlFor="pj-login-id">
+                  로그인 ID <span className="text-red-600">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    id="pj-login-id"
+                    className={`${inputClass} ${loginIdStatus === "checking" ? "pr-11" : ""}`}
+                    value={loginId}
+                    onChange={(e) => setLoginId(e.target.value.toLowerCase())}
+                    maxLength={20}
+                    autoComplete="username"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    required
+                    disabled={busy}
+                    placeholder="예: kim_mom"
+                    aria-busy={loginIdStatus === "checking"}
+                  />
+                  {loginIdStatus === "checking" ? (
+                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">
+                      <InlineSpinner className="h-5 w-5" />
+                    </span>
+                  ) : null}
+                </div>
+                <p className="mt-1 text-[11px] text-neutral-500">
+                  영문 소문자·숫자·밑줄(_), 4~20자. 전 서비스에서 유일해야 합니다.
+                </p>
+                {loginIdMessage ? (
+                  <p
+                    className={`mt-1 flex items-center gap-2 text-xs ${
+                      loginIdStatus === "available"
+                        ? "text-emerald-600"
+                        : loginIdStatus === "checking"
+                          ? "text-neutral-500"
+                          : "text-red-600"
+                    }`}
+                  >
+                    {loginIdStatus === "checking" ? <InlineSpinner className="h-3.5 w-3.5" /> : null}
+                    <span>{loginIdMessage}</span>
+                  </p>
+                ) : null}
+              </div>
+              <PasswordInput
+                id="pj-pw"
+                label={
+                  <>
+                    비밀번호 <span className="text-red-600">*</span>
+                  </>
+                }
+                value={password}
+                onChangeAction={setPassword}
+                visible={showPassword}
+                onToggleVisibleAction={() => setShowPassword((v) => !v)}
+                inputClassName={inputClass}
+                disabled={busy}
+                required
+                minLength={6}
+              />
+              <PasswordInput
+                id="pj-pw2"
+                label={
+                  <>
+                    비밀번호 확인 <span className="text-red-600">*</span>
+                  </>
+                }
+                value={password2}
+                onChangeAction={setPassword2}
+                onBlurAction={() => setConfirmBlurred(true)}
+                visible={showPassword2}
+                onToggleVisibleAction={() => setShowPassword2((v) => !v)}
+                confirmHint={passwordConfirmHint}
+                inputClassName={inputClass}
+                disabled={busy}
+                required
+                minLength={6}
+              />
+            </>
+          ) : null}
+          <ConsentChecklist audience="parent" value={consent} onChangeAction={setConsent} disabled={busy} />
+          <button type="submit" disabled={busy} className={primaryBtn}>
+            {method === "google" ? "가입 완료" : "가입하기"}
+          </button>
+          <button type="button" disabled={busy} onClick={() => setStep("profile")} className={secondaryBtn}>
+            이름·번호 고치기
+          </button>
         </form>
       ) : null}
     </>

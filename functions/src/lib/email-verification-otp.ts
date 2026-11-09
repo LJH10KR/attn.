@@ -4,30 +4,13 @@ import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import * as nodemailer from "nodemailer";
-import { parentStatusFromLinks, readLinkedStudentIdsInTx } from "./parent-links";
 
-export type EmailVerificationPurpose = "owner" | "parent";
+/** 원장 가입 이메일 인증만(2-L — 학부모 이메일 인증은 휴대폰 번호 확인으로 대체돼 없어짐) */
+export type EmailVerificationPurpose = "owner";
 
 const OTP_TTL_MS = 15 * 60 * 1000;
 const MAX_ATTEMPTS = 5;
 const RESEND_COOLDOWN_MS = 60 * 1000;
-
-const EMAIL_RE = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i;
-
-export function normalizeContactEmail(raw: string): string {
-  return raw.trim().toLowerCase();
-}
-
-export function assertContactEmail(raw: unknown): string {
-  if (typeof raw !== "string" || !raw.trim()) {
-    throw new HttpsError("invalid-argument", "이메일을 입력해 주세요.");
-  }
-  const email = normalizeContactEmail(raw);
-  if (!EMAIL_RE.test(email)) {
-    throw new HttpsError("invalid-argument", "이메일 형식을 확인해 주세요.");
-  }
-  return email;
-}
 
 function otpDocPath(uid: string): string {
   return `emailVerificationOtps/${uid}`;
@@ -57,7 +40,7 @@ async function sendOtpEmail(params: {
   const pass = process.env.SMTP_PASS?.trim();
   const from = process.env.SMTP_FROM?.trim() || user;
 
-  const roleLabel = params.purpose === "owner" ? "오너" : "학부모";
+  const roleLabel = "오너";
   const body = [
     `${params.displayName || "회원"}님, 안녕하세요.`,
     "",
@@ -182,56 +165,15 @@ export async function verifyEmailVerificationOtpForUid(params: {
     throw new HttpsError("permission-denied", "인증 코드가 올바르지 않습니다.");
   }
 
-  if (params.purpose === "owner") {
-    await admin.auth().updateUser(params.uid, { emailVerified: true });
-    await db.doc(`users/${params.uid}`).set(
-      {
-        emailVerified: true,
-        ownerOnboardedAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
-  } else {
-    const parentSnaps = await db
-      .collectionGroup("parents")
-      .where("authUid", "==", params.uid)
-      .where("status", "==", "pending_email_verification")
-      .limit(5)
-      .get();
-
-    if (parentSnaps.empty) {
-      throw new HttpsError("failed-precondition", "이메일 인증이 필요한 학부모 계정을 찾을 수 없습니다.");
-    }
-
-    const memberDoc = parentSnaps.docs[0]!;
-    const academyId = memberDoc.ref.parent.parent?.id;
-    if (!academyId) {
-      throw new HttpsError("failed-precondition", "학원 정보를 찾을 수 없습니다.");
-    }
-    // 인증을 마치면 연결 수로 — 0명이면 승인 대기, 그 사이 학원이 연결했으면 사용 중
-    const status = await db.runTransaction(async (tx) => {
-      const snap = await tx.get(memberDoc.ref);
-      if (snap.get("status") !== "pending_email_verification") {
-        throw new HttpsError("failed-precondition", "이메일 인증이 필요한 학부모 계정을 찾을 수 없습니다.");
-      }
-      const linkedStudentIds = await readLinkedStudentIdsInTx(tx, db, academyId, memberDoc.id);
-      const next = parentStatusFromLinks(linkedStudentIds.length);
-      tx.update(memberDoc.ref, {
-        status: next,
-        contactEmailVerified: true,
-        linkedStudentIds,
-        ...(next === "active" ? { activatedAt: FieldValue.serverTimestamp() } : {}),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-      return next;
-    });
-    await admin.auth().setCustomUserClaims(params.uid, {
-      role: "parent",
-      academyId,
-      membershipStatus: status,
-    });
-  }
+  await admin.auth().updateUser(params.uid, { emailVerified: true });
+  await db.doc(`users/${params.uid}`).set(
+    {
+      emailVerified: true,
+      ownerOnboardedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
 
   await ref.delete();
 }

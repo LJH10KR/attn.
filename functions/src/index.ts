@@ -139,7 +139,8 @@ export {
   registerStaffSignup,
   setStaffSignupRole,
 } from "./staff-signup";
-export { getSignupLink, regenerateSignupLink, setSignupLinkEnabled } from "./signup-links";
+export { getSignupLink, regenerateSignupLink, setParentAutoLink, setSignupLinkEnabled } from "./signup-links";
+export { declineParentChildLink } from "./parent-self-service";
 export {
   assignStaffRole,
   deleteAcademyRole,
@@ -179,6 +180,8 @@ export {
   setStudentCheckInPin,
 } from "./kiosk";
 export { sendOwnerSignupVerificationEmail } from "./owner-auth-mail";
+export { startPhoneVerification, checkPhoneVerification } from "./phone-verification";
+export { getOwnerConsentState, recordOwnerConsent } from "./legal-consent";
 export { issueEmailVerificationOtp, verifyEmailVerificationOtp } from "./email-verification-otp";
 export { createAcademyEasy } from "./academy-provision";
 export {

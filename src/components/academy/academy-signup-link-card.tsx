@@ -5,6 +5,7 @@ import { httpsCallable } from "firebase/functions";
 import { QRCodeCanvas } from "qrcode.react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ModalPortal } from "@/components/ui/modal-portal";
+import { SlideSwitch } from "@/components/ui/slide-switch";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { getPublicAppOrigin } from "@/lib/firebase/config";
 
@@ -21,7 +22,7 @@ const TEXT: Record<
 > = {
   parent: {
     title: "학부모 가입 QR",
-    hint: "이 QR·링크로만 가입할 수 있어요. 가입하면 승인 대기로 들어오고, 학원이 연결하면 자녀가 보입니다.",
+    hint: "이 QR·링크로만 가입할 수 있어요. 가입할 때 문자로 번호를 확인하고 학원에 등록된 보호자 번호와 같으면 자녀와 바로 연결돼요. 아니면 승인 대기로 들어옵니다.",
     shareTitle: "학부모 회원 가입",
     shareText: "학원 학부모 앱 가입 링크입니다.",
     fileName: "학부모-가입-QR.png",
@@ -38,6 +39,7 @@ const TEXT: Record<
 };
 
 type LinkState = { token: string; enabled: boolean };
+type LinkResponse = LinkState & { autoLinkVerifiedParents?: boolean };
 type Confirm = "regenerate" | "disable";
 
 function errMsg(err: unknown, fallback: string): string {
@@ -49,9 +51,21 @@ function errMsg(err: unknown, fallback: string): string {
  * 링크에는 학원 ID가 아닌 무작위 토큰만 들어가고(서버가 처음 볼 때 만듦), 권한 있는 사람만 토큰을 받는다.
  * 공유창·링크 복사·QR(기기 안에서 그림, `<img>`로 보여 길게 눌러 저장)·이미지 저장, [다시 만들기]·[가입 받기 끄기/켜기].
  */
-export function AcademySignupLinkCard({ academyId, kind }: { academyId: string; kind: SignupLinkKind }) {
+export function AcademySignupLinkCard({
+  academyId,
+  kind,
+  showAutoLinkSetting = false,
+}: {
+  academyId: string;
+  kind: SignupLinkKind;
+  /** 학부모 관리 화면 — 학원 설정 "번호 확인된 학부모 자동 연결"(2-L) 스위치를 카드 아래에 보임 */
+  showAutoLinkSetting?: boolean;
+}) {
   const text = TEXT[kind];
   const [link, setLink] = useState<LinkState | null>(null);
+  const [autoLink, setAutoLink] = useState<boolean | null>(null);
+  const [autoLinkBusy, setAutoLinkBusy] = useState(false);
+  const [autoLinkError, setAutoLinkError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [showLink, setShowLink] = useState(false);
@@ -68,8 +82,9 @@ export function AcademySignupLinkCard({ academyId, kind }: { academyId: string; 
   const callLink = useCallback(
     async (fn: "getSignupLink" | "regenerateSignupLink" | "setSignupLinkEnabled", extra: Record<string, unknown> = {}) => {
       const res = await httpsCallable(getFirebaseFunctions(), fn)({ academyId, kind, ...extra });
-      const data = res.data as LinkState;
+      const data = res.data as LinkResponse;
       setLink({ token: data.token, enabled: data.enabled });
+      if (typeof data.autoLinkVerifiedParents === "boolean") setAutoLink(data.autoLinkVerifiedParents);
     },
     [academyId, kind],
   );
@@ -189,6 +204,19 @@ export function AcademySignupLinkCard({ academyId, kind }: { academyId: string; 
         "가입 받기를 끄지 못했습니다.",
       );
       if (ok) setConfirm(null);
+    }
+  };
+
+  const changeAutoLink = async (next: boolean) => {
+    setAutoLinkBusy(true);
+    setAutoLinkError(null);
+    try {
+      const res = await httpsCallable(getFirebaseFunctions(), "setParentAutoLink")({ academyId, enabled: next });
+      setAutoLink((res.data as { autoLinkVerifiedParents: boolean }).autoLinkVerifiedParents);
+    } catch (e) {
+      setAutoLinkError(errMsg(e, "설정을 바꾸지 못했습니다."));
+    } finally {
+      setAutoLinkBusy(false);
     }
   };
 
@@ -319,6 +347,31 @@ export function AcademySignupLinkCard({ academyId, kind }: { academyId: string; 
             <p className="break-keep text-[11px] text-red-700" role="alert">
               {actionError}
             </p>
+          ) : null}
+          {showAutoLinkSetting && kind === "parent" && autoLink !== null ? (
+            <div className="border-t border-neutral-200/70 pt-3" data-auto-link-setting>
+              <div className="flex items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold text-foreground">번호 확인된 학부모 자동 연결</p>
+                  <p className="break-keep text-[11px] text-neutral-500">
+                    {autoLink
+                      ? "문자로 번호를 확인한 학부모를 보호자 번호가 같은 원생과 바로 연결하고 알림을 보내요."
+                      : "꺼져 있어요. 번호가 확인돼도 승인 대기로 들어오고, 승인 화면에 일치 원생이 보여요."}
+                  </p>
+                </div>
+                <SlideSwitch
+                  checked={autoLink}
+                  disabled={autoLinkBusy}
+                  onCheckedChangeAction={(v) => void changeAutoLink(v)}
+                  ariaLabel="번호 확인된 학부모 자동 연결"
+                />
+              </div>
+              {autoLinkError ? (
+                <p className="mt-1 break-keep text-[11px] text-red-700" role="alert">
+                  {autoLinkError}
+                </p>
+              ) : null}
+            </div>
           ) : null}
         </>
       )}

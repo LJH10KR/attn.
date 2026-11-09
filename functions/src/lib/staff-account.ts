@@ -1,5 +1,5 @@
 import * as admin from "firebase-admin";
-import { FieldValue, type DocumentReference } from "firebase-admin/firestore";
+import { FieldValue, type DocumentReference, type Transaction } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { academySeqMetaPath, attnLoginIndexPath, formatTeacherAttnId } from "./attn-id";
@@ -82,8 +82,13 @@ export async function provisionStaffAccount(params: {
   status: "pending_setup" | "pending_registration";
   /** 공용 링크 가입 — 가입할 때 적은 번호와 가입 경로 */
   signup?: { phone: string; signupSource: "staff_link" };
+  /**
+   * 계정 문서 쓰기 트랜잭션에 함께 넣을 일(2-L — 번호 확인 증표 소비·동의 기록).
+   * 읽기 단계에서 불리며, 돌려준 `fields`는 계정 문서에 더하고 `write`는 쓰기 단계에서 부른다.
+   */
+  inTx?: (tx: Transaction, authUid: string) => Promise<{ fields?: Record<string, unknown>; write?: () => void }>;
 }): Promise<ProvisionedStaffAccount> {
-  const { db, academyId, hrRef, displayName, roleId, permissions, mode, status, signup } = params;
+  const { db, academyId, hrRef, displayName, roleId, permissions, mode, status, signup, inTx } = params;
 
   const loginId =
     mode.kind === "temp"
@@ -118,63 +123,70 @@ export async function provisionStaffAccount(params: {
   }
 
   try {
-    const hrSnap = hrRef ? await hrRef.get() : null;
-    const hr: Record<string, unknown> = {};
-    if (hrSnap?.exists) {
-      for (const k of HR_FIELDS) {
-        const v = hrSnap.get(k);
-        if (v !== undefined) hr[k] = v;
-      }
-    }
-
+    const secretFields = {
+      ...(mode.kind === "temp" ? await tempPasswordSecretFields(tempPassword!) : {}),
+      ...(mode.kind === "password" ? await passwordSecretFields(mode.password) : {}),
+    };
     const memberRef = db.doc(`academies/${academyId}/staff/${authUid}`);
-    const batch = db.batch();
-    batch.set(memberRef, {
-      employmentStatus: "employed",
-      createdAt: FieldValue.serverTimestamp(),
-      ...hr,
-      ...(signup ? { phone: signup.phone, signupSource: signup.signupSource } : {}),
-      displayName,
-      attnId,
-      ...(loginId ? { loginId } : {}),
-      email: mode.kind === "google" ? mode.email : "",
-      academyId,
-      status,
-      authUid,
-      isGuest: false,
-      roleId,
-      permissions,
-      authProvider: mode.kind === "google" ? "google" : "password",
-      ...(mode.kind === "google" ? { googleLinked: true, googleEmail: mode.email } : {}),
-      ...(status === "pending_registration"
-        ? { onboardingCompleteAt: FieldValue.serverTimestamp() }
-        : {}),
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-    batch.set(
-      memberRef.collection("secrets").doc("login"),
-      {
-        ...(mode.kind === "temp" ? await tempPasswordSecretFields(tempPassword!) : {}),
-        ...(mode.kind === "password" ? await passwordSecretFields(mode.password) : {}),
-        authProvider: mode.kind === "google" ? "google" : "password",
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
-    if (loginId) {
-      batch.set(db.doc(attnLoginIndexPath(loginId)), {
-        loginId,
-        attnId,
-        academyId,
-        authUid,
-        role: "teacher",
+    // 계정 문서·로그인 정보·색인·인사 문서 정리(+ 증표 소비)를 한 트랜잭션에서
+    await db.runTransaction(async (tx) => {
+      const extra = inTx ? await inTx(tx, authUid) : {};
+      const hrSnap = hrRef ? await tx.get(hrRef) : null;
+      const hr: Record<string, unknown> = {};
+      if (hrSnap?.exists) {
+        for (const k of HR_FIELDS) {
+          const v = hrSnap.get(k);
+          if (v !== undefined) hr[k] = v;
+        }
+      }
+
+      tx.set(memberRef, {
+        employmentStatus: "employed",
         createdAt: FieldValue.serverTimestamp(),
+        ...hr,
+        ...(signup ? { phone: signup.phone, signupSource: signup.signupSource } : {}),
+        displayName,
+        attnId,
+        ...(loginId ? { loginId } : {}),
+        email: mode.kind === "google" ? mode.email : "",
+        academyId,
+        status,
+        authUid,
+        isGuest: false,
+        roleId,
+        permissions,
+        authProvider: mode.kind === "google" ? "google" : "password",
+        ...(mode.kind === "google" ? { googleLinked: true, googleEmail: mode.email } : {}),
+        ...(status === "pending_registration"
+          ? { onboardingCompleteAt: FieldValue.serverTimestamp() }
+          : {}),
+        ...(extra.fields ?? {}),
+        updatedAt: FieldValue.serverTimestamp(),
       });
-    }
-    if (hrRef && hrRef.id !== authUid && hrSnap?.exists) {
-      batch.delete(hrRef);
-    }
-    await batch.commit();
+      tx.set(
+        memberRef.collection("secrets").doc("login"),
+        {
+          ...secretFields,
+          authProvider: mode.kind === "google" ? "google" : "password",
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      if (loginId) {
+        tx.set(db.doc(attnLoginIndexPath(loginId)), {
+          loginId,
+          attnId,
+          academyId,
+          authUid,
+          role: "teacher",
+          createdAt: FieldValue.serverTimestamp(),
+        });
+      }
+      if (hrRef && hrRef.id !== authUid && hrSnap?.exists) {
+        tx.delete(hrRef);
+      }
+      extra.write?.();
+    });
 
     await admin.auth().setCustomUserClaims(authUid, {
       role: "teacher",
