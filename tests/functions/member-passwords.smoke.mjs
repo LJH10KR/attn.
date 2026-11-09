@@ -16,6 +16,7 @@ import {
   signOut,
 } from "firebase/auth";
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from "firebase/functions";
+import { seedSignupToken } from "./_signup-token.mjs";
 
 const PROJECT = "demo-attn";
 initAdmin({ projectId: PROJECT });
@@ -24,6 +25,8 @@ const A = "o3_a1";
 
 const owner = await adminAuth().createUser({ email: "owner3@t.dev", password: "pass1234", emailVerified: true });
 await db.doc(`academies/${A}`).set({ ownerUid: owner.uid, name: "비밀번호 학원", status: "active" });
+const STAFF_TOKEN = await seedSignupToken(db, A, "staff");
+const PARENT_TOKEN = await seedSignupToken(db, A, "parent");
 
 const app = initializeApp({ projectId: PROJECT, apiKey: "fake" });
 const auth = getAuth(app);
@@ -48,13 +51,14 @@ async function loginTeacher(loginId, password) {
   return res;
 }
 
-// --- 초대 링크 가입: 본인 비밀번호는 해시로만 ---
+// --- 공용 직원 가입 링크 가입: 본인 비밀번호는 해시로만 ---
 await signInWithEmailAndPassword(auth, "owner3@t.dev", "pass1234");
 await call("listAcademyRoles", { academyId: A });
-const invite = await call("createStaffInvite", { academyId: A, displayName: "링크 가입자", roleId: "teacher" });
 await signOut(auth);
-const token = new URL(invite.url).searchParams.get("token");
-await call("acceptStaffInvite", { token, method: "password", loginId: "linkjoiner", password: "linkpass1" });
+await call("registerStaffSignup", {
+  token: STAFF_TOKEN, method: "password", displayName: "링크 가입자", phone: "010-3000-0001",
+  loginId: "linkjoiner", password: "linkpass1",
+});
 const linkUid = (await db.collection(`academies/${A}/staff`).where("loginId", "==", "linkjoiner").get()).docs[0].id;
 const linkSecret = await assertNoPlaintext(`academies/${A}/staff/${linkUid}/secrets/login`, "linkpass1");
 assert.equal(linkSecret.passwordHash.algo, "scrypt");
@@ -110,7 +114,7 @@ await signOut(auth);
 
 // --- 학부모 자가 가입 ---
 await call("registerParentSelfSignup", {
-  academyId: A, loginId: "parentself", displayName: "학부모", password: "parentpw1",
+  token: PARENT_TOKEN, loginId: "parentself", displayName: "학부모", password: "parentpw1",
   phone: "010-1111-2222", contactEmail: "p@t.dev", agreeTerms: true,
 });
 const parentUid = (await db.collection(`academies/${A}/parents`).where("loginId", "==", "parentself").get()).docs[0].id;

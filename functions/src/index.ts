@@ -1,6 +1,7 @@
 import {setGlobalOptions} from "firebase-functions";
 import {onCall, HttpsError} from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
+import {deleteAcademySignupLinks} from "./lib/signup-links";
 
 /**
  * `createCustomToken`용 IAM 서명 주체.
@@ -72,6 +73,9 @@ export const deleteOwnerAcademy = onCall(async (request) => {
     throw new HttpsError("permission-denied", "학원을 삭제할 권한이 없습니다.");
   }
 
+  // 가입 QR 링크(2-K) — 학원이 지워져도 남는 최상위 해시 문서까지 정리
+  await deleteAcademySignupLinks(db, academyId);
+
   const batch = db.batch();
   batch.delete(academyRef);
   batch.delete(db.doc(`academies/${academyId}/secrets/login`));
@@ -127,14 +131,15 @@ export {
 } from "./classes";
 export { deleteStaffMember, saveStaffMember } from "./staff";
 export { saveAcademyOptionList } from "./academy-options";
+export { createStaffAccounts } from "./staff-accounts";
 export {
-  acceptStaffInvite,
-  cancelStaffInvite,
-  checkStaffInviteLoginId,
-  createStaffAccounts,
-  createStaffInvite,
-  getStaffInviteInfo,
-} from "./staff-invites";
+  approveStaffSignupAsExisting,
+  checkStaffSignupLoginId,
+  getStaffSignupInfo,
+  registerStaffSignup,
+  setStaffSignupRole,
+} from "./staff-signup";
+export { getSignupLink, regenerateSignupLink, setSignupLinkEnabled } from "./signup-links";
 export {
   assignStaffRole,
   deleteAcademyRole,

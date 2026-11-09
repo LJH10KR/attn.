@@ -4,7 +4,7 @@ import { collection, getDocs } from "firebase/firestore";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
-import { AcademyParentSignupLink } from "@/components/academy/academy-parent-signup-link";
+import { AcademySignupLinkCard } from "@/components/academy/academy-signup-link-card";
 import { useAcademyShell } from "@/components/academy/academy-shell";
 import { GuardianDetailSheet } from "@/components/academy/parents/guardian-detail-sheet";
 import { ParentCreateSheet } from "@/components/academy/parents/parent-create-sheet";
@@ -350,7 +350,7 @@ export function AcademyParentsScreen() {
         </>
       ) : (
         <>
-          <AcademyParentSignupLink academyId={academyId} />
+          <AcademySignupLinkCard academyId={academyId} kind="parent" />
 
           <div className="flex items-center gap-2">
             <input

@@ -18,6 +18,7 @@ import {
   signOut,
 } from "firebase/auth";
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from "firebase/functions";
+import { seedSignupToken } from "./_signup-token.mjs";
 
 const PROJECT = "demo-attn";
 initAdmin({ projectId: PROJECT });
@@ -26,6 +27,8 @@ const A = "o5_a1";
 
 const owner = await adminAuth().createUser({ email: "owner5@t.dev", password: "pass1234", emailVerified: true });
 await db.doc(`academies/${A}`).set({ ownerUid: owner.uid, name: "보안 학원", status: "active" });
+const STAFF_TOKEN = await seedSignupToken(db, A, "staff");
+const PARENT_TOKEN = await seedSignupToken(db, A, "parent");
 
 const app = initializeApp({ projectId: PROJECT, apiKey: "fake" });
 const auth = getAuth(app);
@@ -94,19 +97,18 @@ await call("updateTeacherPassword", { currentPassword: "ownpass1", newPassword: 
 await signOut(auth);
 await assertNoDirectLogin("staff", acct.authUid, "ownpass2", "변경한 비밀번호");
 
-// 초대 링크 가입(본인이 정한 비밀번호)
-await asOwner();
-const invite = await call("createStaffInvite", { academyId: A, displayName: "링크 직원", roleId: "teacher" });
+// 공용 직원 가입 링크 가입(본인이 정한 비밀번호)
 await signOut(auth);
-await call("acceptStaffInvite", {
-  token: new URL(invite.url).searchParams.get("token"), method: "password", loginId: "linkhard", password: "linkpw12",
+await call("registerStaffSignup", {
+  token: STAFF_TOKEN, method: "password", displayName: "링크 직원", phone: "010-5000-0001",
+  loginId: "linkhard", password: "linkpw12",
 });
 const linkUid = (await db.collection(`academies/${A}/staff`).where("loginId", "==", "linkhard").get()).docs[0].id;
-await assertNoDirectLogin("staff", linkUid, "linkpw12", "초대 링크 가입 비밀번호");
+await assertNoDirectLogin("staff", linkUid, "linkpw12", "공용 링크 가입 비밀번호");
 
 // 학부모 자가 가입
 await call("registerParentSelfSignup", {
-  academyId: A, loginId: "parenthard", displayName: "학부모", password: "parentpw1",
+  token: PARENT_TOKEN, loginId: "parenthard", displayName: "학부모", password: "parentpw1",
   phone: "010-7777-8888", contactEmail: "p5@t.dev", agreeTerms: true,
 });
 const parentUid = (await db.collection(`academies/${A}/parents`).where("loginId", "==", "parenthard").get()).docs[0].id;
@@ -172,12 +174,12 @@ assert.equal(
   (await db.doc(`academies/${A}/staff/${leaver.authUid}/secrets/login`).get()).exists, false, "secrets 삭제",
 );
 await assert.rejects(call("signInTeacher", { loginId: leaver.loginId, password: "leaverpw1" }), /올바르지 않습니다/);
-// 남은 인사 기록은 재직으로 바꾸면 다시 초대 가능
+// 남은 인사 기록은 재직으로 바꾸면 다시 미리 등록 가능
 await call("saveStaffMember", {
   academyId: A, staffId: removed.keptStaffId, displayName: "퇴사 직원", phone: kept.phone,
   jobTitleId: null, hireDate: "2026-03-02", employmentStatus: "employed", memo: "복직",
 });
-await call("createStaffInvite", { academyId: A, staffId: removed.keptStaffId, roleId: "teacher" });
+await call("setStaffSignupRole", { academyId: A, staffId: removed.keptStaffId, roleId: "teacher" });
 
 // 첫 로그인 전 계정 삭제(초대 취소)는 전체 삭제
 const cancelRes = await call("deleteTeacherInvite", { academyId: A, teacherId: cancelled.authUid });

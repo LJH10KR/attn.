@@ -176,10 +176,8 @@ async function loadParentChildClasses(
   return out;
 }
 
-const enforceAppCheckOnParentState = process.env.ENFORCE_APP_CHECK === "1";
-
 export const getParentActivationState = onCall(
-  { cors: true, enforceAppCheck: enforceAppCheckOnParentState },
+  { cors: true },
   async (request) => {
     if (!request.auth?.uid) {
       throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
@@ -203,7 +201,7 @@ export const getParentActivationState = onCall(
  * 에뮬에서 evaluation error를 낼 수 있어 Admin 조회로 통일합니다.
  */
 export const listParentChildrenStudents = onCall(
-  { cors: true, enforceAppCheck: enforceAppCheckOnParentState },
+  { cors: true },
   async (request) => {
     if (!request.auth?.uid) {
       throw new HttpsError("unauthenticated", "로그인이 필요합니다.");

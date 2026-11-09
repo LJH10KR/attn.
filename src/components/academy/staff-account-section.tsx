@@ -9,13 +9,10 @@ import {
   withinViewerPermissions,
   type PermissionViewer,
 } from "@/lib/academy/role-policy";
-import {
-  staffAccountLabel,
-  staffHasPendingInvite,
-  type StaffRowVM,
-} from "@/lib/academy/staff-row";
+import { staffAccountLabel, type StaffRowVM } from "@/lib/academy/staff-row";
 import type { AcademyRoleVM } from "@/lib/academy/use-academy-roles";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { formatKrPhoneDisplay } from "@/lib/phone/kr-phone";
 
 type StaffAccountSectionProps = {
   academyId: string;
@@ -28,6 +25,8 @@ type StaffAccountSectionProps = {
   onChangedAction: (message: string) => void;
   /** 계정을 만들어 직원 문서가 옮겨졌거나 삭제됐을 때 — 시트를 닫아야 함 */
   onCloseSheetAction: (message: string) => void;
+  /** 가입 승인 대기 계정과 같은 번호로 미리 등록한 직원(멤버 화면이 계산, 2-K) */
+  signupMatches?: StaffRowVM[];
 };
 
 const btn =
@@ -42,16 +41,6 @@ function errMsg(err: unknown, fallback: string): string {
   return err instanceof FirebaseError && err.message ? err.message : fallback;
 }
 
-function formatExpiry(ms: number): string {
-  return new Date(ms).toLocaleString("ko-KR", {
-    timeZone: "Asia/Seoul",
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 type IssuedCredentials = {
   title: string;
   description: string;
@@ -63,8 +52,8 @@ type IssuedCredentials = {
 
 /**
  * 직원 계정 영역 — 직원 관리 시트와 멤버 초대/권한 관리 시트가 함께 씀.
- * 계정 없음: 초대 링크·계정 직접 만들기 / 승인 대기: 승인·거절 / 첫 로그인 전: 임시 비밀번호 재발급·삭제 /
- * 사용 중: 비밀번호 초기화·비활성 / 비활성: 다시 활성화·삭제, 계정이 있으면 역할 바꾸기.
+ * 계정 없음: 미리 등록(가입하면 줄 권한)·계정 직접 만들기 / 승인 대기: (번호 일치 후보면 이 직원으로 승인)·새 직원으로 승인·거절 /
+ * 첫 로그인 전: 임시 비밀번호 재발급·삭제 / 사용 중: 비밀번호 초기화·비활성 / 비활성: 다시 활성화·삭제, 계정이 있으면 역할 바꾸기.
  */
 export function StaffAccountSection({
   academyId,
@@ -73,8 +62,9 @@ export function StaffAccountSection({
   viewer,
   onChangedAction: notifyChanged,
   onCloseSheetAction,
+  signupMatches = [],
 }: StaffAccountSectionProps) {
-  const [inviteRoleId, setInviteRoleId] = useState(target.inviteRoleId ?? "teacher");
+  const [inviteRoleId, setInviteRoleId] = useState(target.signupRoleId ?? "teacher");
   const [nextRoleId, setNextRoleId] = useState(target.roleId ?? "");
   // 목록 새로고침으로 역할이 바뀌면 선택도 맞춤(시트는 열린 채라 다시 마운트되지 않음)
   const [syncedRoleId, setSyncedRoleId] = useState(target.roleId);
@@ -84,8 +74,6 @@ export function StaffAccountSection({
   }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [invite, setInvite] = useState<{ url: string; expiresAtMillis: number } | null>(null);
-  const [copied, setCopied] = useState(false);
   const [credentials, setCredentials] = useState<IssuedCredentials | null>(null);
   /** 시트 안에서도 결과가 보이게(목록 알림은 시트 뒤에 가려짐) */
   const [done, setDone] = useState<string | null>(null);
@@ -112,41 +100,31 @@ export function StaffAccountSection({
     }
   };
 
-  const createInvite = async () => {
-    const data = await call<{ url: string; expiresAtMillis: number }>(
-      "createStaffInvite",
-      { staffId: target.id, roleId: inviteRoleId },
-      "초대 링크를 만들지 못했습니다.",
-    );
+  const savePreRegistration = async (roleId: string | null) => {
+    const data = await call("setStaffSignupRole", { staffId: target.id, roleId }, "미리 등록을 저장하지 못했습니다.");
     if (data) {
-      setInvite(data);
-      setCopied(false);
-      onChangedAction(`${name} 님의 초대 링크를 만들었습니다.`);
+      const roleName = roles?.find((r) => r.id === roleId)?.name;
+      onChangedAction(
+        roleId ? `${name} 님을 미리 등록했습니다(권한 「${roleName ?? roleId}」).` : `${name} 님의 미리 등록을 해제했습니다.`,
+      );
     }
   };
 
-  const shareInvite = async () => {
-    if (!invite) return;
-    const text = `${name} 님, attn. 직원 초대 링크입니다. 링크에서 가입해 주세요.`;
-    if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
-      try {
-        await navigator.share({ title: "attn. 직원 초대", text, url: invite.url });
-      } catch {
-        /* 공유 취소 — 복사로 대체하지 않음 */
-      }
+  const approveAsExisting = async (hr: StaffRowVM) => {
+    const hrName = hr.displayName || "(이름 없음)";
+    if (
+      !window.confirm(
+        `${name} 님을 미리 등록한 ${hrName} 님으로 승인할까요? 직원 관리의 인사 정보와 권한이 이 계정에 합쳐지고 바로 이용할 수 있습니다.`,
+      )
+    ) {
       return;
     }
-    await navigator.clipboard.writeText(invite.url);
-    setCopied(true);
-  };
-
-  const cancelInvite = async () => {
-    if (!window.confirm("보낸 초대 링크를 취소할까요? 이미 보낸 링크로는 가입할 수 없게 됩니다.")) return;
-    const data = await call("cancelStaffInvite", { staffId: target.id }, "초대를 취소하지 못했습니다.");
-    if (data) {
-      setInvite(null);
-      onChangedAction(`${name} 님의 초대를 취소했습니다.`);
-    }
+    const data = await call(
+      "approveStaffSignupAsExisting",
+      { staffAuthUid: target.id, hrStaffId: hr.id },
+      "승인하지 못했습니다.",
+    );
+    if (data) onChangedAction(`${name} 님을 ${hrName} 님으로 승인했습니다.`);
   };
 
   const createAccount = async () => {
@@ -254,25 +232,31 @@ export function StaffAccountSection({
 
   const canManage = roles !== null && viewer !== null;
   const hasAccount = target.accountStatus !== "no_account";
-  const pendingInvite = staffHasPendingInvite(target);
   const canInvite =
-    canManage && !hasAccount && target.employmentStatus !== "resigned";
+    canManage && !hasAccount && target.employmentStatus !== "resigned" && !target.isGuest;
   const canChange =
     canManage && hasAccount && canChangeStaffAccount(viewer, { id: target.id, permissions: target.permissions });
   const grantableRoles = canManage
     ? roles.filter((r) => withinViewerPermissions(viewer, r.permissions))
     : [];
   const currentRoleName = roles?.find((r) => r.id === target.roleId)?.name ?? null;
+  const roleById = (id: string | null) => roles?.find((r) => r.id === id) ?? null;
+  const presetRoleName = target.signupRoleId ? (roleById(target.signupRoleId)?.name ?? "지워진 권한(기본으로)") : null;
+  /** 후보를 합칠 때 줄 역할 — 미리 등록 역할(없거나 지워졌으면 기본 "선생님") */
+  const matchRole = (hr: StaffRowVM) => roleById(hr.signupRoleId) ?? roleById("teacher");
+  const showMatches = canManage && target.accountStatus === "pending_registration" && signupMatches.length > 0;
 
   return (
     <section className="space-y-3 rounded-2xl border border-neutral-200/80 bg-white/40 px-4 py-3 text-xs text-neutral-600">
       <div className="space-y-1">
         <p>
           계정: <span className="font-medium text-foreground">{staffAccountLabel(target)}</span>
-          {pendingInvite && target.inviteExpiresAtMillis ? (
-            <span className="text-neutral-500"> · {formatExpiry(target.inviteExpiresAtMillis)}까지 유효</span>
-          ) : null}
         </p>
+        {target.accountStatus === "pending_registration" && target.phone ? (
+          <p>
+            가입할 때 적은 번호: <span className="font-mono text-foreground">{formatKrPhoneDisplay(target.phone)}</span>
+          </p>
+        ) : null}
         {hasAccount ? (
           <p>
             로그인:{" "}
@@ -291,9 +275,30 @@ export function StaffAccountSection({
 
       {canInvite ? (
         <>
+          <div className="space-y-1 rounded-xl bg-white/60 px-3 py-2 ring-1 ring-neutral-200/70">
+            <p>
+              미리 등록:{" "}
+              {presetRoleName ? (
+                <span className="font-medium text-foreground">권한 {presetRoleName}</span>
+              ) : (
+                <span className="text-neutral-500">안 함</span>
+              )}
+              {" · "}번호{" "}
+              <span className="font-mono text-foreground">{formatKrPhoneDisplay(target.phone) || "없음"}</span>
+            </p>
+            {!target.phone ? (
+              <p className="break-keep text-[11px] text-amber-800">
+                번호를 입력해 두면 직원 가입 QR로 가입한 사람과 번호로 맞춰 볼 수 있어요(인사 정보에서 입력).
+              </p>
+            ) : (
+              <p className="break-keep text-[11px] text-neutral-500">
+                같은 번호로 직원 가입 QR에서 가입하면, 승인 화면에서 「이 직원으로 승인」으로 인사 정보와 권한을 합칠 수 있어요.
+              </p>
+            )}
+          </div>
           <div>
             <label htmlFor="staff-invite-role" className="mb-1 block font-medium text-neutral-600">
-              부여할 권한
+              가입하면 줄 권한 · 직접 만들 때 권한
             </label>
             <select
               id="staff-invite-role"
@@ -310,50 +315,60 @@ export function StaffAccountSection({
             </select>
           </div>
 
-          {invite ? (
-            <div className="space-y-2 rounded-xl bg-sky-50 px-3 py-2 ring-1 ring-sky-200">
-              <p className="text-sky-950">
-                초대 링크가 만들어졌습니다. {formatExpiry(invite.expiresAtMillis)}까지 한 번 사용할 수 있어요.
-              </p>
-              <p className="break-all font-mono text-[11px] text-sky-900">{invite.url}</p>
-              <div className="flex gap-2">
-                <button type="button" className={primaryBtn} onClick={() => void shareInvite()}>
-                  공유하기
-                </button>
-                <button
-                  type="button"
-                  className={btn}
-                  onClick={() => {
-                    void navigator.clipboard.writeText(invite.url);
-                    setCopied(true);
-                  }}
-                >
-                  {copied ? "복사됨" : "링크 복사"}
-                </button>
-              </div>
-              <p className="text-[11px] text-sky-900/80">
-                받은 사람이 가입하면 「가입 승인 대기」가 되고, 승인해야 이용할 수 있습니다.
-              </p>
-            </div>
-          ) : null}
-
           <div className="flex flex-wrap gap-2">
-            <button type="button" className={primaryBtn} disabled={busy} onClick={() => void createInvite()}>
-              {pendingInvite || invite ? "초대 링크 다시 만들기" : "초대 링크 만들기"}
+            <button
+              type="button"
+              className={primaryBtn}
+              disabled={busy || !inviteRoleId || inviteRoleId === target.signupRoleId}
+              onClick={() => void savePreRegistration(inviteRoleId)}
+            >
+              {target.signupRoleId ? "미리 등록 권한 바꾸기" : "미리 등록"}
             </button>
+            {target.signupRoleId ? (
+              <button type="button" className={dangerBtn} disabled={busy} onClick={() => void savePreRegistration(null)}>
+                미리 등록 해제
+              </button>
+            ) : null}
             <button type="button" className={btn} disabled={busy} onClick={() => void createAccount()}>
               계정 직접 만들기
             </button>
-            {pendingInvite || invite ? (
-              <button type="button" className={dangerBtn} disabled={busy} onClick={() => void cancelInvite()}>
-                초대 취소
-              </button>
-            ) : null}
           </div>
           <p className="text-[11px] text-neutral-500">
-            다시 만들면 이전 링크는 쓸 수 없습니다. 링크는 보안을 위해 만들 때 한 번만 보여 드립니다.
+            휴대폰이 없거나 가입이 어려우면 계정을 직접 만들어 로그인 ID·임시 비밀번호를 전달해 주세요.
           </p>
         </>
+      ) : null}
+
+      {showMatches ? (
+        <div className="space-y-2">
+          {signupMatches.map((hr) => {
+            const role = matchRole(hr);
+            const grantable = role ? withinViewerPermissions(viewer, role.permissions) : false;
+            return (
+              <div
+                key={hr.id}
+                className="space-y-2 rounded-xl bg-sky-50 px-3 py-2 ring-1 ring-sky-200"
+                data-signup-match={hr.id}
+              >
+                <p className="break-keep text-sky-950">
+                  미리 등록한 <span className="font-semibold">{hr.displayName || "(이름 없음)"}</span>
+                  (권한 {role?.name ?? "선생님"})과 번호가 같습니다.
+                </p>
+                <button
+                  type="button"
+                  className={primaryBtn}
+                  disabled={busy || !grantable}
+                  onClick={() => void approveAsExisting(hr)}
+                >
+                  이 직원으로 승인
+                </button>
+                {!grantable ? (
+                  <p className="text-[11px] text-sky-900/80">본인보다 넓은 권한이라 이 직원으로 승인할 수 없습니다.</p>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
       ) : null}
 
       {canChange ? (
@@ -395,8 +410,13 @@ export function StaffAccountSection({
           <div className="flex flex-wrap gap-2">
             {target.accountStatus === "pending_registration" ? (
               <>
-                <button type="button" className={primaryBtn} disabled={busy} onClick={() => void approve()}>
-                  가입 승인
+                <button
+                  type="button"
+                  className={showMatches ? btn : primaryBtn}
+                  disabled={busy}
+                  onClick={() => void approve()}
+                >
+                  {showMatches ? "새 직원으로 승인" : "가입 승인"}
                 </button>
                 <button type="button" className={dangerBtn} disabled={busy} onClick={() => void removeAccount("reject")}>
                   가입 거절
@@ -457,10 +477,10 @@ export function StaffAccountSection({
         </p>
       ) : null}
       {!hasAccount && target.employmentStatus === "resigned" ? (
-        <p className="text-neutral-500">퇴사 처리된 직원은 초대할 수 없습니다.</p>
+        <p className="text-neutral-500">퇴사 처리된 직원은 미리 등록하거나 계정을 만들 수 없습니다.</p>
       ) : null}
       {!canManage ? (
-        <p className="text-neutral-500">계정 초대와 권한은 멤버 초대/권한 관리 권한이 있어야 설정할 수 있습니다.</p>
+        <p className="text-neutral-500">미리 등록·계정과 권한은 멤버 초대/권한 관리 권한이 있어야 설정할 수 있습니다.</p>
       ) : null}
 
       {error ? (

@@ -3,6 +3,7 @@ import type { DocumentReference } from "firebase-admin/firestore";
 import { FieldValue } from "firebase-admin/firestore";
 import { attnLoginIndexPath } from "./attn-id";
 import { normalizeParentLoginEmail } from "./parent-login-id";
+import { deleteAcademySignupLinks } from "./signup-links";
 
 export function chunkArray<T>(arr: T[], chunkSize: number): T[][] {
   const out: T[][] = [];
@@ -285,6 +286,9 @@ export async function deleteAcademyFirestoreCascade(
 
   const inboxSnap = await db.collection(`academies/${academyId}/adminInbox`).get();
   inboxSnap.docs.forEach((d) => deleteOps.push(d.ref));
+
+  // 가입 QR 링크(2-K) — 최상위 해시 문서와 원문 secrets 문서
+  await deleteAcademySignupLinks(db, academyId);
 
   const secretsLoginRef = db.doc(`academies/${academyId}/secrets/login`);
   const secretsSnap = await secretsLoginRef.get();

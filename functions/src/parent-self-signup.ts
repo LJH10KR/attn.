@@ -1,12 +1,9 @@
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import {
-  academySeqMetaPath,
-  assertValidAcademyAttnId,
-  attnLoginIndexPath,
-  formatParentAttnId,
-} from "./lib/attn-id";
+import { academySeqMetaPath, attnLoginIndexPath, formatParentAttnId } from "./lib/attn-id";
+import { SIGNUP_APP_CHECK_OPTIONS } from "./lib/app-check";
+import { consumeSignupQuota, resolveSignupLink } from "./lib/signup-links";
 import { assertKrPhoneRequired } from "./lib/kr-phone";
 import { randomAuthPassword } from "./lib/member-credentials";
 import { passwordSecretFields } from "./lib/password-hash";
@@ -24,24 +21,6 @@ import {
 function internalEmailForAttnId(attnId: string): string {
   const safe = attnId.replace(/[^a-zA-Z0-9._-]/g, "_");
   return `attn+${safe}@provision.attndot.internal`;
-}
-
-async function assertAcademyAcceptsSignup(
-  db: admin.firestore.Firestore,
-  academyId: string,
-): Promise<void> {
-  try {
-    assertValidAcademyAttnId(academyId);
-  } catch {
-    throw new HttpsError("invalid-argument", "학원 로그인 번호 형식이 올바르지 않습니다.");
-  }
-  const academySnap = await db.doc(`academies/${academyId}`).get();
-  if (!academySnap.exists) {
-    throw new HttpsError("not-found", "학원을 찾을 수 없습니다.");
-  }
-  if (academySnap.get("status") === "archived") {
-    throw new HttpsError("failed-precondition", "이 학원은 현재 가입을 받지 않습니다.");
-  }
 }
 
 async function allocateParentAttnId(
@@ -64,36 +43,19 @@ async function allocateParentAttnId(
   });
 }
 
-/** 공개 — 학부모 가입 링크용 학원 정보 */
-export const getParentSignupAcademyInfo = onCall(async (request) => {
-  const academyId =
-    typeof request.data?.academyId === "string" ? request.data.academyId.trim() : "";
-  if (!academyId) {
-    throw new HttpsError("invalid-argument", "학원 정보가 올바르지 않습니다.");
-  }
-  try {
-    assertValidAcademyAttnId(academyId);
-  } catch {
-    throw new HttpsError("invalid-argument", "학원 로그인 번호 형식이 올바르지 않습니다.");
-  }
+/**
+ * 학부모 가입(2-K) — 모든 함수가 가입 QR 토큰(`token`)을 받아 서버가 학원을 찾는다(학원 ID를 받지 않음).
+ * App Check 강제(플래그)는 로그인 ID 확인·가입 2개만 — 학원 정보·Google 상태 조회는 토큰으로만 막는다.
+ */
 
-  const snap = await admin.firestore().doc(`academies/${academyId}`).get();
-  if (!snap.exists) {
-    throw new HttpsError("not-found", "학원을 찾을 수 없습니다.");
-  }
-  const status = snap.get("status");
-  if (status === "archived") {
-    throw new HttpsError("failed-precondition", "이 학원은 현재 가입을 받지 않습니다.");
-  }
-  const name = snap.get("name");
-  return {
-    academyId,
-    name: typeof name === "string" && name.trim() ? name.trim() : "학원",
-  };
+/** 공개 — 가입 QR 토큰으로 학원 정보(가입 폼을 보여 주기 전) */
+export const getParentSignupAcademyInfo = onCall(async (request) => {
+  const link = await resolveSignupLink(admin.firestore(), request.data?.token, "parent");
+  return { name: link.academyName };
 });
 
-/** 공개 — 학부모 로그인 ID 중복 확인 (전역 유일) */
-export const checkParentLoginIdAvailable = onCall(async (request) => {
+/** 공개 — 학부모 로그인 ID 중복 확인(전역 유일) — 유효한 가입 링크가 있을 때만(무작위 조회 방지) */
+export const checkParentLoginIdAvailable = onCall(SIGNUP_APP_CHECK_OPTIONS, async (request) => {
   const raw =
     typeof request.data?.loginId === "string"
       ? request.data.loginId
@@ -104,6 +66,7 @@ export const checkParentLoginIdAvailable = onCall(async (request) => {
     throw new HttpsError("invalid-argument", "로그인 ID를 입력해 주세요.");
   }
   const db = admin.firestore();
+  await resolveSignupLink(db, request.data?.token, "parent");
   const loginId = await assertParentLoginIdAvailable(db, raw);
   return { available: true, loginId };
 });
@@ -113,14 +76,8 @@ export const getParentSignupGoogleStatus = onCall(async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "Google 로그인 후 다시 시도해 주세요.");
   }
-  const academyId =
-    typeof request.data?.academyId === "string" ? request.data.academyId.trim() : "";
-  if (!academyId) {
-    throw new HttpsError("invalid-argument", "학원 정보가 올바르지 않습니다.");
-  }
-
   const db = admin.firestore();
-  await assertAcademyAcceptsSignup(db, academyId);
+  const { academyId } = await resolveSignupLink(db, request.data?.token, "parent");
 
   const uid = request.auth.uid;
   const { loginId, displayName } = await resolveParentGoogleLoginId(uid);
@@ -144,21 +101,18 @@ export const getParentSignupGoogleStatus = onCall(async (request) => {
  * 인증 — Google 계정으로 학부모 가입 완료(이름·전화번호 필수) → 승인 대기(`pending_approval`).
  * 번호 중복은 막지 않고 응답에 번호·원생 정보를 담지 않는다(번호 색인은 학원이 연결할 때 잡음).
  */
-export const registerParentGoogleSignup = onCall(async (request) => {
+export const registerParentGoogleSignup = onCall(SIGNUP_APP_CHECK_OPTIONS, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "Google 로그인 후 다시 시도해 주세요.");
   }
   const uid = request.auth.uid;
-  const academyId =
-    typeof request.data?.academyId === "string" ? request.data.academyId.trim() : "";
   const displayNameRaw =
     typeof request.data?.displayName === "string" ? request.data.displayName : "";
   const displayName = displayNameRaw.trim();
   const agreeTerms = request.data?.agreeTerms === true;
 
-  if (!academyId) {
-    throw new HttpsError("invalid-argument", "학원 정보가 올바르지 않습니다.");
-  }
+  const db = admin.firestore();
+  const { academyId } = await resolveSignupLink(db, request.data?.token, "parent");
   if (!displayName) {
     throw new HttpsError("invalid-argument", "이름을 입력해 주세요.");
   }
@@ -169,9 +123,6 @@ export const registerParentGoogleSignup = onCall(async (request) => {
   if (!agreeTerms) {
     throw new HttpsError("invalid-argument", "서비스 이용에 동의해 주세요.");
   }
-
-  const db = admin.firestore();
-  await assertAcademyAcceptsSignup(db, academyId);
 
   const existingMember = await db.doc(`academies/${academyId}/parents/${uid}`).get();
   if (existingMember.exists) {
@@ -189,6 +140,9 @@ export const registerParentGoogleSignup = onCall(async (request) => {
       );
     }
   }
+
+  // 입력·중복 검사를 모두 통과한 뒤 계정을 만들기 직전에 한 건을 센다(링크별 시간당 한도)
+  await consumeSignupQuota(db, request.data?.token, "parent");
 
   const attnId = await allocateParentAttnId(db, academyId, loginId);
   const memberRef = db.doc(`academies/${academyId}/parents/${uid}`);
@@ -251,9 +205,7 @@ export const registerParentGoogleSignup = onCall(async (request) => {
  * 공개 — 학부모 자가 가입(비밀번호·이름·로그인 ID 직접 설정) → 이메일 인증(OTP) 후 승인 대기.
  * 번호 중복은 막지 않고 응답에 번호·원생 정보를 담지 않는다(인증 없는 함수로 번호 소속을 알아내거나 선점하지 못하게).
  */
-export const registerParentSelfSignup = onCall(async (request) => {
-  const academyId =
-    typeof request.data?.academyId === "string" ? request.data.academyId.trim() : "";
+export const registerParentSelfSignup = onCall(SIGNUP_APP_CHECK_OPTIONS, async (request) => {
   const loginIdRaw =
     typeof request.data?.loginId === "string" ? request.data.loginId : "";
   const displayNameRaw =
@@ -262,14 +214,8 @@ export const registerParentSelfSignup = onCall(async (request) => {
   const password = typeof request.data?.password === "string" ? request.data.password : "";
   const agreeTerms = request.data?.agreeTerms === true;
 
-  if (!academyId) {
-    throw new HttpsError("invalid-argument", "학원 정보가 올바르지 않습니다.");
-  }
-  try {
-    assertValidAcademyAttnId(academyId);
-  } catch {
-    throw new HttpsError("invalid-argument", "학원 로그인 번호 형식이 올바르지 않습니다.");
-  }
+  const db = admin.firestore();
+  await resolveSignupLink(db, request.data?.token, "parent");
   if (!displayName) {
     throw new HttpsError("invalid-argument", "이름을 입력해 주세요.");
   }
@@ -292,9 +238,10 @@ export const registerParentSelfSignup = onCall(async (request) => {
   }
   validateParentLoginIdFormat(loginIdRaw);
   const normalizedLoginId = normalizeParentLoginId(loginIdRaw);
+  await assertParentLoginIdAvailable(db, normalizedLoginId);
 
-  const db = admin.firestore();
-  await assertAcademyAcceptsSignup(db, academyId);
+  // 입력 검사를 모두 통과한 뒤 계정을 만들기 직전에 한 건을 센다(링크별 시간당 한도)
+  const { academyId } = await consumeSignupQuota(db, request.data?.token, "parent");
 
   const attnId = await allocateParentAttnId(db, academyId, normalizedLoginId);
 

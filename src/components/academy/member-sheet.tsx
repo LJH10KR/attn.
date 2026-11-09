@@ -23,6 +23,8 @@ type MemberSheetProps = {
   onCloseAction: () => void;
   onChangedAction: (message: string) => void;
   onClosedWithMessageAction: (message: string) => void;
+  /** 가입 승인 대기 계정과 같은 번호로 미리 등록한 직원(2-K) */
+  signupMatches?: StaffRowVM[];
 };
 
 /** 멤버(계정) 상세 전체 화면 시트 — 인사 정보는 보기만, 계정·권한은 직원 관리와 같은 `StaffAccountSection` */
@@ -36,6 +38,7 @@ export function MemberSheet({
   onCloseAction,
   onChangedAction,
   onClosedWithMessageAction,
+  signupMatches,
 }: MemberSheetProps) {
   useBodyScrollLock(true);
 
@@ -107,6 +110,7 @@ export function MemberSheet({
               viewer={viewer}
               onChangedAction={onChangedAction}
               onCloseSheetAction={onClosedWithMessageAction}
+              signupMatches={signupMatches}
             />
           </div>
         </main>

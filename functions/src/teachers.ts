@@ -3,7 +3,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { reconcileUserActivationMirror } from "./user-activation-mirror";
-import { detachStaffAccount } from "./lib/staff-account";
+import { detachStaffAccount, finishStaffActivation } from "./lib/staff-account";
 import { assertPermission, type AcademyActor } from "./lib/academy-access";
 import { normalizePermissionList } from "./lib/permissions";
 import { staffAccountChangeViolation } from "./lib/role-policy";
@@ -18,10 +18,10 @@ import {
  * 직원 계정 — 활성 상태 조회, 승인(활성)·비활성·삭제.
  * 담당 학생 목록은 선생님 화면이 클라이언트 쿼리(`students where teacherUids array-contains 본인`, 규칙 허용)로 읽는다.
  * 계정 삭제는 사용 중·비활성이면 인사 기록을 계정 없는 직원으로 남기고, 첫 로그인 전·승인 대기·게스트는 전체 삭제.
- * 계정 만들기는 `staff-invites.ts`(초대 링크·직접 만들어 주기), 인사 정보는 `staff.ts`.
+ * 계정 만들기는 `staff-signup.ts`(공용 가입 링크·합쳐 승인)·`staff-accounts.ts`(직접 만들어 주기), 인사 정보는 `staff.ts`.
  */
 
-/** pending_setup: 직접 만들어 준 계정(최초 로그인 전) · pending_registration: 초대 링크 가입 후 승인 대기 */
+/** pending_setup: 직접 만들어 준 계정(최초 로그인 전) · pending_registration: 공용 가입 링크 가입 후 승인 대기 */
 type TeacherStatus =
   | "no_account"
   | "pending_setup"
@@ -63,10 +63,8 @@ export async function deactivateStaffAccount(
   await admin.auth().updateUser(authUid, { disabled: true });
 }
 
-const enforceAppCheckOnTeacherState = process.env.ENFORCE_APP_CHECK === "1";
-
 export const getTeacherActivationState = onCall(
-  { cors: true, enforceAppCheck: enforceAppCheckOnTeacherState },
+  { cors: true },
   async (request) => {
     if (!request.auth?.uid) {
       throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
@@ -124,13 +122,7 @@ export const activateTeacher = onCall(async (request) => {
     updatedAt: FieldValue.serverTimestamp(),
   });
 
-  await admin.auth().setCustomUserClaims(teacherAuthUid, {
-    role: "teacher",
-    academyId,
-    membershipStatus: "active",
-  });
-
-  await admin.auth().updateUser(teacherAuthUid, { disabled: false });
+  await finishStaffActivation(academyId, teacherAuthUid);
 
   return { ok: true };
 });

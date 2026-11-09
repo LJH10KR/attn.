@@ -1,5 +1,5 @@
-import { Timestamp } from "firebase/firestore";
 import { normalizePermissionList, type AcademyPermission } from "@/lib/academy/permissions";
+import { isStaffSignupMatchCandidate } from "@/lib/academy/staff-phone-match";
 import {
   readStaffEmploymentStatus,
   type StaffAccountStatus,
@@ -17,9 +17,8 @@ export type StaffRowVM = {
   memo: string;
   accountStatus: StaffAccountStatus;
   isGuest: boolean;
-  /** 초대 링크 대기 중이면 만료 시각 */
-  inviteExpiresAtMillis: number | null;
-  inviteRoleId: string | null;
+  /** 미리 등록(계정 없음일 때) — 가입하면 줄 역할(2-K) */
+  signupRoleId: string | null;
   /** 계정이 있을 때 — 로그인 ID(Google 가입이면 빈 문자열) */
   loginId: string;
   roleId: string | null;
@@ -39,9 +38,7 @@ export function docToStaffRow(id: string, data: Record<string, unknown>): StaffR
     memo: typeof data.memo === "string" ? data.memo : "",
     accountStatus: (data.status as StaffAccountStatus) || "pending_setup",
     isGuest: data.isGuest === true,
-    inviteExpiresAtMillis:
-      data.inviteExpiresAt instanceof Timestamp ? data.inviteExpiresAt.toMillis() : null,
-    inviteRoleId: typeof data.inviteRoleId === "string" ? data.inviteRoleId : null,
+    signupRoleId: typeof data.signupRoleId === "string" && data.signupRoleId ? data.signupRoleId : null,
     loginId: typeof data.loginId === "string" ? data.loginId : "",
     roleId: typeof data.roleId === "string" && data.roleId ? data.roleId : null,
     permissions: normalizePermissionList(data.permissions),
@@ -49,25 +46,11 @@ export function docToStaffRow(id: string, data: Record<string, unknown>): StaffR
   };
 }
 
-/** 초대 링크가 아직 유효한지(계정 없음 + 만료 전) */
-export function staffHasPendingInvite(
-  row: Pick<StaffRowVM, "accountStatus" | "inviteExpiresAtMillis">,
-  now = Date.now(),
-): boolean {
-  return (
-    row.accountStatus === "no_account" &&
-    row.inviteExpiresAtMillis !== null &&
-    row.inviteExpiresAtMillis > now
-  );
-}
-
 /** 계정 상태 배지 문구 */
-export function staffAccountLabel(
-  row: Pick<StaffRowVM, "accountStatus" | "inviteExpiresAtMillis">,
-): string {
+export function staffAccountLabel(row: Pick<StaffRowVM, "accountStatus" | "signupRoleId">): string {
   switch (row.accountStatus) {
     case "no_account":
-      return staffHasPendingInvite(row) ? "초대 링크 보냄" : "계정 없음";
+      return row.signupRoleId ? "계정 없음 · 미리 등록" : "계정 없음";
     case "active":
       return "계정 사용 중";
     case "inactive":
@@ -79,4 +62,14 @@ export function staffAccountLabel(
     default:
       return "계정 확인 필요";
   }
+}
+
+/** 승인 대기 계정과 같은 번호로 미리 등록한 직원(계정 없음·퇴사 아님·게스트 아님) — 서버 합치기와 같은 규칙 */
+export function staffSignupMatches(rows: readonly StaffRowVM[], account: Pick<StaffRowVM, "phone">): StaffRowVM[] {
+  return rows.filter((r) =>
+    isStaffSignupMatchCandidate(
+      { status: r.accountStatus, employmentStatus: r.employmentStatus, isGuest: r.isGuest, phone: r.phone },
+      account.phone,
+    ),
+  );
 }

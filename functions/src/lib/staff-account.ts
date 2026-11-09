@@ -10,12 +10,12 @@ import { DEFAULT_STAFF_ROLE_ID, normalizePermissionList, type AcademyPermission 
 import { allocateTeacherLoginId } from "./teacher-login-id";
 
 /**
- * 직원 계정 만들기 — 초대 링크 가입(`staff-invites.ts`)과 직접 만들어 주기(`createStaffAccounts`) 공용.
+ * 직원 계정 만들기 — 공용 직원 가입 링크(`staff-signup.ts`)와 직접 만들어 주기(`staff-accounts.ts`) 공용.
  * 계정 없는 직원 문서(인사 정보)가 있으면 그 내용을 `staff/{authUid}`로 옮기고 원래 문서를 지운다.
  */
 
 /** 인사 정보 중 계정 문서로 옮기는 필드 — 계정·권한 필드는 새로 씀 */
-const HR_FIELDS = [
+export const HR_FIELDS = [
   "displayName",
   "phone",
   "jobTitleId",
@@ -28,9 +28,9 @@ const HR_FIELDS = [
 export type StaffAccountMode =
   /** 학원이 직접 만들어 줌 — 자동 로그인 ID + 임시 비밀번호, 최초 로그인 시 비밀번호 변경 */
   | { kind: "temp" }
-  /** 초대받은 사람이 로그인 ID·비밀번호를 직접 정함 */
+  /** 가입하는 사람이 로그인 ID·비밀번호를 직접 정함 */
   | { kind: "password"; loginId: string; password: string }
-  /** 초대받은 사람이 Google 계정으로 가입(이미 로그인된 uid) */
+  /** 가입하는 사람이 Google 계정으로 가입(이미 로그인된 uid) */
   | { kind: "google"; uid: string; email: string };
 
 export type ProvisionedStaffAccount = {
@@ -80,8 +80,10 @@ export async function provisionStaffAccount(params: {
   permissions: AcademyPermission[];
   mode: StaffAccountMode;
   status: "pending_setup" | "pending_registration";
+  /** 공용 링크 가입 — 가입할 때 적은 번호와 가입 경로 */
+  signup?: { phone: string; signupSource: "staff_link" };
 }): Promise<ProvisionedStaffAccount> {
-  const { db, academyId, hrRef, displayName, roleId, permissions, mode, status } = params;
+  const { db, academyId, hrRef, displayName, roleId, permissions, mode, status, signup } = params;
 
   const loginId =
     mode.kind === "temp"
@@ -131,6 +133,7 @@ export async function provisionStaffAccount(params: {
       employmentStatus: "employed",
       createdAt: FieldValue.serverTimestamp(),
       ...hr,
+      ...(signup ? { phone: signup.phone, signupSource: signup.signupSource } : {}),
       displayName,
       attnId,
       ...(loginId ? { loginId } : {}),
@@ -188,6 +191,16 @@ export async function provisionStaffAccount(params: {
   }
 
   return { authUid, attnId, loginId, displayName, ...(tempPassword ? { tempPassword } : {}) };
+}
+
+/** 직원 계정 활성 마무리 — 클레임 active + Auth 계정 켜기(승인·다시 활성화·합쳐 승인 공용) */
+export async function finishStaffActivation(academyId: string, authUid: string): Promise<void> {
+  await admin.auth().setCustomUserClaims(authUid, {
+    role: "teacher",
+    academyId,
+    membershipStatus: "active",
+  });
+  await admin.auth().updateUser(authUid, { disabled: false });
 }
 
 /**

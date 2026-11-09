@@ -7,11 +7,10 @@ import { DEFAULT_STAFF_ROLE_ID, normalizePermissionList } from "./lib/permission
 import { staffAccountChangeViolation } from "./lib/role-policy";
 import { academyOptionsRef, readOptionItems } from "./academy-options";
 import { deactivateStaffAccount } from "./teachers";
-import { clearStaffInvite } from "./staff-invites";
 
 /**
  * 설정 › 직원 관리 — `academies/{academyId}/staff/{staffId}`의 인사 정보.
- * 계정(초대·활성·권한)은 멤버 관리(`teachers.ts`, `roles.ts`)에서 다루고,
+ * 계정(가입·활성·권한)은 멤버 관리(`teachers.ts`, `roles.ts`, `staff-signup.ts`)에서 다루고,
  * 계정 없이 등록한 직원은 `status: "no_account"`(문서 ID 임의, 계정 연결 시 Auth uid로 이전).
  * 게스트(`isGuest`)는 인사 정보가 없는 계정이라 여기서 다루지 않는다.
  */
@@ -151,13 +150,14 @@ export const saveStaffMember = onCall(async (request) => {
     }
   }
 
-  await ref.update(hr);
+  // 퇴사하면 미리 등록(가입하면 줄 권한)도 지움 — 가입 승인 화면의 후보에서도 빠짐
+  await ref.update(
+    becomesResigned
+      ? { ...hr, signupRoleId: FieldValue.delete(), signupRoleSetByUid: FieldValue.delete() }
+      : hr,
+  );
   if (deactivateAccount) {
     await deactivateStaffAccount(db, academyId, staffId);
-  }
-  const inviteTokenHash = snap.get("inviteTokenHash");
-  if (becomesResigned && typeof inviteTokenHash === "string" && inviteTokenHash) {
-    await clearStaffInvite(db, ref, inviteTokenHash);
   }
   return { ok: true as const, staffId, accountDeactivated: deactivateAccount };
 });
@@ -183,10 +183,6 @@ export const deleteStaffMember = onCall(async (request) => {
       "failed-precondition",
       "계정이 있는 직원은 삭제할 수 없습니다. 퇴사 처리한 뒤 멤버 관리에서 계정을 정리해 주세요.",
     );
-  }
-  const inviteTokenHash = snap.get("inviteTokenHash");
-  if (typeof inviteTokenHash === "string" && inviteTokenHash) {
-    await db.doc(`staffInvites/${inviteTokenHash}`).delete();
   }
   await ref.delete();
   return { ok: true as const };

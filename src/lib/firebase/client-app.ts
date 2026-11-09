@@ -10,32 +10,27 @@ import {
   isFirebaseConfigured,
   isFirebaseEmulatorEnabled,
 } from "./config";
-import { initFirebaseAppCheck } from "./app-check";
 
 let authEmulatorConnected = false;
 let firestoreEmulatorConnected = false;
 let functionsEmulatorConnected = false;
 let firestoreInstance: Firestore | null = null;
 
-function getOrInitApp(): FirebaseApp {
+/**
+ * App Check는 앱 전체에 켜지 않는다(2-K) — 가입 화면이 강제 함수를 부르기 직전에만 `ensureSignupAppCheck`로.
+ */
+export function getFirebaseApp(): FirebaseApp {
   if (!isFirebaseConfigured()) {
     throw new Error(
       "Firebase 웹 설정이 비어 있습니다. .env.local에 NEXT_PUBLIC_FIREBASE_* 변수를 채워 주세요.",
     );
   }
-  const existing = getApps()[0];
-  if (existing) {
-    initFirebaseAppCheck(existing);
-    return existing;
-  }
-  const app = initializeApp(firebaseWebConfig);
-  initFirebaseAppCheck(app);
-  return app;
+  return getApps()[0] ?? initializeApp(firebaseWebConfig);
 }
 
 /** 브라우저에서만 호출. */
 export function getFirebaseAuth(): Auth {
-  const app = getOrInitApp();
+  const app = getFirebaseApp();
   const auth = getAuth(app);
   if (typeof window !== "undefined") {
     // Firebase useDeviceLanguage는 React 훅이 아니지만 ESLint가 오탐함 → navigator 사용.
@@ -53,7 +48,7 @@ export function getFirebaseAuth(): Auth {
 }
 
 export function getFirebaseDb(): Firestore {
-  const app = getOrInitApp();
+  const app = getFirebaseApp();
   if (!firestoreInstance) {
     const emulator = typeof window !== "undefined" && isFirebaseEmulatorEnabled();
     firestoreInstance = emulator
@@ -85,7 +80,7 @@ export async function getFirebaseDbAfterAuthReady(): Promise<Firestore> {
 }
 
 export function getFirebaseFunctions(): Functions {
-  const app = getOrInitApp();
+  const app = getFirebaseApp();
   const functions = getFunctions(app, FIREBASE_FUNCTIONS_REGION);
   if (typeof window !== "undefined" && isFirebaseEmulatorEnabled() && !functionsEmulatorConnected) {
     connectFunctionsEmulator(functions, "127.0.0.1", 5001);

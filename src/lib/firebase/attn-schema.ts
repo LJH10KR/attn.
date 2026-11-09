@@ -77,19 +77,24 @@ export function academyKioskSettingsPath(academyId: string): string {
 export const ACADEMY_ADMIN_INBOX_SCHEMA_VERSION = 1 as const;
 
 export type AcademyAdminInboxKind =
-  /** 직원 초대 링크 가입 승인 대기·첫 로그인 전 */
+  /** 직원 가입 링크 가입 승인 대기·첫 로그인 전 */
   | "pending_registration"
   /** 예전 직원 초청 메일(폐지) — 남은 항목 표시용 */
   | "invitation_sent"
   /** 학부모 가입 승인 대기(연결 해제로 돌아온 계정은 만들지 않음) */
   | "parent_pending_approval"
-  | "session_payment_received";
+  | "session_payment_received"
+  /** 가입 QR 링크 시간당 한도 초과(2-K) — 링크·서울 시각 정시 창마다 1건, 문서 ID `signup-limit-{linkKind}-{windowKey}` */
+  | "signup_rate_limited";
 
 export type AcademyAdminInboxDoc = {
   schemaVersion: typeof ACADEMY_ADMIN_INBOX_SCHEMA_VERSION;
   kind: AcademyAdminInboxKind;
   /** 회차 결제 알림은 학생 단위(`student`, entityId = studentId) */
-  entityType: "teacher" | "parent" | "student";
+  entityType: "teacher" | "parent" | "student" | "signup_link";
+  /** kind가 "signup_rate_limited"일 때 — 어느 가입 링크인지 */
+  linkKind?: "parent" | "staff";
+  windowKey?: string;
   entityId: string;
   displayName: string;
   email: string;
@@ -204,7 +209,7 @@ export type ParentAccountStatus =
 
 /**
  * 직원 계정 상태 — 계정 없이 인사 정보만 등록한 직원은 "no_account",
- * 초대 링크로 가입하면 "pending_registration"(원장 승인 대기), 학원이 직접 만들어 주면 "pending_setup"(첫 로그인 전)
+ * 직원 가입 링크로 가입하면 "pending_registration"(원장 승인 대기), 학원이 직접 만들어 주면 "pending_setup"(첫 로그인 전)
  */
 export type StaffAccountStatus = TeacherRegistrationStatus | "no_account";
 
@@ -247,9 +252,16 @@ export type AcademyStaff = {
   memo?: string;
   /** 인사 정보 없이 계정만 있는 게스트 — 직원 목록에서 숨김 */
   isGuest?: boolean;
-  /** 초대 링크 대기 중(계정 없음일 때) — 링크 원문은 서버도 보관하지 않음(`staffInvites/{sha256}`) */
-  inviteRoleId?: string;
-  inviteExpiresAt?: Timestamp;
+  /**
+   * 미리 등록(계정 없음일 때, 2-K) — 공용 직원 가입 링크로 같은 번호의 사람이 가입하면 승인 화면에서
+   * 이 직원으로 합칠 수 있고, 그때 줄 역할. 없으면 기본 역할.
+   */
+  signupRoleId?: string;
+  signupRoleSetByUid?: string;
+  /** 공용 직원 가입 링크로 만든 계정 */
+  signupSource?: "staff_link";
+  /** 미리 등록한 직원과 합쳐 승인한 계정 — 원래 인사 문서 ID */
+  mergedFromStaffId?: string;
   academyId: string;
   status: StaffAccountStatus;
   authProvider?: "password" | "google";

@@ -21,6 +21,7 @@ import {
   signOut,
 } from "firebase/auth";
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from "firebase/functions";
+import { seedSignupToken } from "./_signup-token.mjs";
 
 const PROJECT = "demo-attn";
 initAdmin({ projectId: PROJECT });
@@ -32,6 +33,7 @@ const PHONE_KEY = "01022223333";
 const owner = await adminAuth().createUser({ email: "owner7@t.dev", password: "pass1234", emailVerified: true });
 const noPermStaff = await adminAuth().createUser({ email: "stu7@t.dev", password: "pass1234" });
 await db.doc(`academies/${A}`).set({ ownerUid: owner.uid, name: "연결 학원", status: "active" });
+const PARENT_TOKEN = await seedSignupToken(db, A, "parent");
 await db.doc(`academies/${A}/meta/seq`).set({ nextTeacherSeq: 1, nextParentSeq: 1, nextStudentSeq: 1 });
 await db.doc(`academies/${A}/staff/${noPermStaff.uid}`).set({
   authUid: noPermStaff.uid, displayName: "원생 담당", status: "active", roleId: "x", permissions: ["operations.students"],
@@ -77,7 +79,7 @@ async function asParent(loginId, password) {
 async function selfSignupAndVerify(loginId, displayName, phone) {
   await signOut(auth);
   const res = await call("registerParentSelfSignup", {
-    academyId: A, loginId, displayName, phone, contactEmail: `${loginId}@mail.dev`, password: "pw123456", agreeTerms: true,
+    token: PARENT_TOKEN, loginId, displayName, phone, contactEmail: `${loginId}@mail.dev`, password: "pw123456", agreeTerms: true,
   });
   const index = await db.doc(`attnLoginIndex/${res.loginId}`).get();
   const uid = index.get("authUid");

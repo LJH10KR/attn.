@@ -10,7 +10,7 @@ import { MemberSheet } from "@/components/academy/member-sheet";
 import { RoleFormSheet } from "@/components/academy/role-form-sheet";
 import { ACADEMY_PERMISSION_GROUPS } from "@/lib/academy/permissions";
 import { canChangeStaffAccount, type PermissionViewer } from "@/lib/academy/role-policy";
-import { docToStaffRow, type StaffRowVM } from "@/lib/academy/staff-row";
+import { docToStaffRow, staffSignupMatches, type StaffRowVM } from "@/lib/academy/staff-row";
 import { useAcademyOptionList } from "@/lib/academy/use-academy-option-list";
 import { useAcademyRoles, type AcademyRoleVM } from "@/lib/academy/use-academy-roles";
 import { academyStaffPath, type StaffAccountStatus } from "@/lib/firebase/attn-schema";
@@ -160,6 +160,12 @@ function MembersInner({
 
   const sheetTarget = memberSheetId ? members.find((m) => m.id === memberSheetId) ?? null : null;
 
+  /** 승인 대기 계정마다 같은 번호로 미리 등록한 직원(2-K) — 서버 합치기와 같은 번호 비교 규칙 */
+  const matchesFor = useCallback(
+    (m: StaffRowVM) => (m.accountStatus === "pending_registration" ? staffSignupMatches(staff, m) : []),
+    [staff],
+  );
+
   const tabButton = (id: PageTab, label: string) => (
     <button
       key={id}
@@ -248,7 +254,7 @@ function MembersInner({
             {filtered.length === 0 ? (
               <li className={`py-10 text-center text-sm text-neutral-500 ${glassCard}`}>
                 {members.length === 0
-                  ? "계정이 있는 멤버가 없습니다. 「+ 멤버 초대」로 초대해 보세요."
+                  ? "계정이 있는 멤버가 없습니다. 「+ 멤버 초대」에서 직원 가입 QR을 공유하거나 계정을 직접 만들어 보세요."
                   : "조건에 맞는 멤버가 없습니다."}
               </li>
             ) : (
@@ -272,6 +278,11 @@ function MembersInner({
                           {m.isGuest ? (
                             <span className="rounded-full bg-neutral-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-700">
                               게스트
+                            </span>
+                          ) : null}
+                          {matchesFor(m).length > 0 ? (
+                            <span className="rounded-full bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-sky-900">
+                              번호 일치
                             </span>
                           ) : null}
                         </span>
@@ -377,6 +388,7 @@ function MembersInner({
             setNotice(message);
             refreshAll();
           }}
+          signupMatches={matchesFor(sheetTarget)}
         />
       ) : null}
 
