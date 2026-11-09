@@ -10,25 +10,25 @@ runConfig:
 # Environment variables and secrets.
 # App Check(2-K, 가입 단계만) — Fraud Defense(reCAPTCHA Enterprise) 사이트 키는 공개 값이라 여기에 적어도 됨.
 # 사용자가 키를 발급·콘솔에 등록한 뒤 아래 주석을 풀고 값을 넣는다(배포 체크리스트 "2-K" 절 순서대로).
-# env:
-#   - variable: NEXT_PUBLIC_APPCHECK_SITE_KEY
-#     value: 여기에-사이트-키
-#     availability:
-#       - BUILD
-#       - RUNTIME
+env:
+  - variable: NEXT_PUBLIC_APPCHECK_SITE_KEY
+    value: 6LeZkhcuAAAAAIYpXlKL2oitL_pIfd9HKRRMU5ib
+    availability:
+      - BUILD
+      - RUNTIME
 #
 # (예시)
 # env:
-  # Configure environment variables.
-  # See https://firebase.google.com/docs/app-hosting/configure#user-defined-environment
-  # - variable: MESSAGE
-  #   value: Hello world!
-  #   availability:
-  #     - BUILD
-  #     - RUNTIME
+# Configure environment variables.
+# See https://firebase.google.com/docs/app-hosting/configure#user-defined-environment
+# - variable: MESSAGE
+#   value: Hello world!
+#   availability:
+#     - BUILD
+#     - RUNTIME
 
-  # Grant access to secrets in Cloud Secret Manager.
-  # You can create secrets with the CLI command `firebase apphosting:secrets:set <secretName>`.
-  # See https://firebase.google.com/docs/app-hosting/configure#secret-parameters
-  # - variable: MY_SECRET
-  #   secret: mySecretRef
+# Grant access to secrets in Cloud Secret Manager.
+# You can create secrets with the CLI command `firebase apphosting:secrets:set <secretName>`.
+# See https://firebase.google.com/docs/app-hosting/configure#secret-parameters
+# - variable: MY_SECRET
+#   secret: mySecretRef
