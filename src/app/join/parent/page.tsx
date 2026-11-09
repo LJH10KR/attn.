@@ -11,6 +11,7 @@ import { GoogleMark } from "@/components/auth/google-mark";
 import { SignupCompleteModal } from "@/components/auth/signup-complete-modal";
 import { ProcessStatusModal } from "@/components/ui/process-status-modal";
 import { resolvePasswordConfirmHint } from "@/lib/ui/password-confirm-hint";
+import { ensureSignupAppCheck } from "@/lib/firebase/app-check";
 import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import {
@@ -22,6 +23,7 @@ import {
   getParentLoginIdFormatError,
   normalizeParentLoginId,
 } from "@/lib/parent-login-id";
+import { readSignupToken, signupErrorMessage, SIGNUP_LINK_INVALID_MESSAGE } from "@/lib/signup/signup-errors";
 
 const inputClass =
   "w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50";
@@ -50,10 +52,15 @@ function ClipboardIcon() {
 
 type SignupStep = "form" | "google_profile";
 
+/**
+ * 학부모 가입(`/join/parent?token=…`, 2-K) — 학원이 공유한 가입 QR의 무작위 토큰으로만 가입한다.
+ * 토큰이 없거나(예전 `?academyId=` 주소 포함) 형식이 틀리면 서버를 부르지 않고 바로 안내한다.
+ * App Check는 로그인 ID 확인·가입 함수를 처음 부르기 직전에만 켠다(`ensureSignupAppCheck`).
+ */
 function ParentJoinForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const academyId = searchParams.get("academyId")?.trim() ?? "";
+  const token = readSignupToken(searchParams.get("token"));
 
   const [academyName, setAcademyName] = useState<string | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
@@ -84,8 +91,8 @@ function ParentJoinForm() {
   const [signupCompleteOpen, setSignupCompleteOpen] = useState(false);
 
   useEffect(() => {
-    if (!academyId || !isFirebaseConfigured()) {
-      setLoadErr(academyId ? null : "학원 정보가 없습니다. 학원에서 받은 링크를 다시 열어 주세요.");
+    if (!token || !isFirebaseConfigured()) {
+      setLoadErr(token ? null : SIGNUP_LINK_INVALID_MESSAGE);
       return;
     }
     let cancelled = false;
@@ -96,7 +103,7 @@ function ParentJoinForm() {
     (async () => {
       try {
         const fn = httpsCallable(getFirebaseFunctions(), "getParentSignupAcademyInfo");
-        const res = await fn({ academyId });
+        const res = await fn({ token });
         const data = res.data as { name?: string };
         if (!cancelled) {
           setAcademyName(data.name ?? "학원");
@@ -105,9 +112,7 @@ function ParentJoinForm() {
         }
       } catch (e) {
         if (!cancelled) {
-          setLoadErr(
-            e instanceof FirebaseError ? e.message : "학원 정보를 불러오지 못했습니다.",
-          );
+          setLoadErr(signupErrorMessage(e, "학원 정보를 불러오지 못했습니다."));
           setLoadingModal(null);
         }
       }
@@ -115,7 +120,7 @@ function ParentJoinForm() {
     return () => {
       cancelled = true;
     };
-  }, [academyId]);
+  }, [token]);
 
   useEffect(() => {
     const formatErr = getParentLoginIdFormatError(loginId);
@@ -135,18 +140,16 @@ function ParentJoinForm() {
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
+          await ensureSignupAppCheck();
           const fn = httpsCallable(getFirebaseFunctions(), "checkParentLoginIdAvailable");
-          await fn({ loginId });
+          await fn({ token, loginId });
           if (!cancelled) {
             setLoginIdStatus("available");
             setLoginIdMessage("사용할 수 있는 로그인 ID입니다.");
           }
         } catch (e) {
           if (!cancelled) {
-            const msg =
-              e instanceof FirebaseError
-                ? e.message
-                : "확인에 실패했습니다. 잠시 후 다시 시도해 주세요.";
+            const msg = signupErrorMessage(e, "확인에 실패했습니다. 잠시 후 다시 시도해 주세요.");
             if (e instanceof FirebaseError && e.code === "functions/already-exists") {
               setLoginIdStatus("taken");
             } else if (e instanceof FirebaseError && e.code === "functions/invalid-argument") {
@@ -163,13 +166,13 @@ function ParentJoinForm() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [loginId]);
+  }, [loginId, token]);
 
   const passwordConfirmHint = resolvePasswordConfirmHint(password, password2, confirmBlurred);
 
   const onGoogleSignup = useCallback(async () => {
     setError(null);
-    if (!academyId) {
+    if (!token) {
       return;
     }
     setGoogleBusy(true);
@@ -182,7 +185,7 @@ function ParentJoinForm() {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
       const statusFn = httpsCallable(getFirebaseFunctions(), "getParentSignupGoogleStatus");
-      const statusRes = await statusFn({ academyId });
+      const statusRes = await statusFn({ token });
       const status = statusRes.data as {
         loginId?: string;
         suggestedDisplayName?: string;
@@ -207,12 +210,12 @@ function ParentJoinForm() {
       if (auth.currentUser) {
         await signOut(auth).catch(() => undefined);
       }
-      setError(err instanceof FirebaseError ? err.message : "Google 가입을 시작하지 못했습니다.");
+      setError(signupErrorMessage(err, "Google 가입을 시작하지 못했습니다."));
     } finally {
       setGoogleBusy(false);
       setLoadingModal(null);
     }
-  }, [academyId, router]);
+  }, [token, router]);
 
   const onGoogleProfileBack = useCallback(async () => {
     setError(null);
@@ -251,9 +254,10 @@ function ParentJoinForm() {
           title: "학부모 계정 등록 중",
           description: "이름·연락처를 저장하고 가입을 마무리하고 있어요.",
         });
+        await ensureSignupAppCheck();
         const fn = httpsCallable(getFirebaseFunctions(), "registerParentGoogleSignup");
         const res = await fn({
-          academyId,
+          token,
           displayName: displayName.trim(),
           phone: formatKrPhoneInput(phone),
           agreeTerms: true,
@@ -263,10 +267,10 @@ function ParentJoinForm() {
         setDoneLoginId(data.loginId ?? googleLoginId);
       } catch (err) {
         setLoadingModal(null);
-        setError(err instanceof FirebaseError ? err.message : "가입에 실패했습니다.");
+        setError(signupErrorMessage(err, "가입에 실패했습니다."));
       }
     },
-    [academyId, agree, displayName, googleLoginId, phone],
+    [token, agree, displayName, googleLoginId, phone],
   );
 
   const onCopyLoginId = useCallback(async () => {
@@ -338,9 +342,10 @@ function ParentJoinForm() {
           title: "1단계 · 학부모 계정 생성 중",
           description: "로그인 ID와 계정 정보를 안전하게 등록하고 있어요.",
         });
+        await ensureSignupAppCheck();
         const fn = httpsCallable(getFirebaseFunctions(), "registerParentSelfSignup");
         const res = await fn({
-          academyId,
+          token,
           loginId: normalizeParentLoginId(loginId),
           displayName: displayName.trim(),
           contactEmail: em,
@@ -354,10 +359,10 @@ function ParentJoinForm() {
         setSignupCompleteOpen(true);
       } catch (err) {
         setLoadingModal(null);
-        setError(err instanceof FirebaseError ? err.message : "가입에 실패했습니다.");
+        setError(signupErrorMessage(err, "가입에 실패했습니다."));
       }
     },
-    [academyId, agree, contactEmail, displayName, loginId, loginIdStatus, password, password2, phone],
+    [token, agree, contactEmail, displayName, loginId, loginIdStatus, password, password2, phone],
   );
 
   if (!isFirebaseConfigured()) {
@@ -384,21 +389,15 @@ function ParentJoinForm() {
       />
 
       {loadErr ? (
-        <div className="space-y-4 text-center">
-          <p className="text-sm text-red-700">{loadErr}</p>
+        <div className="space-y-4 text-center" data-signup-invalid>
+          <p className="break-keep text-sm text-red-700">{loadErr}</p>
           <Link href="/login/parent" className="text-sm text-[#4a90e2] underline">
             학부모 로그인
           </Link>
         </div>
       ) : null}
 
-      {!loadErr && !academyId ? (
-        <p className="text-center text-sm text-neutral-600">
-          유효하지 않은 링크입니다. 학원에 문의해 주세요.
-        </p>
-      ) : null}
-
-      {!loadErr && academyId && academyName !== null && doneLoginId ? (
+      {!loadErr && token && academyName !== null && doneLoginId ? (
         <div className="space-y-4 text-center">
           <p className="text-lg font-semibold text-emerald-800">가입이 완료되었습니다</p>
           <p className="text-sm text-neutral-600">
@@ -431,7 +430,7 @@ function ParentJoinForm() {
         </div>
       ) : null}
 
-      {!loadErr && academyId && academyName !== null && !doneLoginId && signupStep === "google_profile" ? (
+      {!loadErr && token && academyName !== null && !doneLoginId && signupStep === "google_profile" ? (
         <form className="space-y-4" onSubmit={(e) => void onGoogleComplete(e)} noValidate>
           <p className="text-center text-sm text-neutral-600">
             <span className="font-medium text-foreground">{academyName}</span> · Google 가입
@@ -517,7 +516,7 @@ function ParentJoinForm() {
         </form>
       ) : null}
 
-      {!loadErr && academyId && academyName !== null && !doneLoginId && signupStep === "form" ? (
+      {!loadErr && token && academyName !== null && !doneLoginId && signupStep === "form" ? (
         <form className="space-y-4" onSubmit={(e) => void onSubmit(e)} noValidate>
           <p className="text-center text-sm text-neutral-600">
             <span className="font-medium text-foreground">{academyName}</span> 학부모 회원 가입

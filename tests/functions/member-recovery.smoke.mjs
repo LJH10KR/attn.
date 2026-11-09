@@ -16,6 +16,7 @@ import {
   signOut,
 } from "firebase/auth";
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from "firebase/functions";
+import { seedSignupToken } from "./_signup-token.mjs";
 
 const PROJECT = "demo-attn";
 initAdmin({ projectId: PROJECT });
@@ -26,6 +27,7 @@ const WRONG = /로그인 ID 또는 비밀번호가 올바르지 않습니다/;
 const owner = await adminAuth().createUser({ email: "owner4@t.dev", password: "pass1234", emailVerified: true });
 const manager = await adminAuth().createUser({ email: "manager4@t.dev", password: "pass1234" });
 await db.doc(`academies/${A}`).set({ ownerUid: owner.uid, name: "복구 학원", status: "active" });
+const PARENT_TOKEN = await seedSignupToken(db, A, "parent");
 await db.doc(`academies/${A}/staff/${manager.uid}`).set({
   authUid: manager.uid, displayName: "멤버 관리 직원", status: "active", roleId: "custom",
   permissions: ["settings.members", "operations.students"],
@@ -149,7 +151,7 @@ await activeTeacher({ loginId: first.loginId, tempPassword: byManager.tempPasswo
 
 // 학부모 — 자가 가입 후 사용 중 처리, 초기화는 operations.parents
 await call("registerParentSelfSignup", {
-  academyId: A, loginId: "parent4", displayName: "학부모", password: "parentpw1",
+  token: PARENT_TOKEN, loginId: "parent4", displayName: "학부모", password: "parentpw1",
   phone: "010-3333-4444", contactEmail: "p4@t.dev", agreeTerms: true,
 });
 const parentUid = (await db.collection(`academies/${A}/parents`).where("loginId", "==", "parent4").get()).docs[0].id;

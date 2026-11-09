@@ -34,6 +34,11 @@ function inviteExpired(
 type BellLinks = {
   /** 학부모 승인 대기 바로 가기(학부모 관리 `?view=pending`) — `operations.parents` 권한이 있을 때만 */
   parentsPendingHref?: string | null;
+  /**
+   * 가입 링크 한도 알림(2-K) 바로 가기 — 학부모 링크는 학부모 관리(`operations.parents`), 직원 링크는 멤버 초대/권한 관리
+   * (`settings.members`). null이면 그 권한이 없으므로 알림 자체를 보여 주지 않는다(벨 읽기 규칙은 더 넓음).
+   */
+  signupLinkHrefs?: { parent: string | null; staff: string | null };
 };
 
 function mapInboxDoc(
@@ -91,6 +96,21 @@ function mapInboxDoc(
         },
       ];
     }
+  }
+
+  if (kind === "signup_rate_limited") {
+    const linkKind = data.linkKind === "staff" ? "staff" : data.linkKind === "parent" ? "parent" : null;
+    const href = linkKind ? links.signupLinkHrefs?.[linkKind] ?? null : null;
+    if (!linkKind || !href) return [];
+    return [
+      {
+        id,
+        title: `「${linkKind === "parent" ? "학부모" : "직원"} 가입 링크」 가입 요청이 많아 잠시 멈췄습니다`,
+        detail: "링크가 퍼졌다면 다시 만들어 주세요.",
+        href,
+        hrefLabel: "가입 링크 관리",
+      },
+    ];
   }
 
   if (kind === "session_payment_received") {
@@ -154,6 +174,8 @@ const BELL_EXPIRY_TICK_MS = 60_000;
  */
 export function useAcademyDashboardBell(academyId: string | null, links: BellLinks = {}) {
   const parentsPendingHref = links.parentsPendingHref ?? null;
+  const signupParentHref = links.signupLinkHrefs?.parent ?? null;
+  const signupStaffHref = links.signupLinkHrefs?.staff ?? null;
   const [inboxDocs, setInboxDocs] = useState<{ id: string; data: Record<string, unknown> }[]>(
     [],
   );
@@ -211,11 +233,16 @@ export function useAcademyDashboardBell(academyId: string | null, links: BellLin
     const now = nowMs;
     const out: DashboardNotificationRow[] = [];
     for (const d of inboxDocs) {
-      out.push(...mapInboxDoc(d.id, d.data, now, { parentsPendingHref }));
+      out.push(
+        ...mapInboxDoc(d.id, d.data, now, {
+          parentsPendingHref,
+          signupLinkHrefs: { parent: signupParentHref, staff: signupStaffHref },
+        }),
+      );
     }
     out.sort((a, b) => a.title.localeCompare(b.title, "ko"));
     return out;
-  }, [inboxDocs, nowMs, parentsPendingHref]);
+  }, [inboxDocs, nowMs, parentsPendingHref, signupParentHref, signupStaffHref]);
 
   rawItemsRef.current = rawItems;
 

@@ -3,6 +3,7 @@
 import { FirebaseError } from "firebase/app";
 import { httpsCallable } from "firebase/functions";
 import { useEffect, useState } from "react";
+import { AcademySignupLinkCard } from "@/components/academy/academy-signup-link-card";
 import { TempCredentialsDialog, type TempCredentialRow } from "@/components/academy/temp-credentials-dialog";
 import { ModalPortal } from "@/components/ui/modal-portal";
 import { withinViewerPermissions, type PermissionViewer } from "@/lib/academy/role-policy";
@@ -16,22 +17,18 @@ const MAX_INVITES = 10;
 const MAX_NAME_LENGTH = 60;
 const NEW_STAFF = "__new__";
 
-type InviteMode = "link" | "account";
+type InviteMode = "qr" | "account";
 
 type InviteRow = { key: number; staffId: string; displayName: string; roleId: string };
-
-type LinkResult =
-  | { displayName: string; ok: true; url: string; expiresAtMillis: number }
-  | { displayName: string; ok: false; message: string };
 
 type MemberInviteSheetProps = {
   academyId: string;
   roles: AcademyRoleVM[];
   viewer: PermissionViewer;
-  /** 계정 없는 직원(퇴사·게스트 제외) — 이미 등록된 직원을 골라 초대 */
+  /** 계정 없는 직원(퇴사·게스트 제외) — 이미 등록된 직원을 골라 계정을 만듦 */
   candidates: StaffRowVM[];
   onCloseAction: () => void;
-  /** 초대·계정이 만들어졌을 때 목록 새로고침(시트는 열어 둠) */
+  /** 계정이 만들어졌을 때 목록 새로고침(시트는 열어 둠) */
   onCreatedAction: () => void;
 };
 
@@ -39,26 +36,15 @@ const inputClass =
   "w-full rounded-xl border border-neutral-300/60 bg-white/70 px-3 py-2 text-sm text-foreground outline-none focus:border-[#4a90e2]/50";
 const btn =
   "rounded-xl border border-neutral-300/70 bg-white/70 px-3 py-2 text-xs font-medium text-foreground disabled:opacity-50";
-const primaryBtn =
-  "rounded-xl bg-[#222] px-3 py-2 text-xs font-medium text-white disabled:opacity-50";
 
 function errMsg(err: unknown, fallback: string): string {
   return err instanceof FirebaseError && err.message ? err.message : fallback;
 }
 
-function formatExpiry(ms: number): string {
-  return new Date(ms).toLocaleString("ko-KR", {
-    timeZone: "Asia/Seoul",
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 /**
- * 멤버 초대 시트 — 최대 10명을 한 번에.
- * 초대 링크: 사람마다 1회용 링크(받은 사람이 가입 → 승인 대기). 계정 직접 만들기: 로그인 ID·임시 비밀번호 즉시 발급.
+ * 멤버 초대 시트(2-K) — 두 갈래.
+ * 직원 가입 QR: 학원 공용 직원 가입 링크(받은 사람이 가입 → 승인 대기, 번호가 미리 등록한 직원과 같으면 승인 때 합칠 수 있음).
+ * 계정 직접 만들기: 최대 10명, 로그인 ID·임시 비밀번호 즉시 발급(휴대폰이 없거나 가입이 어려운 사람용).
  * 새 이름이면 직원 목록에도 추가되고, 계정 없는 기존 직원을 고를 수도 있다.
  */
 export function MemberInviteSheet({
@@ -73,15 +59,13 @@ export function MemberInviteSheet({
   const grantable = roles.filter((r) => withinViewerPermissions(viewer, r.permissions));
   const defaultRoleId = grantable.some((r) => r.id === "teacher") ? "teacher" : (grantable[0]?.id ?? "");
 
-  const [mode, setMode] = useState<InviteMode>("link");
+  const [mode, setMode] = useState<InviteMode>("qr");
   const [rows, setRows] = useState<InviteRow[]>([
     { key: 0, staffId: NEW_STAFF, displayName: "", roleId: defaultRoleId },
   ]);
   const [nextKey, setNextKey] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [linkResults, setLinkResults] = useState<LinkResult[] | null>(null);
-  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [issued, setIssued] = useState<TempCredentialRow[] | null>(null);
   const [failures, setFailures] = useState<{ displayName: string; message: string }[]>([]);
   /** 임시 비밀번호 창이 떠 있는 동안은 시트를 닫지 않음 */
@@ -128,23 +112,6 @@ export function MemberInviteSheet({
   const target = (r: InviteRow) =>
     r.staffId === NEW_STAFF ? { displayName: r.displayName.trim(), roleId: r.roleId } : { staffId: r.staffId, roleId: r.roleId };
 
-  const submitLinks = async () => {
-    const fn = httpsCallable(getFirebaseFunctions(), "createStaffInvite");
-    const results: LinkResult[] = [];
-    // 한 명씩 — 중간에 실패해도 만든 링크는 보여 줌
-    for (const r of rows) {
-      try {
-        const res = await fn({ academyId, ...target(r) });
-        const data = res.data as { url: string; expiresAtMillis: number };
-        results.push({ displayName: rowName(r), ok: true, url: data.url, expiresAtMillis: data.expiresAtMillis });
-      } catch (e) {
-        results.push({ displayName: rowName(r), ok: false, message: errMsg(e, "링크를 만들지 못했습니다.") });
-      }
-    }
-    setLinkResults(results);
-    if (results.some((x) => x.ok)) onCreatedAction();
-  };
-
   const submitAccounts = async () => {
     const fn = httpsCallable(getFirebaseFunctions(), "createStaffAccounts");
     try {
@@ -176,37 +143,19 @@ export function MemberInviteSheet({
       setError(invalid);
       return;
     }
-    if (
-      mode === "account" &&
-      !window.confirm(`${rows.length}명의 계정을 바로 만들까요? 임시 비밀번호는 한 번만 보여 드립니다.`)
-    ) {
+    if (!window.confirm(`${rows.length}명의 계정을 바로 만들까요? 임시 비밀번호는 한 번만 보여 드립니다.`)) {
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      if (mode === "link") await submitLinks();
-      else await submitAccounts();
+      await submitAccounts();
     } finally {
       setBusy(false);
     }
   };
 
-  const shareLink = async (result: Extract<LinkResult, { ok: true }>, index: number) => {
-    const text = `${result.displayName} 님, attn. 직원 초대 링크입니다. 링크에서 가입해 주세요.`;
-    if (typeof navigator.share === "function") {
-      try {
-        await navigator.share({ title: "attn. 직원 초대", text, url: result.url });
-      } catch {
-        /* 공유 취소 */
-      }
-      return;
-    }
-    await navigator.clipboard.writeText(result.url);
-    setCopiedIndex(index);
-  };
-
-  const showForm = linkResults === null && issued === null;
+  const showForm = issued === null;
 
   return (
     <ModalPortal>
@@ -239,7 +188,7 @@ export function MemberInviteSheet({
                 <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="초대 방법">
                   {(
                     [
-                      { id: "link", label: "초대 링크", hint: "받은 사람이 가입 → 승인 후 이용" },
+                      { id: "qr", label: "직원 가입 QR", hint: "받은 사람이 가입 → 승인 후 이용" },
                       { id: "account", label: "계정 직접 만들기", hint: "로그인 ID·임시 비밀번호 즉시 발급" },
                     ] as const
                   ).map((m) => (
@@ -263,110 +212,87 @@ export function MemberInviteSheet({
                   ))}
                 </div>
 
-                <ol className="space-y-2">
-                  {rows.map((r, i) => (
-                    <li key={r.key} className="space-y-2 rounded-2xl border border-neutral-200/80 bg-white/40 p-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-neutral-600">{i + 1}</span>
-                        {rows.length > 1 ? (
-                          <button
-                            type="button"
-                            className="text-[11px] text-neutral-500 underline"
-                            onClick={() => setRows((prev) => prev.filter((x) => x.key !== r.key))}
+                {mode === "qr" ? (
+                  <>
+                    <AcademySignupLinkCard academyId={academyId} kind="staff" />
+                    <p className="break-keep text-[11px] text-neutral-500">
+                      직원 관리에서 번호와 「가입하면 줄 권한」을 미리 등록해 두면, 같은 번호로 가입한 사람을 승인할 때
+                      「이 직원으로 승인」으로 인사 정보와 권한을 합칠 수 있어요.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                  <ol className="space-y-2">
+                    {rows.map((r, i) => (
+                      <li key={r.key} className="space-y-2 rounded-2xl border border-neutral-200/80 bg-white/40 p-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-neutral-600">{i + 1}</span>
+                          {rows.length > 1 ? (
+                            <button
+                              type="button"
+                              className="text-[11px] text-neutral-500 underline"
+                              onClick={() => setRows((prev) => prev.filter((x) => x.key !== r.key))}
+                            >
+                              빼기
+                            </button>
+                          ) : null}
+                        </div>
+                        {candidates.length > 0 ? (
+                          <select
+                            aria-label={`${i + 1}번째 직원`}
+                            value={r.staffId}
+                            onChange={(e) => updateRow(r.key, { staffId: e.target.value })}
+                            className={inputClass}
                           >
-                            빼기
-                          </button>
+                            <option value={NEW_STAFF}>새 직원 (이름 입력)</option>
+                            {candidates.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.displayName || "(이름 없음)"} · 직원 목록
+                              </option>
+                            ))}
+                          </select>
                         ) : null}
-                      </div>
-                      {candidates.length > 0 ? (
+                        {r.staffId === NEW_STAFF ? (
+                          <input
+                            aria-label={`${i + 1}번째 이름`}
+                            value={r.displayName}
+                            maxLength={MAX_NAME_LENGTH}
+                            onChange={(e) => updateRow(r.key, { displayName: e.target.value })}
+                            className={inputClass}
+                            placeholder="이름 (예: 김선생)"
+                          />
+                        ) : null}
                         <select
-                          aria-label={`${i + 1}번째 직원`}
-                          value={r.staffId}
-                          onChange={(e) => updateRow(r.key, { staffId: e.target.value })}
+                          aria-label={`${i + 1}번째 권한`}
+                          value={r.roleId}
+                          onChange={(e) => updateRow(r.key, { roleId: e.target.value })}
                           className={inputClass}
                         >
-                          <option value={NEW_STAFF}>새 직원 (이름 입력)</option>
-                          {candidates.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.displayName || "(이름 없음)"} · 직원 목록
+                          {grantable.map((role) => (
+                            <option key={role.id} value={role.id}>
+                              {role.name}
                             </option>
                           ))}
                         </select>
-                      ) : null}
-                      {r.staffId === NEW_STAFF ? (
-                        <input
-                          aria-label={`${i + 1}번째 이름`}
-                          value={r.displayName}
-                          maxLength={MAX_NAME_LENGTH}
-                          onChange={(e) => updateRow(r.key, { displayName: e.target.value })}
-                          className={inputClass}
-                          placeholder="이름 (예: 김선생)"
-                        />
-                      ) : null}
-                      <select
-                        aria-label={`${i + 1}번째 권한`}
-                        value={r.roleId}
-                        onChange={(e) => updateRow(r.key, { roleId: e.target.value })}
-                        className={inputClass}
-                      >
-                        {grantable.map((role) => (
-                          <option key={role.id} value={role.id}>
-                            {role.name}
-                          </option>
-                        ))}
-                      </select>
-                    </li>
-                  ))}
-                </ol>
+                      </li>
+                    ))}
+                  </ol>
 
-                <button
-                  type="button"
-                  className={`${btn} w-full py-3`}
-                  disabled={rows.length >= MAX_INVITES}
-                  onClick={addRow}
-                >
-                  {rows.length >= MAX_INVITES ? `한 번에 최대 ${MAX_INVITES}명까지` : "+ 한 명 더"}
-                </button>
-                <p className="text-[11px] text-neutral-500">
-                  {mode === "link"
-                    ? "링크는 72시간 동안 한 번 쓸 수 있고, 보안을 위해 만들 때 한 번만 보여 드립니다. 가입하면 멤버 목록에서 승인해 주세요."
-                    : "계정을 받은 사람은 첫 로그인 때 비밀번호를 새로 정하면 바로 이용할 수 있습니다."}
-                  {" "}새 이름은 직원 관리 목록에도 추가됩니다.
-                </p>
-              </>
-            ) : null}
-
-            {linkResults ? (
-              <ul className="space-y-2">
-                {linkResults.map((res, i) =>
-                  res.ok ? (
-                    <li key={i} className="space-y-2 rounded-2xl bg-sky-50 px-3 py-3 ring-1 ring-sky-200">
-                      <p className="text-sm font-medium text-sky-950">{res.displayName}</p>
-                      <p className="break-all font-mono text-[11px] text-sky-900">{res.url}</p>
-                      <p className="text-[11px] text-sky-900/80">{formatExpiry(res.expiresAtMillis)}까지 한 번 사용</p>
-                      <div className="flex gap-2">
-                        <button type="button" className={primaryBtn} onClick={() => void shareLink(res, i)}>
-                          공유하기
-                        </button>
-                        <button
-                          type="button"
-                          className={btn}
-                          onClick={() => {
-                            void navigator.clipboard.writeText(res.url);
-                            setCopiedIndex(i);
-                          }}
-                        >
-                          {copiedIndex === i ? "복사됨" : "링크 복사"}
-                        </button>
-                      </div>
-                    </li>
-                  ) : (
-                    <li key={i} className="rounded-2xl bg-red-500/10 px-3 py-3 text-xs text-red-800 ring-1 ring-red-500/15">
-                      <span className="font-medium">{res.displayName || "(이름 없음)"}</span> — {res.message}
-                    </li>
-                  ),
+                  <button
+                    type="button"
+                    className={`${btn} w-full py-3`}
+                    disabled={rows.length >= MAX_INVITES}
+                    onClick={addRow}
+                  >
+                    {rows.length >= MAX_INVITES ? `한 번에 최대 ${MAX_INVITES}명까지` : "+ 한 명 더"}
+                  </button>
+                  <p className="text-[11px] text-neutral-500">
+                    계정을 받은 사람은 첫 로그인 때 비밀번호를 새로 정하면 바로 이용할 수 있습니다. 새 이름은 직원 관리
+                    목록에도 추가됩니다.
+                  </p>
+                  </>
                 )}
-              </ul>
+              </>
             ) : null}
 
             {failures.length > 0 ? (
@@ -390,18 +316,14 @@ export function MemberInviteSheet({
 
         <footer className="shrink-0 border-t border-neutral-200/80 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
           <div className="mx-auto flex max-w-lg gap-2">
-            {showForm ? (
+            {showForm && mode === "account" ? (
               <button
                 type="button"
                 disabled={busy || grantable.length === 0}
                 onClick={() => void onSubmit()}
                 className="flex-1 rounded-2xl bg-[#222] py-3 text-sm font-medium text-white disabled:opacity-50"
               >
-                {busy
-                  ? "만드는 중…"
-                  : mode === "link"
-                    ? `초대 링크 ${rows.length}개 만들기`
-                    : `계정 ${rows.length}개 만들기`}
+                {busy ? "만드는 중…" : `계정 ${rows.length}개 만들기`}
               </button>
             ) : (
               <button

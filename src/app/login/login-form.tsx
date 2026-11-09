@@ -742,7 +742,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
                 placeholder={
                   role === "parent"
                     ? "가입 시 설정한 로그인 ID"
-                    : "초대 링크로 정한 ID 또는 학원이 만들어 준 ID"
+                    : "가입 링크로 정한 ID 또는 학원이 만들어 준 ID"
                 }
               />
             </div>
@@ -856,7 +856,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
               {role === "parent"
                 ? "가입 시 설정한 로그인 ID와 비밀번호로 로그인합니다. 링크 가입 전에 학원이 발급한 로그인 번호가 있다면 그 번호로도 로그인할 수 있습니다."
                 : role === "teacher"
-                  ? "학원에서 받은 초대 링크로 가입한 ID·비밀번호, 또는 학원이 만들어 준 ID와 임시 비밀번호로 로그인합니다. Google로 가입했거나 설정에서 Google을 연동했다면 Google로 로그인할 수 있습니다."
+                  ? "학원에서 받은 직원 가입 QR로 가입한 ID·비밀번호, 또는 학원이 만들어 준 ID와 임시 비밀번호로 로그인합니다. Google로 가입했거나 설정에서 Google을 연동했다면 Google로 로그인할 수 있습니다."
                   : null}
             </p>
           ) : null}

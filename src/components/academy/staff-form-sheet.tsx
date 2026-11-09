@@ -41,11 +41,13 @@ type StaffFormSheetProps = {
   viewer: PermissionViewer | null;
   onCloseAction: () => void;
   onSavedAction: (message: string) => void;
-  /** 초대 링크 발급·취소처럼 시트를 열어 둔 채 목록만 새로고침 */
+  /** 미리 등록·승인처럼 시트를 열어 둔 채 목록만 새로고침 */
   onListChangedAction: (message: string) => void;
+  /** 가입 승인 대기 계정과 같은 번호로 미리 등록한 직원(2-K) */
+  signupMatches?: StaffRowVM[];
 };
 
-/** 직원 추가·수정 전체 화면 시트 — 계정 초대·권한은 멤버 관리에서 */
+/** 직원 추가·수정 전체 화면 시트 — 미리 등록·계정·권한은 아래 계정 영역(멤버 관리 권한) */
 export function StaffFormSheet({
   academyId,
   target,
@@ -57,6 +59,7 @@ export function StaffFormSheet({
   onCloseAction,
   onSavedAction,
   onListChangedAction,
+  signupMatches,
 }: StaffFormSheetProps) {
   useBodyScrollLock(true);
   const [displayName, setDisplayName] = useState(target?.displayName ?? "");
@@ -270,10 +273,11 @@ export function StaffFormSheet({
                 viewer={viewer}
                 onChangedAction={onListChangedAction}
                 onCloseSheetAction={onSavedAction}
+                signupMatches={signupMatches}
               />
             ) : (
               <p className="text-xs text-neutral-500">
-                저장한 뒤 직원을 다시 열면 초대 링크를 보내거나 계정을 직접 만들 수 있습니다.
+                저장한 뒤 직원을 다시 열면 미리 등록(가입하면 줄 권한)하거나 계정을 직접 만들 수 있습니다.
               </p>
             )}
 

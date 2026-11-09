@@ -5,7 +5,7 @@ import { useCallback, useMemo, useState } from "react";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
 import { useAcademyShell } from "@/components/academy/academy-shell";
 import { StaffFormSheet } from "@/components/academy/staff-form-sheet";
-import { docToStaffRow, staffAccountLabel, type StaffRowVM } from "@/lib/academy/staff-row";
+import { docToStaffRow, staffAccountLabel, staffSignupMatches, type StaffRowVM } from "@/lib/academy/staff-row";
 import type { PermissionViewer } from "@/lib/academy/role-policy";
 import { useAcademyOptionList } from "@/lib/academy/use-academy-option-list";
 import { useAcademyRoles } from "@/lib/academy/use-academy-roles";
@@ -53,7 +53,7 @@ function StaffListInner({
   const [sheet, setSheet] = useState<{ target: StaffRowVM | null } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const { items: jobTitles, save: saveJobTitles } = useAcademyOptionList(academyId, "jobTitles");
-  // 초대·계정 발급·권한 바꾸기에 쓸 권한 목록 — 멤버 초대/권한 관리 권한이 있을 때만(서버가 템플릿 보장)
+  // 미리 등록·계정 발급·권한 바꾸기에 쓸 권한 목록 — 멤버 초대/권한 관리 권한이 있을 때만(서버가 템플릿 보장)
   const { roles } = useAcademyRoles(academyId, canManageMembers);
 
   const loadStaff = useCallback(async () => {
@@ -233,6 +233,9 @@ function StaffListInner({
             setNotice(message);
             refresh();
           }}
+          signupMatches={
+            sheet.target?.accountStatus === "pending_registration" ? staffSignupMatches(rows, sheet.target) : []
+          }
         />
       ) : null}
     </div>

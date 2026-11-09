@@ -440,12 +440,17 @@ describe("권한 없는 직원·비활성·무관한 계정", () => {
     await assertFails(getDocs(collection(db, academyPath("roles"))));
   });
 
-  it("직원 초대 문서(staffInvites)는 누구도 클라이언트로 읽지 못한다", async () => {
+  it("가입 QR 링크(signupLinks 해시 문서·secrets/signupLinks 원문)는 누구도 클라이언트로 읽거나 쓰지 못한다", async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await setDoc(doc(ctx.firestore(), "staffInvites", "hash-1"), { academyId: ACADEMY });
+      await setDoc(doc(ctx.firestore(), "signupLinks", "hash-1"), { academyId: ACADEMY, kind: "parent", enabled: true });
+      await setDoc(doc(ctx.firestore(), academyPath("secrets", "signupLinks")), { parent: { token: "t", tokenHash: "hash-1" } });
     });
-    await assertFails(getDoc(doc(dbAs(OWNER), "staffInvites", "hash-1")));
-    await assertFails(getDoc(doc(dbAs("staff-members"), "staffInvites", "hash-1")));
+    for (const who of [OWNER, "staff-members"]) {
+      await assertFails(getDoc(doc(dbAs(who), "signupLinks", "hash-1")));
+      await assertFails(getDoc(doc(dbAs(who), academyPath("secrets", "signupLinks"))));
+      await assertFails(setDoc(doc(dbAs(who), "signupLinks", "hash-2"), { academyId: ACADEMY, kind: "parent", enabled: true }));
+    }
+    await assertFails(getDoc(doc(testEnv.unauthenticatedContext().firestore(), "signupLinks", "hash-1")));
   });
 
   it("로그인 비밀번호 해시·연속 실패 잠금(secrets/login)은 본인·원장도 읽거나 쓰지 못한다", async () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { AcademyParentSignupLink } from "@/components/academy/academy-parent-signup-link";
+import { AcademySignupLinkCard } from "@/components/academy/academy-signup-link-card";
 import { useAcademyShell } from "@/components/academy/academy-shell";
 import {
   AcademyTreemap,
@@ -367,7 +367,7 @@ export function AcademyHome() {
       ) : null}
       {can("operations.parents") ? (
         <section className="mt-4">
-          <AcademyParentSignupLink academyId={academyId} />
+          <AcademySignupLinkCard academyId={academyId} kind="parent" />
         </section>
       ) : null}
       {canKiosk ? (

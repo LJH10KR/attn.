@@ -136,9 +136,10 @@ export function AcademyRegistrationOverlay({
                 <span className="font-mono font-medium text-foreground">{academyAttnId}</span>
                 입니다.
               </p>
-              <p className="mt-3 text-xs leading-relaxed text-neutral-500">
-                선생님·직원은 학원 대시보드의 직원 관리에서 초대 링크를 보내거나 계정을 직접 만들어 주세요.
-                학부모는 「학부모」 탭의 가입 링크로 직접 가입하도록 안내해 주세요.
+              <p className="mt-3 break-keep text-xs leading-relaxed text-neutral-500">
+                학부모 가입 QR은 운영 › 학부모 관리(홈에도 있어요)에서, 직원 가입 QR은 설정 › 멤버 초대/권한 관리 ›
+                「+ 멤버 초대」에서 공유할 수 있어요. 휴대폰이 없거나 가입이 어려운 분은 같은 곳에서 계정을 직접 만들어 줄
+                수 있어요.
               </p>
             </div>
           </div>

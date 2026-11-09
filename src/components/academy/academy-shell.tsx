@@ -167,6 +167,11 @@ export function AcademyShell({ children }: { children: ReactNode }) {
     parentsPendingHref: can("operations.parents")
       ? `${academyPath(academyId, "operations/parents")}?view=pending`
       : null,
+    // 가입 링크 한도 알림 — 그 링크를 관리할 수 있는 사람에게만
+    signupLinkHrefs: {
+      parent: can("operations.parents") ? academyPath(academyId, "operations/parents") : null,
+      staff: can("settings.members") ? academyPath(academyId, "settings/members") : null,
+    },
   });
 
   const { logout, logoutBusy, logoutModal } = useRoleLogout({

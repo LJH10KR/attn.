@@ -314,7 +314,7 @@ export const completeMemberFirstLogin = onCall(async (request) => {
   if (!memberSnap.exists) {
     throw new HttpsError("not-found", "멤버 정보를 찾을 수 없습니다.");
   }
-  // 학원이 직접 만들어 준 계정의 첫 로그인만 — 승인 대기(초대 링크 가입)·비활성 계정이 스스로 활성화하지 못하게
+  // 학원이 직접 만들어 준 계정의 첫 로그인만 — 승인 대기(가입 링크 가입)·비활성 계정이 스스로 활성화하지 못하게
   if (memberSnap.get("status") !== "pending_setup") {
     throw new HttpsError("failed-precondition", "첫 로그인 비밀번호 설정이 필요한 계정이 아닙니다.");
   }
