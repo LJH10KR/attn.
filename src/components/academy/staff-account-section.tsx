@@ -4,6 +4,7 @@ import { FirebaseError } from "firebase/app";
 import { httpsCallable } from "firebase/functions";
 import { useState } from "react";
 import { TempCredentialsDialog, type TempCredentialRow } from "@/components/academy/temp-credentials-dialog";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import {
   canChangeStaffAccount,
   withinViewerPermissions,
@@ -36,6 +37,10 @@ const primaryBtn =
 const dangerBtn = `${btn} text-red-700`;
 const selectClass =
   "w-full rounded-xl border border-neutral-300/60 bg-white/70 px-3 py-2 text-sm text-foreground";
+
+/** 써 오던 계정 삭제 확인 문구(2-L — 초대는 2-K에서 폐지, 다시 들어오는 길 안내) */
+export const STAFF_DELETE_KEEP_TEXT =
+  "인사 기록은 직원 관리에 「계정 없음」으로 남고, 나중에 계정을 직접 만들어 주거나, 미리 등록 후 직원 가입 QR로 다시 가입하게 할 수 있습니다.";
 
 function errMsg(err: unknown, fallback: string): string {
   return err instanceof FirebaseError && err.message ? err.message : fallback;
@@ -77,6 +82,9 @@ export function StaffAccountSection({
   const [credentials, setCredentials] = useState<IssuedCredentials | null>(null);
   /** 시트 안에서도 결과가 보이게(목록 알림은 시트 뒤에 가려짐) */
   const [done, setDone] = useState<string | null>(null);
+  /** 써 오던 계정 삭제 확인 시트(2-L S1 — 체크박스 때문에 window.confirm 대신) */
+  const [deleteSheetOpen, setDeleteSheetOpen] = useState(false);
+  const [deleteHrToo, setDeleteHrToo] = useState(false);
 
   const onChangedAction = (message: string) => {
     setDone(message);
@@ -166,26 +174,31 @@ export function StaffAccountSection({
 
   /**
    * reject: 가입 거절 / cancel: 첫 로그인 전 계정 취소 — 직원 정보까지 전체 삭제
-   * delete: 써 오던(비활성) 계정 — 서버가 로그인 계정만 지우고 인사 기록은 "계정 없음" 직원으로 남김
+   * delete: 써 오던(비활성) 계정 — 서버가 로그인 계정만 지우고 인사 기록은 "계정 없음" 직원으로 남김.
+   * delete는 확인 시트에서 "인사 기록도 함께 지우기"(기본 꺼짐, 2-L S1)를 고를 수 있다(`deleteHrRecord`).
    */
-  const removeAccount = async (kind: "reject" | "cancel" | "delete") => {
-    const question = {
-      reject: `${name} 님의 가입 신청을 거절할까요? 만들어진 계정이 삭제됩니다.`,
-      cancel: `${name} 님의 계정을 삭제할까요? 아직 첫 로그인 전이라 직원 정보도 함께 삭제되며 되돌릴 수 없습니다.`,
-      delete: `${name} 님의 로그인 계정을 삭제할까요? 인사 기록은 직원 관리에 「계정 없음」으로 남고, 나중에 다시 초대할 수 있습니다.`,
-    }[kind];
-    if (!window.confirm(question)) return;
+  const removeAccount = async (kind: "reject" | "cancel" | "delete", deleteHrRecord = false) => {
+    if (kind !== "delete") {
+      const question = {
+        reject: `${name} 님의 가입 신청을 거절할까요? 만들어진 계정이 삭제됩니다.`,
+        cancel: `${name} 님의 계정을 삭제할까요? 아직 첫 로그인 전이라 직원 정보도 함께 삭제되며 되돌릴 수 없습니다.`,
+      }[kind];
+      if (!window.confirm(question)) return;
+    }
     const data = await call(
       "deleteTeacherInvite",
-      { teacherId: target.id },
+      { teacherId: target.id, ...(kind === "delete" && deleteHrRecord ? { deleteHrRecord: true } : {}) },
       kind === "reject" ? "거절하지 못했습니다." : "삭제하지 못했습니다.",
     );
     if (data) {
+      setDeleteSheetOpen(false);
       onCloseSheetAction(
         {
           reject: `${name} 님의 가입 신청을 거절했습니다.`,
           cancel: `${name} 님의 계정과 직원 정보를 삭제했습니다.`,
-          delete: `${name} 님의 로그인 계정을 삭제했습니다. 인사 기록은 직원 관리에 남아 있습니다.`,
+          delete: deleteHrRecord
+            ? `${name} 님의 로그인 계정과 인사 기록을 삭제했습니다.`
+            : `${name} 님의 로그인 계정을 삭제했습니다. 인사 기록은 직원 관리에 남아 있습니다.`,
         }[kind],
       );
     }
@@ -455,7 +468,17 @@ export function StaffAccountSection({
                 <button type="button" className={primaryBtn} disabled={busy} onClick={() => void reactivate()}>
                   다시 활성화
                 </button>
-                <button type="button" className={dangerBtn} disabled={busy} onClick={() => void removeAccount("delete")}>
+                <button
+                  type="button"
+                  className={dangerBtn}
+                  disabled={busy}
+                  onClick={() => {
+                    setError(null);
+                    setDeleteHrToo(false);
+                    setDeleteSheetOpen(true);
+                  }}
+                  data-staff-account-delete
+                >
                   계정 삭제
                 </button>
               </>
@@ -492,6 +515,72 @@ export function StaffAccountSection({
         <p className="rounded-xl bg-emerald-500/10 px-3 py-2 text-emerald-900 ring-1 ring-emerald-500/20" role="status">
           {done}
         </p>
+      ) : null}
+
+      {deleteSheetOpen ? (
+        <ModalPortal>
+          <div
+            className="fixed inset-0 z-[260] flex items-end justify-center bg-black/40 sm:items-center"
+            role="presentation"
+            onClick={() => (busy ? undefined : setDeleteSheetOpen(false))}
+          >
+            <div
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="staff-delete-title"
+              className="w-full max-w-lg rounded-t-3xl bg-white p-5 pb-[calc(max(1.25rem,env(safe-area-inset-bottom))+30px)] text-sm shadow-2xl sm:rounded-3xl sm:pb-5"
+              onClick={(e) => e.stopPropagation()}
+              data-staff-delete-sheet
+            >
+              <h2 id="staff-delete-title" className="break-keep text-base font-semibold text-foreground">
+                {name} 님의 로그인 계정을 삭제할까요?
+              </h2>
+              <p className="mt-2 break-keep text-neutral-600">{STAFF_DELETE_KEEP_TEXT}</p>
+              <label className="mt-3 flex items-start gap-2 rounded-xl bg-neutral-50 px-3 py-2.5 text-neutral-800 ring-1 ring-neutral-200">
+                <input
+                  type="checkbox"
+                  checked={deleteHrToo}
+                  disabled={busy}
+                  onChange={(e) => setDeleteHrToo(e.target.checked)}
+                  className="mt-0.5 accent-red-600"
+                  data-staff-delete-hr
+                />
+                <span className="break-keep">
+                  인사 기록도 함께 지우기
+                  {deleteHrToo ? (
+                    <span className="mt-0.5 block text-[11px] text-red-700">
+                      직원 관리에서도 사라지며 되돌릴 수 없습니다.
+                    </span>
+                  ) : null}
+                </span>
+              </label>
+              {error ? (
+                <p className="mt-2 break-keep text-red-700" role="alert">
+                  {error}
+                </p>
+              ) : null}
+              <div className="mt-4 flex gap-2">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setDeleteSheetOpen(false)}
+                  className="flex-1 rounded-2xl border border-neutral-200 py-3 font-medium disabled:opacity-50"
+                >
+                  취소
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void removeAccount("delete", deleteHrToo)}
+                  className="flex-1 rounded-2xl bg-red-600 py-3 font-medium text-white disabled:opacity-50"
+                  data-staff-delete-confirm
+                >
+                  {busy ? "삭제하는 중…" : "계정 삭제"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
       ) : null}
 
       {credentials ? (

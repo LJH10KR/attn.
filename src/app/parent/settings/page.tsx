@@ -6,7 +6,7 @@ import { doc, getDoc, setDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { KrPhoneInput } from "@/components/ui/kr-phone-input";
+import { PhoneChangeSheet } from "@/components/phone-verification/phone-change-sheet";
 import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
@@ -26,11 +26,11 @@ import {
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { useDashboardRefetchOnFocus } from "@/lib/firebase/use-dashboard-refetch-on-focus";
 import { formatKrPhoneDisplay } from "@/lib/phone/kr-phone";
+import { octomoPhoneKey } from "@/lib/phone/octomo-phone-key";
 import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
-import { useRoleLogout } from "@/lib/auth/use-role-logout";
-import { LegalLinks } from "@/components/legal/legal-links";
+import { useRoleLogout } from "@/lib/auth/use-role-logout";import { LegalLinks } from "@/components/legal/legal-links";
 
 const inputClass =
   "w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3 text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50";
@@ -50,6 +50,9 @@ export default function ParentSettingsPage() {
   });
   const [displayName, setDisplayName] = useState("");
   const [phone, setPhone] = useState("");
+  const [phoneVerified, setPhoneVerified] = useState(false);
+  const [phoneSheetOpen, setPhoneSheetOpen] = useState(false);
+  const [phoneMessage, setPhoneMessage] = useState<string | null>(null);
   const [loginId, setLoginId] = useState("");
   const [attnId, setAttnId] = useState("");
   const [authProvider, setAuthProvider] = useState<string>("");
@@ -126,7 +129,9 @@ export default function ParentSettingsPage() {
     const snap = await getDoc(doc(db, "academies", primaryAcademyId, "parents", uid));
     const d = snap.data();
     setDisplayName(typeof d?.displayName === "string" ? d.displayName : "");
-    setPhone(formatKrPhoneDisplay(typeof d?.phone === "string" ? d.phone : ""));
+    const storedPhone = typeof d?.phone === "string" ? d.phone : "";
+    setPhone(formatKrPhoneDisplay(storedPhone));
+    setPhoneVerified(octomoPhoneKey(storedPhone) !== "" && d?.phoneVerifiedKey === octomoPhoneKey(storedPhone));
     setLoginId(typeof d?.loginId === "string" ? d.loginId : "");
     setAttnId(typeof d?.attnId === "string" ? d.attnId : "");
     setAuthProvider(typeof d?.authProvider === "string" ? d.authProvider : "");
@@ -144,10 +149,8 @@ export default function ParentSettingsPage() {
     setProfileBusy(true);
     try {
       const fn = httpsCallable(getFirebaseFunctions(), "updateParentProfile");
-      await fn({
-        displayName: displayName.trim(),
-        phone: phone.trim(),
-      });
+      // 번호는 [번호 바꾸기](문자 확인 필수)로만 바꾼다 — 여기서는 이름만
+      await fn({ displayName: displayName.trim() });
       await refreshProfile();
       setProfileSaved(true);
     } catch (e) {
@@ -157,7 +160,7 @@ export default function ParentSettingsPage() {
     } finally {
       setProfileBusy(false);
     }
-  }, [displayName, phone, refreshProfile]);
+  }, [displayName, refreshProfile]);
 
   const affiliationLabel =
     primaryAcademyId === undefined
@@ -253,13 +256,36 @@ export default function ParentSettingsPage() {
               >
                 전화번호
               </label>
-              <KrPhoneInput
-                id="p-phone"
-                className={inputClass}
-                value={phone}
-                onChange={setPhone}
-                disabled={profileBusy || logoutBusy}
-              />
+              <div className="flex items-center gap-2">
+                <p
+                  id="p-phone"
+                  className="min-w-0 flex-1 truncate rounded-2xl border border-neutral-300/60 bg-white/30 px-4 py-3 font-mono text-sm text-foreground dark:border-white/12"
+                >
+                  {phone || "없음"}
+                </p>
+                <button
+                  type="button"
+                  disabled={profileBusy || logoutBusy || !primaryAcademyId}
+                  onClick={() => {
+                    setPhoneMessage(null);
+                    setPhoneSheetOpen(true);
+                  }}
+                  className="shrink-0 rounded-2xl border border-neutral-300/70 bg-white/70 px-3 py-3 text-xs font-medium text-foreground disabled:opacity-50"
+                  data-phone-change-open
+                >
+                  번호 바꾸기
+                </button>
+              </div>
+              {phone ? (
+                <p className="mt-1 text-[11px] text-neutral-500" data-phone-verified={phoneVerified ? "yes" : "no"}>
+                  {phoneVerified ? "문자로 확인된 번호예요." : "아직 문자로 확인하지 않은 번호예요."}
+                </p>
+              ) : null}
+              {phoneMessage ? (
+                <p className="mt-1 break-keep text-sm text-emerald-800" role="status">
+                  {phoneMessage}
+                </p>
+              ) : null}
             </div>
             {profileError ? (
               <p className="text-sm text-red-700">{profileError}</p>
@@ -337,6 +363,32 @@ export default function ParentSettingsPage() {
         <LegalLinks className="mt-6" />
       </div>
 
+      {phoneSheetOpen ? (
+        <PhoneChangeSheet
+          title="번호 바꾸기"
+          intro="새 번호로 문자 확인을 마치면 계정 번호와 학원에 연결된 자녀의 보호자 번호가 함께 바뀌어요."
+          initialPhone=""
+          currentPhone={phone}
+          currentVerified={phoneVerified}
+          submitAction={async (nextPhone, proof) => {
+            const res = await httpsCallable(getFirebaseFunctions(), "updateParentProfile")({
+              phone: nextPhone,
+              phoneProof: proof,
+            });
+            const linkedCount = (res.data as { linkedCount?: number }).linkedCount ?? 0;
+            return linkedCount > 0
+              ? `번호를 확인해 바꿨어요. 자녀 ${linkedCount}명과 새로 연결됐어요.`
+              : "번호를 확인해 바꿨어요.";
+          }}
+          onDoneAction={(message) => {
+            setPhoneSheetOpen(false);
+            setPhoneMessage(message);
+            void refreshParentMember();
+            void refreshProfile();
+          }}
+          onCloseAction={() => setPhoneSheetOpen(false)}
+        />
+      ) : null}
       <DashboardBottomScrim />
       {logoutModal}
     </div>

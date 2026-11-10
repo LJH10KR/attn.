@@ -140,7 +140,7 @@ export {
   setStaffSignupRole,
 } from "./staff-signup";
 export { getSignupLink, regenerateSignupLink, setParentAutoLink, setSignupLinkEnabled } from "./signup-links";
-export { declineParentChildLink } from "./parent-self-service";
+export { declineParentChildLink, resolveParentPhoneNotice } from "./parent-self-service";
 export {
   assignStaffRole,
   deleteAcademyRole,

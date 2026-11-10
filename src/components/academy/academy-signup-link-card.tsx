@@ -46,10 +46,21 @@ function errMsg(err: unknown, fallback: string): string {
   return err instanceof FirebaseError && err.message ? err.message : fallback;
 }
 
+export const QR_SHARE_UNSUPPORTED = "이 기기에서는 이미지를 바로 공유할 수 없어요. [이미지 저장] 후 사진으로 보내 주세요.";
+
+/** 기기 안에서 만든 QR data URL → PNG 파일(네트워크 없이 — fetch(data:)는 CSP connect-src에 걸릴 수 있음) */
+function pngFileFromDataUrl(dataUrl: string, fileName: string): File {
+  const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+  return new File([bytes], fileName, { type: "image/png" });
+}
+
 /**
  * 가입 QR 카드(2-K) — 학부모(홈·학부모 관리)·직원(멤버 초대) 공용.
  * 링크에는 학원 ID가 아닌 무작위 토큰만 들어가고(서버가 처음 볼 때 만듦), 권한 있는 사람만 토큰을 받는다.
- * 공유창·링크 복사·QR(기기 안에서 그림, `<img>`로 보여 길게 눌러 저장)·이미지 저장, [다시 만들기]·[가입 받기 끄기/켜기].
+ * 공유창·링크 복사·QR(기기 안에서 그림, `<img>`로 보여 길게 눌러 저장)·QR 이미지 공유(2-L S2)·이미지 저장, [다시 만들기]·[가입 받기 끄기/켜기].
  */
 export function AcademySignupLinkCard({
   academyId,
@@ -73,6 +84,7 @@ export function AcademySignupLinkCard({
   const [canShare, setCanShare] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [qrShareError, setQrShareError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -157,6 +169,23 @@ export function AcademySignupLinkCard({
       setQrDataUrl(null);
     }
   }, [qrOpen, signupUrl]);
+
+  /** S2(2-L) — QR을 PNG 파일로 공유창에 넘김(카톡 등에 사진으로). 파일 공유를 못 하는 기기는 [이미지 저장] 안내 */
+  const shareQrImage = useCallback(async () => {
+    if (!qrDataUrl) return;
+    setQrShareError(null);
+    try {
+      const file = pngFileFromDataUrl(qrDataUrl, text.fileName);
+      if (typeof navigator.canShare !== "function" || typeof navigator.share !== "function" || !navigator.canShare({ files: [file] })) {
+        setQrShareError(QR_SHARE_UNSUPPORTED);
+        return;
+      }
+      await navigator.share({ files: [file], title: text.shareTitle });
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      setQrShareError(QR_SHARE_UNSUPPORTED);
+    }
+  }, [qrDataUrl, text.fileName, text.shareTitle]);
 
   const saveQr = useCallback(() => {
     if (!qrDataUrl) return;
@@ -272,7 +301,15 @@ export function AcademySignupLinkCard({
             <button type="button" onClick={() => void copy()} className={canShare ? btnClass : primaryBtnClass}>
               {copied ? "복사됨" : "링크 복사"}
             </button>
-            <button type="button" onClick={() => setQrOpen((v) => !v)} aria-expanded={qrOpen} className={btnClass}>
+            <button
+              type="button"
+              onClick={() => {
+                setQrShareError(null);
+                setQrOpen((v) => !v);
+              }}
+              aria-expanded={qrOpen}
+              className={btnClass}
+            >
               {qrOpen ? "QR 닫기" : "QR 보기"}
             </button>
           </div>
@@ -308,9 +345,25 @@ export function AcademySignupLinkCard({
               <p className="break-keep text-center text-[11px] text-neutral-500">
                 휴대폰 카메라로 찍으면 가입 화면이 열립니다. 저장이 안 되면 QR을 길게 눌러 저장해 주세요.
               </p>
-              <button type="button" onClick={saveQr} disabled={!qrDataUrl} className={btnClass}>
-                이미지 저장
-              </button>
+              <div className="flex flex-wrap justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void shareQrImage()}
+                  disabled={!qrDataUrl}
+                  className={primaryBtnClass}
+                  data-qr-share
+                >
+                  QR 이미지 공유
+                </button>
+                <button type="button" onClick={saveQr} disabled={!qrDataUrl} className={btnClass}>
+                  이미지 저장
+                </button>
+              </div>
+              {qrShareError ? (
+                <p className="break-keep text-center text-[11px] text-amber-800" role="status" data-qr-share-error>
+                  {qrShareError}
+                </p>
+              ) : null}
             </div>
           ) : null}
           <div className="flex flex-wrap gap-2 border-t border-neutral-200/70 pt-3">

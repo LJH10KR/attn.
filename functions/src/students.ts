@@ -8,8 +8,10 @@ import { assertPermission } from "./lib/academy-access";
 import { academySeqMetaPath, formatStudentAttnId } from "./lib/attn-id";
 import { deleteStudentDocs } from "./lib/firestore-cleanup";
 import { parseOptionalKrPhone } from "./lib/kr-phone";
-import { refreshParentLinkSummary, syncStudentPaymentParents } from "./lib/parent-links";
+import { parentDocRef, refreshParentLinkSummary, syncStudentPaymentParents } from "./lib/parent-links";
 import { autoLinkNewGuardianPhones, newGuardianPhoneKeys } from "./lib/parent-auto-link";
+import { changedLinkedGuardianPhones, phoneNoticeActionFor } from "./lib/parent-phone-change";
+import { sendParentAppPush } from "./lib/parent-push";
 import { readUidList } from "./lib/parent-recipients";
 import {
   deriveGuardianFields,
@@ -168,20 +170,20 @@ export const saveStudent = onCall(async (request) => {
   }
 
   const ref = studentsCol.doc(studentId);
-  const attnId = await db.runTransaction(async (tx) => {
+  const { attnId, noticeParentUids } = await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) {
       throw new HttpsError("not-found", "원생 정보를 찾을 수 없습니다.");
     }
     // 보호자 목록을 보내지 않으면 그대로 둔다([]만 전부 삭제). 연결(linkedParentUid)은 이 트랜잭션에서 읽은 값에서만 이어받는다
     const guardiansRaw = request.data?.guardians;
-    const guardiansPatch =
-      guardiansRaw === undefined || guardiansRaw === null
-        ? {}
-        : (() => {
-          const guardians = parseGuardiansInput(guardiansRaw, readGuardians(snap.get("guardians")), relationIds);
-          return { guardians, ...deriveGuardianFields(guardians) };
-        })();
+    const before = readGuardians(snap.get("guardians"));
+    const guardians =
+      guardiansRaw === undefined || guardiansRaw === null ? null : parseGuardiansInput(guardiansRaw, before, relationIds);
+    const guardiansPatch = guardians ? { guardians, ...deriveGuardianFields(guardians) } : {};
+    // 2-L L3-1-2(★4) — 연결된 칸 번호가 바뀌면 그 학부모 문서에 번호 확인 안내(계정 번호와 같아졌으면 안내 삭제)
+    const linkedChanges = guardians ? changedLinkedGuardianPhones(before, guardians) : [];
+    const parentSnaps = await Promise.all(linkedChanges.map((c) => tx.get(parentDocRef(db, academyId, c.uid))));
     const grade = resolveGrade(
       request.data?.grade,
       { grade: snap.get("grade"), gradeYear: snap.get("gradeYear") },
@@ -203,10 +205,39 @@ export const saveStudent = onCall(async (request) => {
         updatedAt: FieldValue.serverTimestamp(),
       });
     }
+    const notified: string[] = [];
+    linkedChanges.forEach((c, i) => {
+      const p = parentSnaps[i]!;
+      if (!p.exists) return;
+      const field = `phoneNotice.byStudent.${studentId}`;
+      if (phoneNoticeActionFor(p.get("phone"), c.phone) === "clear") {
+        if (p.get(field) !== undefined) {
+          tx.update(p.ref, { [field]: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp() });
+        }
+        return;
+      }
+      tx.update(p.ref, {
+        [field]: { studentName: name, phone: c.phone, changedAt: FieldValue.serverTimestamp() },
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      notified.push(typeof p.get("authUid") === "string" && p.get("authUid") ? (p.get("authUid") as string) : p.id);
+    });
     const existingAttnId = snap.get("attnId");
-    return typeof existingAttnId === "string" ? existingAttnId : "";
+    return { attnId: typeof existingAttnId === "string" ? existingAttnId : "", noticeParentUids: notified };
   });
-  return { ok: true as const, studentId, attnId };
+  // 커밋 뒤 그 학부모에게 푸시 1회(실패 무시, 번호는 넣지 않음) — 앱을 열면 안내 창
+  await Promise.all(
+    noticeParentUids.map((recipientUid) =>
+      sendParentAppPush(db, recipientUid, {
+        body: `학원에서 ${name} 학생의 보호자 번호를 바꿨어요. 앱을 열어 지금 쓰는 번호를 확인해 주세요.`,
+        type: "parent_phone_notice",
+        url: "/parent",
+        academyId,
+        studentId,
+      }),
+    ),
+  );
+  return { ok: true as const, studentId, attnId, phoneNoticeCount: noticeParentUids.length };
 });
 
 /** 원생 삭제 — 학생 문서·하위 기록·메모 */

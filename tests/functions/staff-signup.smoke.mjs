@@ -175,6 +175,18 @@ const otherActive = await other.ref.get();
 assert.equal(otherActive.get("status"), "active");
 assert.equal(otherActive.get("roleId"), "teacher", "새 직원으로 승인 = 기본 역할");
 
+// --- 2-L S1: 계정 삭제 + "인사 기록도 함께 지우기"(deleteHrRecord) → 사용 중 계정도 인사 기록까지 삭제 ---
+const otherName = otherActive.get("displayName");
+const wiped = await call("deleteTeacherInvite", { academyId: A, teacherId: other.id, deleteHrRecord: true });
+assert.equal(wiped.keptStaffId, null, "인사 기록 남기지 않음");
+assert.equal((await other.ref.get()).exists, false);
+assert.equal(
+  (await db.collection(`academies/${A}/staff`).where("displayName", "==", otherName).get()).size,
+  0,
+  "계정 없음 직원으로도 남지 않음",
+);
+await assert.rejects(adminAuth().getUser(other.id), /no user record|user-not-found/i, "Auth 사용자 삭제");
+
 // --- 직접 만들어 주기(그대로) ---
 const hr2 = await call("saveStaffMember", { academyId: A, displayName: "직접 만든 직원", employmentStatus: "employed" });
 const { accounts } = await call("createStaffAccounts", { academyId: A, items: [{ staffId: hr2.staffId, roleId: "teacher" }] });

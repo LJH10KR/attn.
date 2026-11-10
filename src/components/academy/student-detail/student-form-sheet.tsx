@@ -30,6 +30,12 @@ const MEMO_MAX = 1000;
 /** 서버 `LINKED_GUARDIAN_REMOVE_MSG`(functions/src/lib/student-guardians.ts)의 앞부분 */
 const LINKED_GUARDIAN_REJECT_TEXT = "앱에 연결된 보호자입니다";
 
+/** 연결된 칸 번호를 고칠 때 바로 아래 안내(2-L L3-1-2) */
+export const LINKED_PHONE_CHANGE_HINT =
+  "앱에 연결된 보호자예요. 같은 분의 번호가 바뀐 경우에만 고치고, 다른 분으로 바꾸려면 학부모 관리에서 연결을 해제한 뒤 새 보호자로 추가해 주세요.";
+/** 연결된 칸 번호를 바꿔 저장한 뒤 토스트 — 서버가 학부모 앱에 번호 확인 안내(푸시 + 안내 창)를 남김 */
+export const PHONE_NOTICE_SENT_TOAST = "학부모 앱에 번호 확인 안내를 보냈어요.";
+
 const inputClass =
   "w-full rounded-2xl border border-neutral-300/60 bg-white/50 px-4 py-3 text-sm text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50 focus:bg-white/70 disabled:opacity-60";
 
@@ -255,8 +261,16 @@ export function StudentFormSheet({
           : {}),
         ...(memoChanged ? { memo: memo.trim() } : {}),
       });
-      const studentId = (res.data as { studentId?: string }).studentId ?? target?.id ?? "";
-      onSavedAction(target ? `${name.trim()} 원생 정보를 저장했습니다.` : `${name.trim()} 원생을 추가했습니다.`, studentId);
+      const saved = res.data as { studentId?: string; phoneNoticeCount?: number };
+      const studentId = saved.studentId ?? target?.id ?? "";
+      onSavedAction(
+        (saved.phoneNoticeCount ?? 0) > 0
+          ? PHONE_NOTICE_SENT_TOAST
+          : target
+            ? `${name.trim()} 원생 정보를 저장했습니다.`
+            : `${name.trim()} 원생을 추가했습니다.`,
+        studentId,
+      );
     } catch (e) {
       const message = errMsg(e, "저장하지 못했습니다.");
       // 연결된 항목을 지우지 않았는데 거부 → 시트를 연 사이 다른 곳(학부모 관리)에서 연결된 보호자가 생김
@@ -471,9 +485,12 @@ export function StudentFormSheet({
                         disabled={busy}
                       />
                       {linked ? (
-                        <p className="mt-2 break-keep text-[11px] leading-relaxed text-neutral-500">
+                        <p
+                          className={`mt-2 break-keep text-[11px] leading-relaxed ${phoneChanged ? "text-amber-800" : "text-neutral-500"}`}
+                          data-linked-phone-hint={phoneChanged ? "changed" : "linked"}
+                        >
                           {phoneChanged
-                            ? "번호를 바꿔도 앱 연결은 유지됩니다. 다른 분의 번호라면 학부모 관리에서 연결을 먼저 해제해 주세요."
+                            ? LINKED_PHONE_CHANGE_HINT
                             : "앱에 연결된 보호자는 학부모 관리에서 연결을 해제한 뒤 삭제할 수 있어요."}
                         </p>
                       ) : null}

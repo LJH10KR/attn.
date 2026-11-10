@@ -75,6 +75,21 @@ async function waitFor(label, check, timeoutMs = 20000) {
   }
 }
 
+const mirror = async (uid) => (await db.doc(`users/${uid}/serverMirror/activation`).get()).data() ?? {};
+/**
+ * 자동 활성·자동 연결 직후 바로 이용 — 클레임(서버가 활성과 함께 씀)·로그인 응답은 바로 active,
+ * 미러(트리거가 씀)는 짧게 기다려 active, 그 뒤 3초가 지나도 옛 상태(대기)로 덮이지 않음(2-L L-3 보강).
+ */
+async function assertStaysActive(role, uid, loginId) {
+  assert.equal((await adminAuth().getUser(uid)).customClaims?.membershipStatus, "active", `${loginId}: 직후 클레임`);
+  const login = await call(role === "teacher" ? "signInTeacher" : "signInParent", { loginId, password: "pw123456" });
+  assert.equal(login.membershipStatus, "active", `${loginId}: 로그인 응답`);
+  await waitFor(`${loginId}: 미러 active`, async () => (await mirror(uid))[role]?.primaryStatus === "active", 10000);
+  await sleep(3000);
+  assert.equal((await adminAuth().getUser(uid)).customClaims?.membershipStatus, "active", `${loginId}: 대기 뒤 클레임`);
+  assert.equal((await mirror(uid))[role]?.primaryStatus, "active", `${loginId}: 대기 뒤 미러`);
+}
+
 /** 번호 확인(가짜 OCTOMO true) → 증표 */
 async function proofFor(phone, purpose = "parent_signup", token = P) {
   const s = await call("startPhoneVerification", { purpose, token, phone });
@@ -286,12 +301,10 @@ assert.equal(st1.get("roleId"), "lessonManager");
 assert.equal(st1.get("mergedFromStaffId"), hr1);
 assert.equal(st1.get("displayName"), "미리 선생", "미리 등록한 이름");
 assert.equal((await db.doc(`academies/${A}/staff/${hr1}`).get()).exists, false, "인사 문서 합쳐짐");
-assert.equal((await adminAuth().getUser(st1.id)).customClaims.membershipStatus, "active");
 const sb = await bell(`s-autoact-${st1.id}`);
 assert.equal(sb.get("kind"), "staff_auto_activated");
 assert.equal(sb.get("roleId"), "lessonManager");
-const tLogin = await call("signInTeacher", { loginId: "autostaff1", password: "pw123456" });
-assert.equal(tLogin.membershipStatus, "active");
+await assertStaysActive("teacher", st1.id, "autostaff1");
 // 후보 2명 / 역할 없음 / 번호 미확인 → 승인 대기
 for (const [loginId, phone, verify] of [["autostaff2", H2, true], ["autostaff3", H3, true], ["autostaff4", H4, false]]) {
   const r = await staffSignup(loginId, phone, verify);
@@ -299,6 +312,45 @@ for (const [loginId, phone, verify] of [["autostaff2", H2, true], ["autostaff3",
   assert.equal((await staffByLogin(loginId)).get("status"), "pending_registration", loginId);
 }
 assert.equal((await bellsOfKind("staff_auto_activated")).length, 1);
+
+// --- 클레임·미러 늦은 덮어쓰기 가드(2-L L-3 보강) — 생성과 활성이 한 요청에서 일어나는 두 경로를 여러 번 반복 ---
+// 직원 자동 활성(provision → merge)
+for (let i = 1; i <= 6; i += 1) {
+  const phone = `010-3300-000${i}`;
+  await asOwner();
+  await hr(`반복 선생${i}`, phone, "lessonManager");
+  await signOut(auth);
+  const r = await staffSignup(`racestaff${i}`, phone, true);
+  assert.equal(r.membershipStatus, "active", `반복 직원 ${i}`);
+  await assertStaysActive("teacher", (await staffByLogin(`racestaff${i}`)).id, `racestaff${i}`);
+}
+// 학부모 가입 자동 연결(pending_approval → active)
+for (let i = 1; i <= 6; i += 1) {
+  const phone = `010-2200-000${i}`;
+  await asOwner();
+  await mk(`반복 원생${i}`, [{ relationId: "mother", phone }]);
+  const p = await parentSignup(phone);
+  assert.equal(p.res.membershipStatus, "active", `반복 학부모 ${i}`);
+  assert.equal(p.res.linkedCount, 1);
+  await assertStaysActive("parent", p.uid, p.loginId);
+}
+// 결정적 재현 — "먼저 계산하고 늦게 쓰는 실행": 옛 상태(대기)로 계산해 둔 값으로 시작해도 쓰고 다시 확인해 active로 끝남
+const { reconcileUserActivationMirror } = requireFns("./lib/user-activation-mirror.js");
+const staleTeacher = {
+  teacher: { anyActive: false, primaryStatus: "pending_registration", primaryAcademyId: A },
+  parent: { anyActive: false, primaryStatus: null, primaryAcademyId: null },
+};
+const fixed = await reconcileUserActivationMirror(fnsDb, st1.id, "trigger", { precomputed: staleTeacher });
+assert.equal(fixed.teacher.primaryStatus, "active", "다시 계산한 값");
+assert.equal((await adminAuth().getUser(st1.id)).customClaims.membershipStatus, "active", "옛 값으로 덮이지 않음(클레임)");
+assert.equal((await mirror(st1.id)).teacher.primaryStatus, "active", "옛 값으로 덮이지 않음(미러)");
+const staleParent = {
+  teacher: { anyActive: false, primaryStatus: null, primaryAcademyId: null },
+  parent: { anyActive: false, primaryStatus: "pending_approval", primaryAcademyId: A },
+};
+await reconcileUserActivationMirror(fnsDb, mom.uid, "trigger", { precomputed: staleParent });
+assert.equal((await adminAuth().getUser(mom.uid)).customClaims.membershipStatus, "active");
+assert.equal((await mirror(mom.uid)).parent.primaryStatus, "active");
 
 console.log("SMOKE OK parent-auto-link");
 process.exit(0);

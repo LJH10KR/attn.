@@ -2,7 +2,7 @@ import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { assertPermission } from "./lib/academy-access";
-import { parseOptionalKrPhone } from "./lib/kr-phone";
+import { digitsOnlyKrPhone, parseOptionalKrPhone } from "./lib/kr-phone";
 import { DEFAULT_STAFF_ROLE_ID, normalizePermissionList } from "./lib/permissions";
 import { staffAccountChangeViolation } from "./lib/role-policy";
 import { academyOptionsRef, readOptionItems } from "./academy-options";
@@ -150,12 +150,15 @@ export const saveStaffMember = onCall(async (request) => {
     }
   }
 
+  // 원장이 번호를 고치면 그 번호는 "확인 안 됨"(2-L L3-1-3) — 문자로 확인한 번호만 확인 표시(2-M 찾기에도 안 쓰임)
+  const oldPhone = typeof snap.get("phone") === "string" ? (snap.get("phone") as string) : "";
+  const phoneChanged = digitsOnlyKrPhone(phone ?? "") !== digitsOnlyKrPhone(oldPhone);
   // 퇴사하면 미리 등록(가입하면 줄 권한)도 지움 — 가입 승인 화면의 후보에서도 빠짐
-  await ref.update(
-    becomesResigned
-      ? { ...hr, signupRoleId: FieldValue.delete(), signupRoleSetByUid: FieldValue.delete() }
-      : hr,
-  );
+  await ref.update({
+    ...hr,
+    ...(becomesResigned ? { signupRoleId: FieldValue.delete(), signupRoleSetByUid: FieldValue.delete() } : {}),
+    ...(phoneChanged ? { phoneVerifiedKey: FieldValue.delete(), phoneVerifiedAt: FieldValue.delete() } : {}),
+  });
   if (deactivateAccount) {
     await deactivateStaffAccount(db, academyId, staffId);
   }

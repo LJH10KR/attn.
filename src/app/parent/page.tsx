@@ -42,8 +42,8 @@ import { useRoleLogout } from "@/lib/auth/use-role-logout";
 import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
-import { FirebaseError } from "firebase/app";
-import { ParentDeclineChildButton } from "@/components/parent/parent-decline-child";
+import { FirebaseError } from "firebase/app";import { ParentDeclineChildButton } from "@/components/parent/parent-decline-child";
+import { PARENT_CHILDREN_CHANGED_EVENT } from "@/components/parent/parent-phone-notice";
 
 const glassCard = "glass-card";
 
@@ -405,6 +405,13 @@ export default function ParentDashboardPage() {
       setListRefreshBusy(false);
     }
   }, [academyId]);
+
+  // 번호 변경 안내 처리(2-L L-3)로 자녀가 새로 연결되면 목록 다시 받기
+  useEffect(() => {
+    const onChanged = () => void refreshChildrenList();
+    window.addEventListener(PARENT_CHILDREN_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(PARENT_CHILDREN_CHANGED_EVENT, onChanged);
+  }, [refreshChildrenList]);
 
   // PWA에서 모바일 REDIRECTION 결제 시 나이스 결제 페이지가 시스템 브라우저로 열려
   // 결제 완료 후 PWA로 자동 복귀되지 않는다 — /payment/complete가 localStorage에 남긴

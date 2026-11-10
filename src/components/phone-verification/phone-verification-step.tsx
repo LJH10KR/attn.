@@ -65,6 +65,7 @@ export function PhoneVerificationStep({
   phone,
   allowSkip,
   skipNote,
+  unavailableText = PHONE_VERIFY_TEXT.unavailable,
   onVerifiedAction,
   onSkipAction,
   onEditPhoneAction,
@@ -77,6 +78,8 @@ export function PhoneVerificationStep({
   allowSkip: boolean;
   /** 건너뛰면 어떻게 되는지 한 줄 */
   skipNote?: string;
+  /** 한도·장애 문구 — 번호 변경은 "학원에 번호 변경을 요청" 안내까지(건너뛰기 없음) */
+  unavailableText?: string;
   onVerifiedAction: (proof: string) => void;
   onSkipAction?: () => void;
   onEditPhoneAction?: () => void;
@@ -108,13 +111,13 @@ export function PhoneVerificationStep({
       } else {
         setView({
           kind: "blocked",
-          message: d.status === "unsupported_phone" ? PHONE_VERIFY_TEXT.unsupported : PHONE_VERIFY_TEXT.unavailable,
+          message: d.status === "unsupported_phone" ? PHONE_VERIFY_TEXT.unsupported : unavailableText,
         });
       }
     } catch (e) {
-      setView({ kind: "blocked", message: signupErrorMessage(e, PHONE_VERIFY_TEXT.unavailable) });
+      setView({ kind: "blocked", message: signupErrorMessage(e, unavailableText) });
     }
-  }, [purpose, phone, token]);
+  }, [purpose, phone, token, unavailableText]);
 
   useEffect(() => {
     const key = `${purpose}|${phone}|${token ?? ""}`;
@@ -149,10 +152,10 @@ export function PhoneVerificationStep({
           setView({ kind: "retry", message: PHONE_VERIFY_TEXT.exhausted });
           return;
         default:
-          setView({ kind: "blocked", message: PHONE_VERIFY_TEXT.unavailable });
+          setView({ kind: "blocked", message: unavailableText });
       }
     } catch (e) {
-      setView({ kind: "issued", verificationId, code, note: signupErrorMessage(e, PHONE_VERIFY_TEXT.unavailable) });
+      setView({ kind: "issued", verificationId, code, note: signupErrorMessage(e, unavailableText) });
     }
   };
 
