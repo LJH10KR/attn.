@@ -10,6 +10,7 @@ import {
   counterTtl,
   decideCheckGate,
   isPhoneVerificationPurpose,
+  isRecoveryPurpose,
   isVerificationId,
   issueLimitsOk,
   ISSUABLE_PURPOSES,
@@ -71,7 +72,8 @@ type StartResult =
   | { status: "unavailable" };
 
 /**
- * 코드 발급 — 가입(`parent_signup`·`staff_signup`)은 가입 QR 토큰, 번호 변경(`phone_change`)은 로그인 본인.
+ * 코드 발급 — 가입(`parent_signup`·`staff_signup`)은 가입 QR 토큰, 번호 변경(`phone_change`)은 로그인 본인,
+ * 아이디·비밀번호 찾기(`find_login_id`·`reset_password`, 2-M)는 토큰·로그인 없이(범위 recovery, 찾기 전용 하루 몫·IP 제한).
  * OCTOMO는 부르지 않는다(조회는 사용자가 [문자를 보냈어요]를 누를 때만). 오늘 OCTOMO 한도가 이미 찼거나
  * 번호·IP·계정별 발급 제한을 넘으면 `unavailable`(가입 화면은 "번호 확인 없이 계속").
  */
@@ -84,6 +86,9 @@ export const startPhoneVerification = onCall(SIGNUP_APP_CHECK_OPTIONS, async (re
   let scope: PhoneVerificationScope;
   if (purpose === "phone_change") {
     scope = accountScopeFromAuth(request);
+  } else if (isRecoveryPurpose(purpose)) {
+    // 2-M 아이디·비밀번호 찾기 — 로그인 전·토큰 없음. 아이디는 받지 않는다(존재 여부를 알 수 없게)
+    scope = { kind: "recovery" };
   } else {
     const kind = purpose === "parent_signup" ? "parent" : "staff";
     await resolveSignupLink(db, request.data?.token, kind);
@@ -101,13 +106,15 @@ export const startPhoneVerification = onCall(SIGNUP_APP_CHECK_OPTIONS, async (re
     ipHash: ip ? shortHash(ip) : null,
     uid: scope.kind === "account" ? scope.uid : null,
     linkHash: scope.kind === "signup_link" ? scope.linkHash : null,
+    recovery: scope.kind === "recovery",
   });
 
   const outcome = await db.runTransaction(async (tx) => {
-    const issueKeys = [keys.phoneHour, keys.phoneDay, keys.ipHour, keys.uidHour];
-    const [octomoDay, linkDay, ...issueSnaps] = await Promise.all([
+    const issueKeys = [keys.phoneHour, keys.phoneDay, keys.ipHour, keys.uidHour, keys.ipRecoveryHour];
+    const [octomoDay, linkDay, recoveryDay, ...issueSnaps] = await Promise.all([
       tx.get(phoneCounterRef(db, keys.octomoDay)),
       keys.linkDay ? tx.get(phoneCounterRef(db, keys.linkDay)) : Promise.resolve(null),
+      keys.recoveryDay ? tx.get(phoneCounterRef(db, keys.recoveryDay)) : Promise.resolve(null),
       ...issueKeys.map((k) => (k ? tx.get(phoneCounterRef(db, k)) : Promise.resolve(null))),
     ]);
     const blocked = octomoDay.get("blockedUntil");
@@ -115,10 +122,19 @@ export const startPhoneVerification = onCall(SIGNUP_APP_CHECK_OPTIONS, async (re
       globalCount: readCount(octomoDay.get("count")),
       globalBlockedUntilMs: blocked instanceof Timestamp ? blocked.toMillis() : null,
       linkCount: linkDay ? readCount(linkDay.get("count")) : null,
+      recoveryCount: recoveryDay ? readCount(recoveryDay.get("count")) : null,
       nowMs,
     });
-    const [phoneHour, phoneDay, ipHour, uidHour] = issueSnaps.map((s) => (s ? readCount(s.get("count")) : null));
-    const limitsOk = issueLimitsOk({ phoneHour: phoneHour ?? 0, phoneDay: phoneDay ?? 0, ipHour, uidHour });
+    const [phoneHour, phoneDay, ipHour, uidHour, ipRecoveryHour] = issueSnaps.map((s) =>
+      s ? readCount(s.get("count")) : null,
+    );
+    const limitsOk = issueLimitsOk({
+      phoneHour: phoneHour ?? 0,
+      phoneDay: phoneDay ?? 0,
+      ipHour,
+      uidHour,
+      ipRecoveryHour,
+    });
     if (!budgetOk || !limitsOk) return null;
 
     issueKeys.forEach((k, i) => {
@@ -138,7 +154,9 @@ export const startPhoneVerification = onCall(SIGNUP_APP_CHECK_OPTIONS, async (re
       code,
       scope: scope.kind === "signup_link"
         ? { linkHash: scope.linkHash }
-        : { uid: scope.uid, academyId: scope.academyId, role: scope.role },
+        : scope.kind === "recovery"
+          ? { recovery: true }
+          : { uid: scope.uid, academyId: scope.academyId, role: scope.role },
       status: "pending",
       checkCount: 0,
       lastCheckAt: null,
@@ -198,16 +216,19 @@ export const checkPhoneVerification = onCall(
       if (!decision.ok) return { kind: "gate" as const, decision };
 
       const linkHash = typeof scope.linkHash === "string" ? scope.linkHash : null;
-      const keys = counterKeys({ nowMs, phoneKey: "", ipHash: null, uid: null, linkHash });
-      const [octomoDay, linkDay] = await Promise.all([
+      const recovery = scope.recovery === true;
+      const keys = counterKeys({ nowMs, phoneKey: "", ipHash: null, uid: null, linkHash, recovery });
+      const [octomoDay, linkDay, recoveryDay] = await Promise.all([
         tx.get(phoneCounterRef(db, keys.octomoDay)),
         keys.linkDay ? tx.get(phoneCounterRef(db, keys.linkDay)) : Promise.resolve(null),
+        keys.recoveryDay ? tx.get(phoneCounterRef(db, keys.recoveryDay)) : Promise.resolve(null),
       ]);
       const blocked = octomoDay.get("blockedUntil");
       const budgetOk = octomoBudgetAvailable({
         globalCount: readCount(octomoDay.get("count")),
         globalBlockedUntilMs: blocked instanceof Timestamp ? blocked.toMillis() : null,
         linkCount: linkDay ? readCount(linkDay.get("count")) : null,
+        recoveryCount: recoveryDay ? readCount(recoveryDay.get("count")) : null,
         nowMs,
       });
       if (!budgetOk) return { kind: "unavailable" as const };
@@ -221,6 +242,13 @@ export const checkPhoneVerification = onCall(
         tx.set(
           phoneCounterRef(db, keys.linkDay),
           { count: readCount(linkDay.get("count")) + 1, ttlAt: counterTtl(nowMs) },
+          { merge: true },
+        );
+      }
+      if (keys.recoveryDay && recoveryDay) {
+        tx.set(
+          phoneCounterRef(db, keys.recoveryDay),
+          { count: readCount(recoveryDay.get("count")) + 1, ttlAt: counterTtl(nowMs) },
           { merge: true },
         );
       }

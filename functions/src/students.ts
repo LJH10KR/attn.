@@ -18,14 +18,8 @@ import {
   parseGuardiansInput,
   readGuardians,
 } from "./lib/student-guardians";
-import {
-  displayGrade,
-  isGradeCode,
-  isStudentStatus,
-  kstYear,
-  type GradeCode,
-  type StudentStatus,
-} from "./lib/student-profile";
+import { isStudentStatus, kstYear, type StudentStatus } from "./lib/student-profile";
+import { newStudentDocFields, parseStudentName, parseStudentSchool, resolveGrade } from "./lib/student-create";
 import { isRetriableError, MAX_TRIGGER_RETRY_AGE_MS, triggerEventAgeMs } from "./lib/trigger-retry";
 
 /**
@@ -37,8 +31,6 @@ import { isRetriableError, MAX_TRIGGER_RETRY_AGE_MS, triggerEventAgeMs } from ".
  * 원비·회차 필드는 4단계까지 기존 화면이 규칙 범위 안에서 직접 쓴다.
  */
 
-const MAX_NAME_LENGTH = 40;
-const MAX_SCHOOL_LENGTH = 40;
 const MAX_MEMO_LENGTH = 1000;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -68,26 +60,6 @@ function parseStatus(raw: unknown): StudentStatus {
   throw new HttpsError("invalid-argument", "원생 상태가 올바르지 않습니다.");
 }
 
-/**
- * 화면은 "지금 보이는 학년"을 보낸다. 저장 값의 표시 학년과 같으면 저장 값(기준 연도 포함)을 그대로 두고,
- * 바뀌었으면 보낸 학년을 올해 기준으로 저장한다. 졸업은 저장 값이 졸업으로 보일 때만 그대로 받는다.
- */
-function resolveGrade(
-  raw: unknown,
-  stored: { grade: unknown; gradeYear: unknown } | null,
-  nowYear: number,
-): { grade: GradeCode; gradeYear: number } {
-  if (stored && isGradeCode(stored.grade) && typeof stored.gradeYear === "number") {
-    if (raw === displayGrade(stored.grade, stored.gradeYear, nowYear)) {
-      return { grade: stored.grade, gradeYear: stored.gradeYear };
-    }
-  }
-  if (!isGradeCode(raw)) {
-    throw new HttpsError("invalid-argument", "학년을 선택해 주세요.");
-  }
-  return { grade: raw, gradeYear: nowYear };
-}
-
 /** 원생 추가(studentId 없음)·수정 */
 export const saveStudent = onCall(async (request) => {
   if (!request.auth?.uid) {
@@ -101,14 +73,8 @@ export const saveStudent = onCall(async (request) => {
       ? null
       : requireString(studentIdRaw, "원생 정보가 올바르지 않습니다.");
 
-  const name = typeof request.data?.name === "string" ? request.data.name.trim() : "";
-  if (!name || name.length > MAX_NAME_LENGTH) {
-    throw new HttpsError("invalid-argument", `이름을 1~${MAX_NAME_LENGTH}자로 입력해 주세요.`);
-  }
-  const school = typeof request.data?.school === "string" ? request.data.school.trim() : "";
-  if (school.length > MAX_SCHOOL_LENGTH) {
-    throw new HttpsError("invalid-argument", `학교는 ${MAX_SCHOOL_LENGTH}자 이하로 입력해 주세요.`);
-  }
+  const name = parseStudentName(request.data?.name);
+  const school = parseStudentSchool(request.data?.school);
   const phone = parseOptionalKrPhone(request.data?.phone);
   const status = parseStatus(request.data?.status ?? "enrolled");
   const firstAttendedOn = parseOptionalDate(request.data?.firstAttendedOn);
@@ -143,20 +109,7 @@ export const saveStudent = onCall(async (request) => {
       const next = (seqSnap.get("nextStudentSeq") as number) || 1;
       const newAttnId = formatStudentAttnId(academyId, next);
       tx.set(seqRef, { nextStudentSeq: next + 1 }, { merge: true });
-      tx.create(ref, {
-        attnId: newAttnId,
-        ...profile,
-        ...grade,
-        status,
-        statusChangedAt: FieldValue.serverTimestamp(),
-        guardians,
-        ...deriveGuardianFields(guardians),
-        classIds: [],
-        teacherUids: [],
-        createdByUid: callerUid,
-        createdAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
+      tx.create(ref, newStudentDocFields({ attnId: newAttnId, profile, grade, status, guardians, callerUid }));
       if (memo) {
         tx.set(db.doc(`academies/${academyId}/studentNotes/${ref.id}`), {
           memo,

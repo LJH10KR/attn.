@@ -127,7 +127,7 @@ describe("직원 번호 비교 — 화면·서버 같은 규칙", () => {
   });
 });
 
-describe("App Check 강제 대상 — 가입 단계 5개 + 번호 확인 2개(2-L)", () => {
+describe("App Check 강제 대상 — 가입 단계 5개 + 번호 확인 2개(2-L) + 아이디·비밀번호 찾기 3개(2-M)", () => {
   const ENFORCED = [
     "registerParentSelfSignup",
     "registerParentGoogleSignup",
@@ -136,6 +136,9 @@ describe("App Check 강제 대상 — 가입 단계 5개 + 번호 확인 2개(2-
     "checkStaffSignupLoginId",
     "startPhoneVerification",
     "checkPhoneVerification",
+    "findLoginIdsByPhone",
+    "verifyPasswordResetTarget",
+    "resetPasswordWithPhone",
   ];
   const NOT = [
     "getParentSignupAcademyInfo",
@@ -150,6 +153,10 @@ describe("App Check 강제 대상 — 가입 단계 5개 + 번호 확인 2개(2-
     "recordOwnerConsent",
     "updateParentProfile",
     "updateTeacherProfile",
+    "createStudentsBulk",
+    "createStaffPreRegistrations",
+    "getAcademyOnboarding",
+    "updateAcademyOnboarding",
   ];
   /**
    * 각 Callable에 App Check·로그인 토큰 없이 빈 요청을 넣어 본다 — 강제 중이면 SDK가 핸들러 전에
@@ -184,7 +191,7 @@ describe("App Check 강제 대상 — 가입 단계 5개 + 번호 확인 2개(2-
     assert.equal(r.status, 0, r.stderr);
     return JSON.parse(r.stdout.split("@@RESULT@@")[1]);
   };
-  it("플래그가 켜지면 7개만 true", () => {
+  it("플래그가 켜지면 10개만 true", () => {
     const on = endpoints(true);
     for (const n of ENFORCED) assert.equal(on[n], true, n);
     for (const n of NOT) assert.equal(on[n], false, n);

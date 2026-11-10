@@ -68,6 +68,23 @@ async function parseJobTitleId(
   return raw;
 }
 
+/** 계정 없는 직원 문서(직원 추가·여러 명 미리 등록 공용) */
+export function newNoAccountStaffFields(
+  academyId: string,
+  hr: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...hr,
+    academyId,
+    status: "no_account",
+    authUid: null,
+    isGuest: false,
+    roleId: DEFAULT_STAFF_ROLE_ID,
+    permissions: [],
+    createdAt: FieldValue.serverTimestamp(),
+  };
+}
+
 /** 직원 추가(staffId 없음)·인사 정보 수정. 퇴사로 바꾸면 활성 계정도 함께 비활성화 */
 export const saveStaffMember = onCall(async (request) => {
   if (!request.auth?.uid) {
@@ -115,16 +132,7 @@ export const saveStaffMember = onCall(async (request) => {
 
   if (!staffId) {
     const ref = db.collection(`academies/${academyId}/staff`).doc();
-    await ref.set({
-      ...hr,
-      academyId,
-      status: "no_account",
-      authUid: null,
-      isGuest: false,
-      roleId: DEFAULT_STAFF_ROLE_ID,
-      permissions: [],
-      createdAt: FieldValue.serverTimestamp(),
-    });
+    await ref.set(newNoAccountStaffFields(academyId, hr));
     return { ok: true as const, staffId: ref.id, accountDeactivated: false };
   }
 

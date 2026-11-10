@@ -79,7 +79,7 @@ async function verify(phone, purpose = "parent_signup", token = P) {
 // --- 발급: 토큰 없음·잘못된 토큰 거부, 010 아닌 번호 unsupported, 정상 발급(숫자 6자리·서버에만 저장) ---
 await assert.rejects(call("startPhoneVerification", { purpose: "parent_signup", phone: "010-1000-0001" }), /가입 링크/);
 await assert.rejects(call("startPhoneVerification", { purpose: "parent_signup", token: S, phone: "010-1000-0001" }), /가입 링크/);
-await assert.rejects(call("startPhoneVerification", { purpose: "find_login_id", token: P, phone: "010-1000-0001" }), /목적/);
+await assert.rejects(call("startPhoneVerification", { purpose: "unknown_purpose", token: P, phone: "010-1000-0001" }), /목적/);
 assert.equal((await call("startPhoneVerification", { purpose: "parent_signup", token: P, phone: "011-123-4567" })).status, "unsupported_phone");
 const s1 = await call("startPhoneVerification", { purpose: "parent_signup", token: P, phone: "010-1000-0001" });
 assert.equal(s1.status, "issued");

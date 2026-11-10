@@ -110,6 +110,10 @@ export {
   onAcademyStudentParentLinksWritten,
   saveStudent,
 } from "./students";
+export { createStudentsBulk } from "./students-bulk";
+export { createStaffPreRegistrations } from "./staff-bulk";
+export { getAcademyOnboarding, updateAcademyOnboarding } from "./onboarding";
+export { findLoginIdsByPhone, verifyPasswordResetTarget, resetPasswordWithPhone } from "./account-recovery";
 export {
   activateParent,
   deactivateParent,

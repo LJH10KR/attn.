@@ -3,7 +3,8 @@ import { HttpsError } from "firebase-functions/v2/https";
 /**
  * App Check 강제 여부(2-K) — `ENFORCE_APP_CHECK=1`(functions/.env.attndot)일 때만.
  * 강제 대상은 가입 단계뿐: 가입 3개(`registerParentSelfSignup`·`registerParentGoogleSignup`·`registerStaffSignup`),
- * 로그인 ID 확인 2개(`checkParentLoginIdAvailable`·`checkStaffSignupLoginId`), 번호 확인 2개(2-L `startPhoneVerification`·`checkPhoneVerification`).
+ * 로그인 ID 확인 2개(`checkParentLoginIdAvailable`·`checkStaffSignupLoginId`), 번호 확인 2개(2-L `startPhoneVerification`·`checkPhoneVerification`),
+ * 아이디·비밀번호 찾기 3개(2-M `findLoginIdsByPhone`·`verifyPasswordResetTarget`·`resetPasswordWithPhone`, 1회용).
  * 화면은 이 함수들을 처음 부르기 직전에만 App Check를 켠다(reCAPTCHA 평가 건수를 실제 시도로 한정).
  * 켜는 순서: 앱 사이트 키 배포 → 콘솔 지표로 토큰 확인 → 이 플래그로 함수 강제(순서가 바뀌면 가입이 모두 막힘).
  */
@@ -13,7 +14,7 @@ export const APP_CHECK_ENFORCED = process.env.ENFORCE_APP_CHECK === "1";
 export const SIGNUP_APP_CHECK_OPTIONS = { enforceAppCheck: APP_CHECK_ENFORCED } as const;
 
 /**
- * 한 번씩 누르는 동작(가입 3개·번호 확인 조회) — 1회용 토큰(2-L).
+ * 한 번씩 누르는 동작(가입 3개·번호 확인 조회·2-M 찾기 3개) — 1회용 토큰(2-L).
  * 화면은 `httpsCallable(…, { limitedUseAppCheckTokens: true })`로 부를 때마다 새 토큰을 받는다.
  * 서버는 토큰을 소비(`verifyToken(…, { consume: true })`)하고, 이미 쓴 토큰이면 `assertFreshAppCheck`가 거부한다.
  * 소비는 1회용 토큰이 아니어도 일어난다(Admin SDK: 이 옵션으로 보낸 토큰은 무엇이든 소비 표시) — 그래서

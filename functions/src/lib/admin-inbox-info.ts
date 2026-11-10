@@ -17,7 +17,9 @@ export type InfoBellKind =
   | "parent_auto_linked"
   | "parent_child_declined"
   | "parent_phone_changed"
-  | "staff_auto_activated";
+  | "staff_auto_activated"
+  /** 2-M 아이디·비밀번호 찾기 — 문자 확인으로 비밀번호 재설정(학부모 `operations.parents`·직원 `settings.members`에 표시) */
+  | "member_password_reset";
 
 export async function writeInfoBell(
   db: admin.firestore.Firestore,

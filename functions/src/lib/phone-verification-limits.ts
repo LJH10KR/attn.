@@ -25,6 +25,20 @@ export const OCTOMO_DAILY_CALL_LIMIT = 300;
 /** 가입 링크 하나의 하루 OCTOMO 호출 수(한 링크가 퍼져도 다른 학원 확인이 멈추지 않게) */
 export const OCTOMO_DAILY_CALL_LIMIT_PER_LINK = 150;
 
+/**
+ * 아이디·비밀번호 찾기(2-M) 하루 OCTOMO 호출 수 — 서비스 전체 한도 안에서 찾기에 쓸 수 있는 몫
+ * (찾기 남용이 가입 번호 확인 한도를 다 쓰지 못하게).
+ */
+export const OCTOMO_DAILY_CALL_LIMIT_FOR_RECOVERY = 60;
+/** 찾기 코드 발급 IP별 시간당(가입보다 엄격) */
+export const PHONE_RECOVERY_CODES_PER_IP_PER_HOUR = 10;
+/** 비밀번호 찾기 — 같은 아이디(입력 문자열 기준) 하루 확인 수 */
+export const PASSWORD_RESET_CHECKS_PER_LOGIN_ID_PER_DAY = 5;
+/** 비밀번호 찾기 — 재설정 표 유효 시간 */
+export const PASSWORD_RESET_TICKET_TTL_MS = 10 * 60 * 1000;
+/** 비밀번호 찾기 확인 응답 시간 하한(아이디 존재 여부를 응답 시간으로 알 수 없게) */
+export const RECOVERY_RESPONSE_FLOOR_MS = 1200;
+
 /** 코드 발급(느슨한 보조 제한) */
 export const PHONE_CODES_PER_PHONE_PER_HOUR = 5;
 export const PHONE_CODES_PER_PHONE_PER_DAY = 10;

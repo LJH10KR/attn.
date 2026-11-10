@@ -5,7 +5,9 @@ import { HttpsError } from "firebase-functions/v2/https";
 import { octomoPhoneKey } from "./octomo-phone-key";
 import {
   OCTOMO_DAILY_CALL_LIMIT,
+  OCTOMO_DAILY_CALL_LIMIT_FOR_RECOVERY,
   OCTOMO_DAILY_CALL_LIMIT_PER_LINK,
+  PHONE_RECOVERY_CODES_PER_IP_PER_HOUR,
   PHONE_CHECK_MIN_INTERVAL_MS,
   PHONE_CHECKS_PER_CODE,
   PHONE_CODES_PER_IP_PER_HOUR,
@@ -27,18 +29,33 @@ export const PHONE_VERIFICATION_PURPOSES = [
   "parent_signup",
   "staff_signup",
   "phone_change",
-  // 2-M(아이디·비밀번호 찾기) 예약 — 아직 발급하지 않음
+  // 2-M 아이디·비밀번호 찾기 — 로그인 전·가입 토큰 없음(scope recovery)
   "find_login_id",
   "reset_password",
 ] as const;
 export type PhoneVerificationPurpose = (typeof PHONE_VERIFICATION_PURPOSES)[number];
 
-/** 2-L에서 발급하는 목적 */
-export const ISSUABLE_PURPOSES: readonly PhoneVerificationPurpose[] = ["parent_signup", "staff_signup", "phone_change"];
+/** 발급하는 목적(2-L 가입·번호 변경 + 2-M 찾기) */
+export const ISSUABLE_PURPOSES: readonly PhoneVerificationPurpose[] = [
+  "parent_signup",
+  "staff_signup",
+  "phone_change",
+  "find_login_id",
+  "reset_password",
+];
+
+/** 아이디·비밀번호 찾기 목적(2-M) */
+export const RECOVERY_PURPOSES: readonly PhoneVerificationPurpose[] = ["find_login_id", "reset_password"];
+
+export function isRecoveryPurpose(raw: unknown): boolean {
+  return (RECOVERY_PURPOSES as readonly unknown[]).includes(raw);
+}
 
 export type PhoneVerificationScope =
   | { kind: "signup_link"; linkHash: string }
-  | { kind: "account"; uid: string; academyId: string; role: "parent" | "teacher" };
+  | { kind: "account"; uid: string; academyId: string; role: "parent" | "teacher" }
+  /** 아이디·비밀번호 찾기 — 로그인 전, 가입 토큰 없음(저장 `{ recovery: true }`) */
+  | { kind: "recovery" };
 
 export const MSG_PHONE_PROOF_INVALID = "번호 확인이 만료되었거나 올바르지 않습니다. 번호 확인을 다시 해 주세요.";
 export const MSG_PHONE_PROOF_MISMATCH = "번호 확인을 마친 번호와 입력한 번호가 다릅니다. 번호 확인을 다시 해 주세요.";
@@ -120,15 +137,19 @@ export function counterKeys(params: {
   ipHash: string | null;
   uid: string | null;
   linkHash: string | null;
+  /** 아이디·비밀번호 찾기(2-M) — 찾기 전용 하루 몫·IP 제한 키 */
+  recovery?: boolean;
 }) {
   const day = seoulDayKey(params.nowMs);
   const hour = seoulHourKeyOf(params.nowMs);
   return {
     octomoDay: `octomo_day_${day}`,
     linkDay: params.linkHash ? `link_day_${params.linkHash}_${day}` : null,
+    recoveryDay: params.recovery ? `recovery_day_${day}` : null,
     phoneHour: `phone_hr_${params.phoneKey}_${hour}`,
     phoneDay: `phone_day_${params.phoneKey}_${day}`,
     ipHour: params.ipHash ? `ip_hr_${params.ipHash}_${hour}` : null,
+    ipRecoveryHour: params.recovery && params.ipHash ? `ip_rcv_hr_${params.ipHash}_${hour}` : null,
     uidHour: params.uid ? `uid_hr_${params.uid}_${hour}` : null,
   };
 }
@@ -137,30 +158,47 @@ export function readCount(raw: unknown): number {
   return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
 }
 
-/** 오늘 OCTOMO를 더 부를 수 있는지 — 서비스 전체·링크별 한도와 429 차단 */
+/** 오늘 OCTOMO를 더 부를 수 있는지 — 서비스 전체·링크별·찾기 몫 한도와 429 차단 */
 export function octomoBudgetAvailable(params: {
   globalCount: number;
   globalBlockedUntilMs: number | null;
   linkCount: number | null;
+  /** 찾기(2-M)일 때만 — 찾기 전용 하루 몫 */
+  recoveryCount?: number | null;
   nowMs: number;
 }): boolean {
   if (params.globalBlockedUntilMs !== null && params.globalBlockedUntilMs > params.nowMs) return false;
   if (params.globalCount >= OCTOMO_DAILY_CALL_LIMIT) return false;
   if (params.linkCount !== null && params.linkCount >= OCTOMO_DAILY_CALL_LIMIT_PER_LINK) return false;
+  if (
+    params.recoveryCount !== undefined &&
+    params.recoveryCount !== null &&
+    params.recoveryCount >= OCTOMO_DAILY_CALL_LIMIT_FOR_RECOVERY
+  ) {
+    return false;
+  }
   return true;
 }
 
-/** 코드 발급 보조 제한 — 번호별·IP별·계정별 */
+/** 코드 발급 보조 제한 — 번호별·IP별·계정별(+ 찾기 IP별) */
 export function issueLimitsOk(c: {
   phoneHour: number;
   phoneDay: number;
   ipHour: number | null;
   uidHour: number | null;
+  ipRecoveryHour?: number | null;
 }): boolean {
   if (c.phoneHour >= PHONE_CODES_PER_PHONE_PER_HOUR) return false;
   if (c.phoneDay >= PHONE_CODES_PER_PHONE_PER_DAY) return false;
   if (c.ipHour !== null && c.ipHour >= PHONE_CODES_PER_IP_PER_HOUR) return false;
   if (c.uidHour !== null && c.uidHour >= PHONE_CODES_PER_UID_PER_HOUR) return false;
+  if (
+    c.ipRecoveryHour !== undefined &&
+    c.ipRecoveryHour !== null &&
+    c.ipRecoveryHour >= PHONE_RECOVERY_CODES_PER_IP_PER_HOUR
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -211,6 +249,8 @@ export type PhoneProofExpectation = {
   linkHash?: string;
   /** 번호 변경 — 같은 계정이 확인한 증표만 */
   uid?: string;
+  /** 아이디·비밀번호 찾기(2-M) — 찾기 범위(`{ recovery: true }`)로 발급한 증표만 */
+  recovery?: boolean;
 };
 
 /**
@@ -240,7 +280,8 @@ export async function readPhoneProofInTx(
     proofExpiresAt > nowMs &&
     expect.purposes.includes(snap.get("purpose")) &&
     (expect.linkHash === undefined || scope?.linkHash === expect.linkHash) &&
-    (expect.uid === undefined || scope?.uid === expect.uid);
+    (expect.uid === undefined || scope?.uid === expect.uid) &&
+    (expect.recovery !== true || scope?.recovery === true);
   if (!valid) throw new HttpsError("failed-precondition", MSG_PHONE_PROOF_INVALID);
   const phoneKey = snap.get("phoneKey");
   if (typeof phoneKey !== "string" || phoneKey !== expect.phoneKey) {
