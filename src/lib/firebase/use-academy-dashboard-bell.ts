@@ -171,6 +171,22 @@ function mapInboxDoc(
     }];
   }
 
+  // 2-M 아이디·비밀번호 찾기 — 문자 확인으로 비밀번호 재설정(학부모는 학부모 관리, 직원은 멤버 관리 권한일 때만)
+  if (kind === "member_password_reset") {
+    const isParent = entityType !== "teacher";
+    const href = isParent ? links.parentsHref : links.membersHref;
+    if (!href) return [];
+    const exp = readTs(data.expiresAt);
+    if (exp && exp.toMillis() <= now) return [];
+    return [{
+      id,
+      title: `${name} ${isParent ? "학부모" : "직원"}이 문자 확인으로 비밀번호를 바꿨습니다`,
+      detail: "다른 기기의 로그인은 모두 끊겼습니다. 본인이 한 일이 아니라면 계정을 비활성화하고 확인해 주세요.",
+      href,
+      hrefLabel: isParent ? "학부모 관리" : "멤버 관리",
+    }];
+  }
+
   if (kind === "session_payment_received") {
     const studentName =
       typeof data.studentName === "string" && data.studentName.trim()

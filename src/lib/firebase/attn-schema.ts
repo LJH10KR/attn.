@@ -93,7 +93,9 @@ export type AcademyAdminInboxKind =
   /** 학부모 번호 변경(문자 확인) — `variant` self·corrected·reverted */
   | "parent_phone_changed"
   /** 직원 번호 확인 + 미리 등록 후보 1명 + 역할 → 바로 사용 중(ID `s-autoact-{uid}`) */
-  | "staff_auto_activated";
+  | "staff_auto_activated"
+  /** 2-M 문자 확인으로 비밀번호 재설정(전화번호 없음) */
+  | "member_password_reset";
 
 export type AcademyAdminInboxDoc = {
   schemaVersion: typeof ACADEMY_ADMIN_INBOX_SCHEMA_VERSION;

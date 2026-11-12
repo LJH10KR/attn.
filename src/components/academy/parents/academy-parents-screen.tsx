@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
 import { AcademySignupLinkCard } from "@/components/academy/academy-signup-link-card";
+import { recordParentLinkShared } from "@/lib/academy/use-academy-onboarding";
 import { useAcademyShell } from "@/components/academy/academy-shell";
 import { GuardianDetailSheet } from "@/components/academy/parents/guardian-detail-sheet";
 import { ParentCreateSheet } from "@/components/academy/parents/parent-create-sheet";
@@ -360,7 +361,12 @@ export function AcademyParentsScreen() {
         </>
       ) : (
         <>
-          <AcademySignupLinkCard academyId={academyId} kind="parent" showAutoLinkSetting />
+          <AcademySignupLinkCard
+            academyId={academyId}
+            kind="parent"
+            showAutoLinkSetting
+            onShareAction={permissions.actor === "owner" ? () => recordParentLinkShared(academyId) : undefined}
+          />
 
           <div className="flex items-center gap-2">
             <input

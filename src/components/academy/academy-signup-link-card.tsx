@@ -30,9 +30,9 @@ const TEXT: Record<
   },
   staff: {
     title: "직원 가입 QR",
-    hint: "이 QR·링크로만 가입할 수 있어요. 가입하면 「가입 승인 대기」로 들어오고, 멤버 목록에서 승인해야 이용할 수 있습니다.",
+    hint: "이 QR·링크로만 가입할 수 있어요. 가입할 때 문자로 번호를 확인하고, 직원 관리에 미리 등록한 번호·권한과 맞으면 바로 이용할 수 있어요. 아니면 「가입 승인 대기」로 들어와 멤버 목록에서 승인합니다.",
     shareTitle: "attn. 직원 가입",
-    shareText: "학원 직원 가입 링크입니다. 가입한 뒤 학원의 승인을 기다려 주세요.",
+    shareText: "학원 직원 가입 링크입니다. 가입할 때 휴대폰 번호를 문자로 확인해 주세요.",
     fileName: "직원-가입-QR.png",
     who: "직원",
   },
@@ -66,11 +66,17 @@ export function AcademySignupLinkCard({
   academyId,
   kind,
   showAutoLinkSetting = false,
+  onShareAction,
+  qrOpenRequest = 0,
 }: {
   academyId: string;
   kind: SignupLinkKind;
   /** 학부모 관리 화면 — 학원 설정 "번호 확인된 학부모 자동 연결"(2-L) 스위치를 카드 아래에 보임 */
   showAutoLinkSetting?: boolean;
+  /** 2-M 홈 "시작하기" — [공유]·[링크 복사]·[QR 이미지 공유]·[이미지 저장]을 누르면(원장 화면에서만 넘김) */
+  onShareAction?: () => void;
+  /** 2-M 홈 "시작하기" [QR 보기] — 값이 바뀔 때마다 QR을 펼침 */
+  qrOpenRequest?: number;
 }) {
   const text = TEXT[kind];
   const [link, setLink] = useState<LinkState | null>(null);
@@ -113,6 +119,10 @@ export function AcademySignupLinkCard({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (qrOpenRequest > 0) setQrOpen(true);
+  }, [qrOpenRequest]);
 
   useEffect(() => {
     setCanShare(typeof navigator !== "undefined" && typeof navigator.share === "function");
@@ -294,11 +304,17 @@ export function AcademySignupLinkCard({
           ) : null}
           <div className="flex flex-wrap gap-2">
             {canShare ? (
-              <button type="button" onClick={() => void share()} className={primaryBtnClass}>
+              <button type="button" onClick={() => {
+                onShareAction?.();
+                void share();
+              }} className={primaryBtnClass}>
                 공유
               </button>
             ) : null}
-            <button type="button" onClick={() => void copy()} className={canShare ? btnClass : primaryBtnClass}>
+            <button type="button" onClick={() => {
+              onShareAction?.();
+              void copy();
+            }} className={canShare ? btnClass : primaryBtnClass}>
               {copied ? "복사됨" : "링크 복사"}
             </button>
             <button
@@ -348,14 +364,25 @@ export function AcademySignupLinkCard({
               <div className="flex flex-wrap justify-center gap-2">
                 <button
                   type="button"
-                  onClick={() => void shareQrImage()}
+                  onClick={() => {
+                    onShareAction?.();
+                    void shareQrImage();
+                  }}
                   disabled={!qrDataUrl}
                   className={primaryBtnClass}
                   data-qr-share
                 >
                   QR 이미지 공유
                 </button>
-                <button type="button" onClick={saveQr} disabled={!qrDataUrl} className={btnClass}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onShareAction?.();
+                    saveQr();
+                  }}
+                  disabled={!qrDataUrl}
+                  className={btnClass}
+                >
                   이미지 저장
                 </button>
               </div>

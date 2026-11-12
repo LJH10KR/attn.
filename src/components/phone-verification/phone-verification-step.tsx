@@ -16,7 +16,13 @@ import {
 } from "@/lib/phone/phone-verification-ui";
 import { signupErrorMessage } from "@/lib/signup/signup-errors";
 
-export type PhoneVerificationPurpose = "parent_signup" | "staff_signup" | "phone_change";
+export type PhoneVerificationPurpose =
+  | "parent_signup"
+  | "staff_signup"
+  | "phone_change"
+  /** 2-M 아이디·비밀번호 찾기 — 로그인 전·토큰 없음 */
+  | "find_login_id"
+  | "reset_password";
 
 type StartRes =
   | { status: "issued"; verificationId: string; code: string; smsTo: string; expiresAtMs: number }

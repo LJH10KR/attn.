@@ -1,5 +1,6 @@
 "use client";
 
+import { AcademyOnboardingCard } from "@/components/academy/academy-onboarding-card";
 import { AcademySignupLinkCard } from "@/components/academy/academy-signup-link-card";
 import { useAcademyShell } from "@/components/academy/academy-shell";
 import {
@@ -26,6 +27,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { academyMenuPath } from "@/lib/academy/academy-routes";
 import type { AcademyPermission } from "@/lib/academy/permissions";
 import { SlideSwitch } from "@/components/ui/slide-switch";
+import { useAcademyOnboarding } from "@/lib/academy/use-academy-onboarding";
 
 const glassCard = "glass-card";
 
@@ -163,6 +165,17 @@ export function AcademyHome() {
   const summaryRows = SUMMARY_STAT_ROWS.filter((c) => can(c.permission));
   // 키오스크 체크인·종료 PIN 확인은 서버가 출결 권한만 허용(종료 PIN 설정은 전체설정에서)
   const canKiosk = can("lessons.attendance");
+  // 2-M "시작하기" 체크리스트 — 원장만(M2-2)
+  const isOwner = permissions.actor === "owner";
+  const onboarding = useAcademyOnboarding(academyId, isOwner);
+  const [parentQrRequest, setParentQrRequest] = useState(0);
+  const openParentQr = useCallback(() => {
+    setParentQrRequest((n) => n + 1);
+    document.querySelector('[data-signup-link-kind="parent"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+  const onParentLinkShared = useCallback(() => {
+    if (onboarding.view && !onboarding.view.steps.parents.shared) void onboarding.act("parent_link_shared");
+  }, [onboarding]);
 
   const [summaryCounts, setSummaryCounts] =
     useState<AcademySummaryCounts | null>(null);
@@ -312,6 +325,11 @@ export function AcademyHome() {
 
   return (
     <>
+      {isOwner ? (
+        <div className="mb-4">
+          <AcademyOnboardingCard academyId={academyId} onboarding={onboarding} onOpenParentQrAction={openParentQr} />
+        </div>
+      ) : null}
       {summaryRows.length > 0 ? (
         <>
           <h2 className="mb-2 text-sm font-semibold text-foreground">요약</h2>
@@ -367,7 +385,12 @@ export function AcademyHome() {
       ) : null}
       {can("operations.parents") ? (
         <section className="mt-4">
-          <AcademySignupLinkCard academyId={academyId} kind="parent" />
+          <AcademySignupLinkCard
+            academyId={academyId}
+            kind="parent"
+            onShareAction={isOwner ? onParentLinkShared : undefined}
+            qrOpenRequest={parentQrRequest}
+          />
         </section>
       ) : null}
       {canKiosk ? (

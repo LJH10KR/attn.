@@ -811,7 +811,25 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
                 회원가입
               </Link>
             </p>
-          ) : showMemberAttnAuth ? (
+          ) : null}
+          {showMemberAttnAuth ? (
+            <p data-recovery-links>
+              <Link
+                href={`/login/find-id?role=${role}`}
+                className="font-medium text-[#4a90e2] underline-offset-2 hover:underline"
+              >
+                아이디 찾기
+              </Link>
+              <span className="mx-2 text-neutral-400">·</span>
+              <Link
+                href={`/login/reset-password?role=${role}`}
+                className="font-medium text-[#4a90e2] underline-offset-2 hover:underline"
+              >
+                비밀번호 찾기
+              </Link>
+            </p>
+          ) : null}
+          {showMemberAttnAuth ? (
             <p className="text-xs text-neutral-500">
               {role === "parent"
                 ? "가입 시 설정한 로그인 ID와 비밀번호로 로그인합니다. 링크 가입 전에 학원이 발급한 로그인 번호가 있다면 그 번호로도 로그인할 수 있습니다."

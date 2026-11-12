@@ -16,6 +16,7 @@ import { useAcademyRoles, type AcademyRoleVM } from "@/lib/academy/use-academy-r
 import { academyStaffPath, type StaffAccountStatus } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
+import { useQueryFlag } from "@/lib/ui/use-query-flag";
 
 const glassCard = "glass-card";
 
@@ -83,6 +84,8 @@ function MembersInner({
   const [inviteOpen, setInviteOpen] = useState(false);
   const [roleSheet, setRoleSheet] = useState<{ role: AcademyRoleVM | null } | null>(null);
   const { roles, error: rolesError, refresh: refreshRoles } = useAcademyRoles(academyId, true);
+  // 2-M 홈 "시작하기" [직원 가입 QR] — `?invite=qr`이면 멤버 초대 시트(직원 가입 QR)를 바로 연다(권한 목록을 받은 뒤)
+  useQueryFlag("invite", "qr", Boolean(roles), () => setInviteOpen(true));
   const { items: jobTitles } = useAcademyOptionList(academyId, "jobTitles");
 
   const loadStaff = useCallback(async () => {

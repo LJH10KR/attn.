@@ -11,6 +11,7 @@ import {
 import { StudentFormSheet } from "@/components/academy/student-detail/student-form-sheet";
 import { useStudentDetailParam } from "@/components/academy/student-detail/use-student-detail-param";
 import { DefaultTuitionTypeModal } from "@/components/academy/students/default-tuition-type-modal";
+import { StudentBulkSheet } from "@/components/academy/students/student-bulk-sheet";
 import {
   compareStudentsByName,
   docToStudent,
@@ -39,6 +40,7 @@ import { getFirebaseDb } from "@/lib/firebase/client-app";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
 import { formatKrPhoneDisplay } from "@/lib/phone/kr-phone";
 import { downloadCsv, type CsvColumn } from "@/lib/ui/csv";
+import { useQueryFlag } from "@/lib/ui/use-query-flag";
 
 type StatusFilter = StudentStatus | "all";
 /** 반 필터 — 반 id, "none"(반 없음), "all" */
@@ -99,6 +101,7 @@ export function AcademyStudentsScreen() {
   const [classFilter, setClassFilter] = useState<ClassFilter>("all");
   const [gradeFilter, setGradeFilter] = useState<GradeFilter>("all");
   const [addOpen, setAddOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [defaultTuitionOpen, setDefaultTuitionOpen] = useState(false);
   const [csvBusy, setCsvBusy] = useState(false);
@@ -121,6 +124,13 @@ export function AcademyStudentsScreen() {
   }, [academyId]);
 
   const { refresh, busy: listBusy } = useAcademyListPoll(loadStudents, [academyId]);
+
+  // 2-M 홈 "시작하기" [표로 입력] — `?bulk=1`로 들어오면 표를 바로 연다
+  useQueryFlag("bulk", "1", access.manage, () => setBulkOpen(true));
+  const existingForBulk = useMemo(
+    () => students.map((s) => ({ name: s.name, displayGrade: s.displayGrade })),
+    [students],
+  );
 
   const classById = useMemo(() => new Map<string, AcademyClassBrief>(classes.map((c) => [c.id, c])), [classes]);
 
@@ -229,6 +239,16 @@ export function AcademyStudentsScreen() {
               className="rounded-[8px] bg-[#222] px-3 py-2 text-xs font-medium text-white"
             >
               + 원생 추가
+            </button>
+          ) : null}
+          {access.manage ? (
+            <button
+              type="button"
+              onClick={() => setBulkOpen(true)}
+              className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-xs font-medium text-neutral-700"
+              data-student-bulk-open
+            >
+              여러 명 입력
             </button>
           ) : null}
           <div className="relative">
@@ -446,6 +466,21 @@ export function AcademyStudentsScreen() {
           onTabChangeAction={detail.setTab}
           onCloseAction={detail.close}
           onChangedAction={onDetailChanged}
+        />
+      ) : null}
+      {bulkOpen ? (
+        <StudentBulkSheet
+          academyId={academyId}
+          relations={relations}
+          classes={classes}
+          canAssignClass={permissions.can("operations.classes")}
+          existingStudents={existingForBulk}
+          onCloseAction={() => setBulkOpen(false)}
+          onSavedAction={(message, closed) => {
+            if (closed) setBulkOpen(false);
+            showNotice(message);
+            refresh();
+          }}
         />
       ) : null}
       {addOpen ? (
