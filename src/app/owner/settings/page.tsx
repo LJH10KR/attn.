@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 import { HomeTabIcon } from "@/components/dashboard/attn-tab-logo";
+import { LegalLinks } from "@/components/legal/legal-links";
 import { DashboardBottomScrim } from "@/components/dashboard/dashboard-bottom-scrim";
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { OwnerPasswordSettingsCard } from "@/components/account/password-settings-cards";
@@ -172,6 +173,7 @@ export default function OwnerSettingsPage() {
           <OwnerGoogleLinkCard defaultCollapsed />
           <AccountWithdrawalCard role="owner" />
         </div>
+        <LegalLinks className="mt-6" />
       </div>
 
       <DashboardBottomScrim />

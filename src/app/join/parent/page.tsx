@@ -16,6 +16,7 @@ import {
   EMPTY_CONSENT,
   type ConsentState,
 } from "@/components/legal/consent-checklist";
+import { LegalLinks } from "@/components/legal/legal-links";
 import { PhoneVerificationStep } from "@/components/phone-verification/phone-verification-step";
 import { resolvePasswordConfirmHint } from "@/lib/ui/password-confirm-hint";
 import { ensureAppCheck, oneShotCallable } from "@/lib/firebase/app-check";
@@ -655,6 +656,7 @@ export default function ParentJoinPage() {
           </Suspense>
         </div>
       </div>
+      <LegalLinks className="mt-6 w-full max-w-[400px]" />
     </div>
   );
 }

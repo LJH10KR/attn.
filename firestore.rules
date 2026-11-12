@@ -475,6 +475,40 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    /**
+     * 법적 고지 정보(2-O) — 처리방침·약관 본문과 사이트 하단이 로그인 없이 읽는다(`src/lib/legal/legal-info.ts`).
+     * 공개 읽기는 `appConfig/legalInfo` 한 문서뿐(목록·다른 문서 거부), 쓰기는 admin만·형식 검사·삭제 없음.
+     * 빈 문자열 = 아직 입력 안 함. 관리자 uid는 공개 문서에 두지 않는다(updatedAt만).
+     */
+    match /appConfig/{docId} {
+      function legalDateOk(v) {
+        return v is string
+          && (v == '' || v.matches('^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'));
+      }
+      function legalInfoValid() {
+        let d = request.resource.data;
+        let fields = [
+          'representativeName', 'businessNumber', 'address', 'contactEmail',
+          'privacyEffectiveDate', 'termsEffectiveDate', 'updatedAt'
+        ];
+        return d.keys().hasOnly(fields)
+          && d.keys().hasAll(fields)
+          && d.representativeName is string && d.representativeName.size() <= 40
+          && d.businessNumber is string
+          && (d.businessNumber == '' || d.businessNumber.matches('^[0-9]{3}-[0-9]{2}-[0-9]{5}$'))
+          && d.address is string && d.address.size() <= 200
+          && d.contactEmail is string && d.contactEmail.size() <= 120
+          && (d.contactEmail == '' || d.contactEmail.matches('^[^@\\s]+@[^@\\s]+[.][^@\\s]+$'))
+          && legalDateOk(d.privacyEffectiveDate)
+          && legalDateOk(d.termsEffectiveDate)
+          && d.updatedAt == request.time;
+      }
+      allow get: if docId == 'legalInfo';
+      allow list: if false;
+      allow create, update: if docId == 'legalInfo' && isAdmin() && legalInfoValid();
+      allow delete: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

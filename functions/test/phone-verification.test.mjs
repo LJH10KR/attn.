@@ -189,6 +189,15 @@ describe("동의 버전", () => {
     assert.equal(pick("terms"), LEGAL_DOC_VERSIONS.terms);
     assert.equal(pick("privacy"), LEGAL_DOC_VERSIONS.privacy);
   });
+  it("확정본 버전 형식(초안 아님)·시행일은 코드에 없음(2-O — 관리자 입력)", () => {
+    for (const k of ["terms", "privacy"]) {
+      assert.match(LEGAL_DOC_VERSIONS[k], /^\d{4}-\d{2}-v\d+$/);
+      assert.doesNotMatch(LEGAL_DOC_VERSIONS[k], /draft/);
+    }
+    const client = read("../../src/lib/legal/legal-docs.ts");
+    assert.doesNotMatch(client, /LEGAL_DOC_EFFECTIVE_DATES/);
+    assert.doesNotMatch(client, /확정 전/);
+  });
   it("지금 버전만 통과", () => {
     const c = parseRequiredConsents({ terms: LEGAL_DOC_VERSIONS.terms, privacy: LEGAL_DOC_VERSIONS.privacy });
     assert.equal(c.terms.version, LEGAL_DOC_VERSIONS.terms);

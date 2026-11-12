@@ -35,6 +35,7 @@ import {
   EMPTY_CONSENT,
   type ConsentState,
 } from "@/components/legal/consent-checklist";
+import { LegalLinks } from "@/components/legal/legal-links";
 import { currentConsentPayload } from "@/lib/legal/legal-docs";
 
 /**
@@ -545,6 +546,7 @@ export function SignupForm() {
           </Link>
         </p>
       </div>
+      <LegalLinks className="mt-6 w-full max-w-[400px]" />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { LegalLinks } from "@/components/legal/legal-links";
 import {
   LOGIN_ROLE_OPTIONS,
   loginPathForRole,
@@ -36,6 +37,7 @@ export function LoginHub() {
           ))}
         </ul>
       </div>
+      <LegalLinks className="mt-6 w-full max-w-[400px]" />
     </div>
   );
 }
