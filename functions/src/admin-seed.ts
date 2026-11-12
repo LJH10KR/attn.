@@ -12,8 +12,8 @@ import {
   formatStudentAttnId,
   formatTeacherAttnId,
 } from "./lib/attn-id";
-import { cleanupDeletedAcademyUsers } from "./lib/admin-user-cleanup";
-import { deleteAcademyFirestoreCascade, deleteCollectionDocs } from "./lib/firestore-cleanup";
+import { deleteAcademyCompletely } from "./lib/academy-delete";
+import { releaseDeletedAcademyMembers } from "./lib/admin-user-cleanup";
 import { internalEmailForAttnId, randomAuthPassword } from "./lib/member-credentials";
 import { passwordSecretFields } from "./lib/password-hash";
 import { allocateTeacherLoginId } from "./lib/teacher-login-id";
@@ -724,17 +724,16 @@ export const deleteSeedBatch = onCall(async (request) => {
     throw new HttpsError("failed-precondition", "seed 배치 메타데이터가 올바르지 않습니다.");
   }
 
-  // 학원 삭제와 같은 cascade(멤버 로그인 정보·색인·알림 기록 포함) + seed 학원만 결제 장부까지
-  const { teacherSnapshots, parentSnapshots } = await deleteAcademyFirestoreCascade(db, academyId);
-  await deleteCollectionDocs(db, `academies/${academyId}/payments`);
-
-  // Auth·사용자 데이터 — 학원 삭제(adminDeleteAcademyCascade)와 같은 보호(admin 계정 제외, 원장은 남은 소유 학원이 없을 때만)
-  await cleanupDeletedAcademyUsers(db, {
-    memberAuthUids: [
-      ...teacherUids,
-      ...parentUids,
-      ...[...teacherSnapshots, ...parentSnapshots].map((m) => m.authUid),
-    ],
+  // 학원 삭제와 같은 전체 정리(2-N — 결제 기록 포함, 멤버·원장 Auth는 다른 쓰임이 없을 때만, admin 계정 제외)
+  await deleteAcademyCompletely(db, academyId, {
+    ownerAccount: "delete_if_unused",
+    context: "deleteSeedBatch",
+    requestedBy: callerUid,
+    ownerUidHint: ownerUid,
+  });
+  // 배치에 적힌 계정 중 학원 문서에 없던 것(만들다 멈춘 계정 등)도 같은 판단으로
+  await releaseDeletedAcademyMembers(db, {
+    memberAuthUids: [...teacherUids, ...parentUids],
     ownerUid,
     context: "deleteSeedBatch",
   });

@@ -5,6 +5,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { academyOptionsRef, readOptionItems } from "./academy-options";
 import { assertPermission } from "./lib/academy-access";
+import { academyAcceptsWrites } from "./lib/academy-deletion-state";
 import {
   classContributedTeacherUids,
   classesCol,
@@ -446,6 +447,8 @@ export const onAcademyClassWritten = onDocumentWritten(
     }
 
     const db = admin.firestore();
+    // 2-N B2 — 학원 삭제가 반을 지워 생긴 이벤트(또는 지운 뒤 늦게 온 이벤트)는 할 일 없음
+    if (!(await academyAcceptsWrites(db, academyId))) return;
     try {
       const studentIds = await listClassStudentIds(db, academyId, classId);
       let changed = 0;

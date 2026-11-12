@@ -96,8 +96,11 @@ export const findLoginIdsByPhone = onCall(ONE_SHOT_APP_CHECK_OPTIONS, async (req
   });
   const academyIds = [...new Set(found.map((f) => f.academyId))];
   const academySnaps = academyIds.length > 0 ? await db.getAll(...academyIds.map((id) => db.doc(`academies/${id}`))) : [];
+  // 학원 문서가 있는 결과만(2-N N9 ④) — `getAll`은 없는 문서도 돌려주므로 `exists`로 거른다
   const academyName = new Map(
-    academySnaps.map((s) => [s.id, typeof s.get("name") === "string" ? (s.get("name") as string) : ""]),
+    academySnaps
+      .filter((s) => s.exists)
+      .map((s) => [s.id, typeof s.get("name") === "string" ? (s.get("name") as string) : ""]),
   );
   const accounts: FoundAccount[] = found
     .filter((f) => academyName.has(f.academyId))

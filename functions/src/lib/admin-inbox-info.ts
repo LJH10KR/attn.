@@ -1,6 +1,7 @@
 import * as admin from "firebase-admin";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
+import { academyAcceptsWrites } from "./academy-deletion-state";
 
 /**
  * 원장 벨 정보성 알림(2-L) — `academies/{a}/adminInbox/{id}`. 처리할 일이 아니라 "이런 일이 있었다" 알림이라
@@ -19,7 +20,9 @@ export type InfoBellKind =
   | "parent_phone_changed"
   | "staff_auto_activated"
   /** 2-M 아이디·비밀번호 찾기 — 문자 확인으로 비밀번호 재설정(학부모 `operations.parents`·직원 `settings.members`에 표시) */
-  | "member_password_reset";
+  | "member_password_reset"
+  /** 2-N 본인 회원 탈퇴(학부모 `operations.parents`·직원 `settings.members`에 표시) — `variant`: kept_hr_record | removed */
+  | "member_withdrawn";
 
 export async function writeInfoBell(
   db: admin.firestore.Firestore,
@@ -34,6 +37,8 @@ export async function writeInfoBell(
   mode: "once" | "replace" = "once",
   nowMs: number = Date.now(),
 ): Promise<boolean> {
+  // 2-N B2 — 지웠거나 지우는 중인 학원 아래에는 벨을 만들지 않음
+  if (!(await academyAcceptsWrites(db, academyId))) return false;
   const col = db.collection(`academies/${academyId}/adminInbox`);
   let created = false;
   const doc = {

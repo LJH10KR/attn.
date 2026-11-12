@@ -220,37 +220,40 @@ export async function finishStaffActivation(academyId: string, authUid: string):
  * 새 ID의 계정 없는 직원 문서(status no_account, 기본 역할·권한 없음)로 옮기고 계정 문서는 지운다.
  * 예전 uid 경로에 문서를 남기지 않아, 삭제된 계정의 아직 유효한 토큰이 멤버로 취급되지 않는다.
  * Auth 사용자·로그인 인덱스·secrets 정리는 호출 측에서. 새 직원 문서 ID를 돌려준다.
+ * 2-N(F6): 트랜잭션 — 동시에 두 번 불려도(탈퇴 두 기기·삭제 두 번 누름) 인사 기록은 하나. 계정 문서가 이미 없으면 null.
  */
 export async function detachStaffAccount(
   db: admin.firestore.Firestore,
   academyId: string,
-  accountSnap: admin.firestore.DocumentSnapshot,
-): Promise<string> {
-  const hr: Record<string, unknown> = {};
-  for (const k of HR_FIELDS) {
-    const v = accountSnap.get(k);
-    if (v !== undefined) hr[k] = v;
-  }
+  accountRef: admin.firestore.DocumentReference,
+): Promise<string | null> {
   const hrRef = db.collection(`academies/${academyId}/staff`).doc();
-  const batch = db.batch();
-  batch.set(hrRef, {
-    displayName: "",
-    phone: null,
-    jobTitleId: null,
-    hireDate: null,
-    employmentStatus: "employed",
-    memo: "",
-    createdAt: FieldValue.serverTimestamp(),
-    ...hr,
-    academyId,
-    status: "no_account",
-    authUid: null,
-    isGuest: false,
-    roleId: DEFAULT_STAFF_ROLE_ID,
-    permissions: [],
-    updatedAt: FieldValue.serverTimestamp(),
+  return db.runTransaction(async (tx) => {
+    const accountSnap = await tx.get(accountRef);
+    if (!accountSnap.exists) return null;
+    const hr: Record<string, unknown> = {};
+    for (const k of HR_FIELDS) {
+      const v = accountSnap.get(k);
+      if (v !== undefined) hr[k] = v;
+    }
+    tx.set(hrRef, {
+      displayName: "",
+      phone: null,
+      jobTitleId: null,
+      hireDate: null,
+      employmentStatus: "employed",
+      memo: "",
+      createdAt: FieldValue.serverTimestamp(),
+      ...hr,
+      academyId,
+      status: "no_account",
+      authUid: null,
+      isGuest: false,
+      roleId: DEFAULT_STAFF_ROLE_ID,
+      permissions: [],
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    tx.delete(accountRef);
+    return hrRef.id;
   });
-  batch.delete(accountSnap.ref);
-  await batch.commit();
-  return hrRef.id;
 }

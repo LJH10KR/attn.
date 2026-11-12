@@ -3,6 +3,7 @@ import { FieldValue, Timestamp, type DocumentData } from "firebase-admin/firesto
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import * as logger from "firebase-functions/logger";
+import { academyAcceptsWrites } from "./lib/academy-deletion-state";
 
 type MemberStatus =
   | "pending_setup"
@@ -79,12 +80,12 @@ async function countParentsAwaitingApproval(
 }
 
 /**
- * 학원 문서가 있는지 — 학원 삭제(cascade)가 멤버·학생을 지우면 그 삭제 트리거가 뒤늦게 돌아
- * 지워진 학원 아래에 집계·inbox 문서를 다시 만들 수 있어, 쓰기 직전에 확인한다.
- * (확인 직후 학원이 지워지는 좁은 틈은 남음)
+ * 학원 아래에 써도 되는지 — 학원 삭제가 멤버·학생을 지우면 그 삭제 트리거가 뒤늦게 돌아
+ * 지워진(또는 지우는 중인) 학원 아래에 집계·inbox 문서를 다시 만들 수 있어, 쓰기 직전에 확인한다.
+ * 2-N B2: 학원 문서가 있고 **삭제 중 표시가 없을 때만**(확인 직후 삭제가 시작되는 좁은 틈은 학원 삭제의 마지막 쓸기가 잡음)
  */
 async function academyExists(db: admin.firestore.Firestore, academyId: string): Promise<boolean> {
-  return (await db.doc(`academies/${academyId}`).get()).exists;
+  return academyAcceptsWrites(db, academyId);
 }
 
 /**

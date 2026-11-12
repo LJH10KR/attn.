@@ -224,8 +224,8 @@ await call("getParentSignupAcademyInfo", { token: p2.token });
 await call("registerStaffSignup", { consents: CONSENTS, token: s2.token, ...staffInput() });
 
 // --- 링크 문서·원문은 학원 삭제(원장)와 함께 정리 ---
-await as("owner11@t.dev");
-await call("deleteOwnerAcademy", { academyId: B });
+await as("owner11@t.dev"); // 방금 로그인 = 최근 인증(2-N), 이름 확인 필요
+await call("deleteOwnerAcademy", { academyId: B, confirmName: "동시 학원" });
 assert.equal((await db.doc(`signupLinks/${sha(c1.token)}`).get()).exists, false);
 assert.equal((await db.doc(`academies/${B}/secrets/signupLinks`).get()).exists, false);
 

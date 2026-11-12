@@ -378,16 +378,3 @@ export async function deleteParentAccountData(
   await ref.delete();
   return { authUid, data };
 }
-
-/** 다른 학원 멤버십·소유 학원이 남아 있는 Auth 계정인지(학부모 계정을 지울 때 Auth까지 지울지 판단) */
-export async function authUidHasOtherMemberships(
-  db: admin.firestore.Firestore,
-  authUid: string,
-): Promise<boolean> {
-  const [staff, parents, owned] = await Promise.all([
-    db.collectionGroup("staff").where("authUid", "==", authUid).limit(1).get(),
-    db.collectionGroup("parents").where("authUid", "==", authUid).limit(1).get(),
-    db.collection("academies").where("ownerUid", "==", authUid).limit(1).get(),
-  ]);
-  return !staff.empty || !parents.empty || !owned.empty;
-}

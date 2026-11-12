@@ -1,18 +1,13 @@
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import * as logger from "firebase-functions/logger";
 import { reconcileUserActivationMirror } from "./user-activation-mirror";
-import { detachStaffAccount, finishStaffActivation } from "./lib/staff-account";
+import { finishStaffActivation } from "./lib/staff-account";
 import { assertPermission, type AcademyActor } from "./lib/academy-access";
 import { normalizePermissionList } from "./lib/permissions";
 import { staffAccountChangeViolation } from "./lib/role-policy";
-import { stripTeacherFromClasses } from "./lib/class-teachers";
-import {
-  deleteAttnLoginIndexForMember,
-  deleteMemberLoginSecrets,
-  purgeUserFirestoreData,
-} from "./lib/firestore-cleanup";
+import { removeStaffMembership } from "./lib/account-membership";
+import { releaseAuthIfUnused } from "./lib/admin-user-cleanup";
 
 /**
  * 직원 계정 — 활성 상태 조회, 승인(활성)·비활성·삭제.
@@ -185,29 +180,17 @@ export const deleteTeacherInvite = onCall(async (request) => {
     throw new HttpsError("failed-precondition", "계정이 없는 직원은 직원 관리에서 삭제해 주세요.");
   }
 
-  const authUid = (snap.get("authUid") as string | undefined) || teacherId;
-  const data = snap.data() ?? {};
   // 써 오던 계정(사용 중·비활성)은 계정만 지우고 인사 기록 유지 — 초대 취소·가입 거절(첫 로그인 전·승인 대기)과 게스트는 전체 삭제.
-  // `deleteHrRecord`(2-L S1, 삭제 창 "인사 기록도 함께 지우기")면 써 오던 계정도 인사 기록까지 지운다(권한은 같음)
-  const deleteHrRecord = request.data?.deleteHrRecord === true;
-  const keepStaffRecord =
-    (st === "active" || st === "inactive") && snap.get("isGuest") !== true && !deleteHrRecord;
-
-  await deleteMemberLoginSecrets(db, academyId, "teacher", teacherId);
-  await deleteAttnLoginIndexForMember(db, data, authUid);
-  const keptStaffId = keepStaffRecord ? await detachStaffAccount(db, academyId, snap) : null;
-  if (!keepStaffRecord) {
-    await ref.delete();
+  // `deleteHrRecord`(2-L S1, 삭제 창 "인사 기록도 함께 지우기")면 써 오던 계정도 인사 기록까지 지운다(권한은 같음).
+  // 본인 탈퇴(2-N)도 같은 정리(`removeStaffMembership`)를 쓴다.
+  const removal = await removeStaffMembership(db, academyId, teacherId, callerUid, {
+    deleteHrRecord: request.data?.deleteHrRecord === true,
+  });
+  if (removal.result === "missing") {
+    throw new HttpsError("not-found", "선생님 정보를 찾을 수 없습니다.");
   }
-  // staff 문서를 분리·삭제한 뒤 반에서 뺀다 — 그 사이 저장된 반도 새 uid 검사(D6)에서 막히므로 지운 uid가 남지 않음
-  await stripTeacherFromClasses(db, academyId, authUid, callerUid);
+  // 2-N ★5 — 다른 학원 소속·소유 학원·원장 계정이면 Auth는 남긴다(이 학원 소속만 정리)
+  await releaseAuthIfUnused(db, removal.authUid, "deleteTeacherInvite");
 
-  try {
-    await admin.auth().deleteUser(authUid);
-  } catch (e) {
-    logger.warn("deleteTeacherInvite: auth delete skipped", { authUid, e });
-  }
-  await purgeUserFirestoreData(db, authUid);
-
-  return { ok: true as const, keptStaffId };
+  return { ok: true as const, keptStaffId: removal.keptStaffId };
 });
