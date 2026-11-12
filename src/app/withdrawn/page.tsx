@@ -28,7 +28,8 @@ export default function WithdrawnPage() {
       setCleaning(false);
       return;
     }
-    void performLogout({ role })
+    // 서버는 이미 정리됨 — 이 기기만(FCM 토큰·로컬 저장·배지·signOut). 서버 푸시 끄기를 부르면 users 문서가 다시 생김
+    void performLogout({ role, localOnly: true })
       .catch(() => undefined)
       .finally(() => setCleaning(false));
   }, []);

@@ -159,17 +159,23 @@ export async function callSyncParentPushSubscription(
  * - 클라: FCM `deleteToken`(가능할 때), 마지막 동기화용 sessionStorage 제거
  *
  * 동일 브라우저에서 다른 학부모 계정으로 바꿀 때 이전 사용자 토큰이 섞이지 않도록 합니다.
+ * `localOnly`: 서버를 부르지 않고 이 기기 정리만(회원 탈퇴 완료 화면).
  */
-export async function tearDownParentWebPushForLogout(): Promise<void> {
+export async function tearDownParentWebPushForLogout(
+  opts: { localOnly?: boolean } = {},
+): Promise<void> {
   if (isFirebaseEmulatorEnabled()) {
     clearLastSyncedFcmTokenStorage();
     return;
   }
 
-  try {
-    await callSyncParentPushSubscription(false);
-  } catch {
-    /* 오프라인 등 — 로컬 정리는 계속 */
+  // 탈퇴 직후(2-N)는 서버 정리가 이미 끝났고 Auth도 없음 — 아직 유효한 ID 토큰으로 서버를 부르면 지운 `users/{uid}`가 다시 생김
+  if (!opts.localOnly) {
+    try {
+      await callSyncParentPushSubscription(false);
+    } catch {
+      /* 오프라인 등 — 로컬 정리는 계속 */
+    }
   }
 
   if (isWebPushConfigured()) {
