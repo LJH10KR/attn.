@@ -4,7 +4,6 @@
     "grant-admin-emulator": "node scripts/grantAdminEmulator.mjs",
     "grant-admin": "node scripts/grantAdmin.mjs",
     "lint": "eslint .",
-    "prepare": "npm run build",
     "build": "tsc",
     "build:watch": "tsc --watch",
     "test": "npm run build && node --test test/*.test.mjs",
