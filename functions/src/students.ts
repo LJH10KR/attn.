@@ -5,6 +5,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { academyOptionsRef, readOptionItems } from "./academy-options";
 import { assertPermission } from "./lib/academy-access";
+import { academyAcceptsWrites } from "./lib/academy-deletion-state";
 import { academySeqMetaPath, formatStudentAttnId } from "./lib/attn-id";
 import { deleteStudentDocs } from "./lib/firestore-cleanup";
 import { parseOptionalKrPhone } from "./lib/kr-phone";
@@ -243,6 +244,8 @@ export const onAcademyStudentParentLinksWritten = onDocumentWritten(
     }
 
     const db = admin.firestore();
+    // 2-N B2 — 학원 삭제가 학생을 지워 생긴 이벤트는 할 일 없음(학부모 요약·결제·자동 연결을 다시 쓰지 않게)
+    if (!(await academyAcceptsWrites(db, academyId))) return;
     try {
       for (const uid of changed) {
         await refreshParentLinkSummary(db, academyId, uid);

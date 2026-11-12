@@ -1,5 +1,6 @@
 import * as admin from "firebase-admin";
 import { HttpsError } from "firebase-functions/v2/https";
+import { academyDeletionRef } from "./academy-deletion-state";
 import {
   ACADEMY_PERMISSIONS,
   normalizePermissionList,
@@ -36,9 +37,17 @@ export async function resolveAcademyActor(
   academyId: string,
   uid: string,
 ): Promise<AcademyActor | null> {
-  const academySnap = await db.doc(`academies/${academyId}`).get();
+  // 2-N B2 — 삭제 표시도 같은 왕복으로 읽어, 지우는 중인 학원에는 학원 작업을 받지 않음
+  // (학원 화면들은 서버 문구를 그대로 보여 주므로 화면용 문장 하나로 모든 학원 화면에 같은 안내)
+  const [academySnap, deletionSnap] = await db.getAll(
+    db.doc(`academies/${academyId}`),
+    academyDeletionRef(db, academyId),
+  );
   if (!academySnap.exists) {
     throw new HttpsError("not-found", "학원을 찾을 수 없습니다.");
+  }
+  if (deletionSnap.exists) {
+    throw new HttpsError("failed-precondition", "이 학원은 삭제하는 중이에요. 잠시 뒤 학원 목록을 확인해 주세요.", { reason: "academy_deleting" });
   }
   const ownerUid = academySnap.get("ownerUid");
   if (typeof ownerUid === "string" && ownerUid === uid) {

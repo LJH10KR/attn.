@@ -181,8 +181,15 @@ service cloud.firestore {
       /** 학원 생성은 Cloud Functions(Admin SDK)에서만 처리 */
       allow create: if isAdmin();
 
-      allow update, delete: if isAdmin()
-        || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      /**
+       * 2-N B1 — 원장 화면(학원 수정)이 쓰는 필드만(이름·운영 상태·수정 시각). ownerUid·attnId 등 나머지는 서버만.
+       * 삭제는 서버 함수만(`deleteOwnerAcademy`·`adminDeleteAcademyCascade` — 하위 데이터·계정까지 정리).
+       */
+      allow update: if (isAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid))
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'status', 'updatedAt'])
+        && request.resource.data.name is string
+        && request.resource.data.status in ['active', 'archived'];
+      allow delete: if false;
 
       /** 서버 전용 비밀 값(예전 포털 비밀번호 등) — 클라이언트 직접 접근 불가(Admin SDK만) */
       match /secrets/{secretId} {

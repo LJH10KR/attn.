@@ -2,6 +2,7 @@ import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import * as logger from "firebase-functions/logger";
+import { hasOwnerRole } from "./lib/account-use";
 import { purgeUserFirestoreData, syncUserAdminProfile } from "./lib/firestore-cleanup";
 
 type TeacherStatus =
@@ -242,12 +243,12 @@ async function writeUserActivation(
 
   const noMembership = teacher.primaryStatus === null && parent.primaryStatus === null;
   if (noMembership) {
-    const ownsAcademy = await db
-      .collection("academies")
-      .where("ownerUid", "==", authUid)
-      .limit(1)
-      .get();
-    if (ownsAcademy.empty) {
+    const [ownsAcademy, ownerRole] = await Promise.all([
+      db.collection("academies").where("ownerUid", "==", authUid).limit(1).get(),
+      hasOwnerRole(db, authUid),
+    ]);
+    // 2-N: 학원을 모두 지운 원장(원장 계정 표시만 남음)의 `users` 문서는 지우지 않는다
+    if (ownsAcademy.empty && !ownerRole) {
       await purgeUserFirestoreData(db, authUid);
     }
     return true;

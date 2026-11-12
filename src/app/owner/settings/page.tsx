@@ -1,5 +1,6 @@
 "use client";
 
+import { AccountWithdrawalCard } from "@/components/account/account-withdrawal-card";
 import { onAuthStateChanged } from "firebase/auth";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -169,6 +170,7 @@ export default function OwnerSettingsPage() {
         <div className="mt-[26px] space-y-4">
           <OwnerPasswordSettingsCard disabled={logoutBusy} defaultCollapsed />
           <OwnerGoogleLinkCard defaultCollapsed />
+          <AccountWithdrawalCard role="owner" />
         </div>
       </div>
 

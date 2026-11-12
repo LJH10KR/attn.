@@ -2,18 +2,9 @@ import * as admin from "firebase-admin";
 import { FieldPath } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
-import {
-  deleteAcademyFirestoreCascade,
-  deleteAttnLoginIndexForMember,
-  deleteMemberLoginSecrets,
-  purgeUserFirestoreData,
-} from "./lib/firestore-cleanup";
-import {
-  authUserHasAdminClaim,
-  cleanupDeletedAcademyUsers,
-  safeDeleteAuthUser,
-} from "./lib/admin-user-cleanup";
-import { stripTeacherFromClasses } from "./lib/class-teachers";
+import { deleteAcademyCompletely } from "./lib/academy-delete";
+import { removeStaffMembership } from "./lib/account-membership";
+import { releaseAuthIfUnused } from "./lib/admin-user-cleanup";
 import { deleteParentAccountData } from "./lib/parent-links";
 import { reconcileUserActivationMirror } from "./user-activation-mirror";
 
@@ -179,15 +170,11 @@ export const adminDeleteAcademyCascade = onCall(async (request) => {
     throw new HttpsError("failed-precondition", "학원 ownerUid가 없습니다.");
   }
 
-  const { teacherSnapshots, parentSnapshots } = await deleteAcademyFirestoreCascade(
-    db,
-    academyId,
-  );
-
-  await cleanupDeletedAcademyUsers(db, {
-    memberAuthUids: [...teacherSnapshots, ...parentSnapshots].map((m) => m.authUid),
-    ownerUid,
+  // 2-N: 원장 삭제와 같은 전체 정리(결제 기록 포함). 멤버·원장 Auth는 다른 쓰임이 없을 때만 삭제
+  await deleteAcademyCompletely(db, academyId, {
+    ownerAccount: "delete_if_unused",
     context: "adminDeleteAcademyCascade",
+    requestedBy: request.auth!.uid,
   });
 
   logger.info("adminDeleteAcademyCascade done", { academyId, ownerUid });
@@ -222,23 +209,14 @@ export const adminDeleteMemberUser = onCall(async (request) => {
   const authUid = memberAuthUid(data, memberDocId);
 
   if (role === "teacher") {
-    await deleteMemberLoginSecrets(db, academyId, "teacher", memberDocId);
-    await deleteAttnLoginIndexForMember(db, data, authUid);
-    await ref.delete();
-    // staff 문서를 지운 뒤 반 선생님에서 뺀다(학생 teacherUids는 반 트리거가 맞춤)
-    await stripTeacherFromClasses(db, academyId, authUid, request.auth?.uid ?? null);
-    await safeDeleteAuthUser(authUid, "adminDeleteMemberUser teacher");
-    if (!(await authUserHasAdminClaim(authUid))) {
-      await purgeUserFirestoreData(db, authUid);
-    }
+    // 관리자 정리 — 인사 기록까지 지움(계정 문서를 지운 뒤 반 선생님에서 뺌, 학생 teacherUids는 반 트리거가 맞춤)
+    await removeStaffMembership(db, academyId, memberDocId, request.auth?.uid ?? null, { deleteHrRecord: true });
   } else {
     // 원생은 그대로 두고 연결만 해제(결제 parentUids는 학생 트리거가 정리), 번호 색인·로그인 정보 삭제
     await deleteParentAccountData(db, academyId, memberDocId);
-    await safeDeleteAuthUser(authUid, "adminDeleteMemberUser parent");
-    if (!(await authUserHasAdminClaim(authUid))) {
-      await purgeUserFirestoreData(db, authUid);
-    }
   }
+  // 2-N ★5 — 다른 학원 소속·소유 학원·원장 계정이면 Auth 유지(admin 계정은 항상 유지)
+  await releaseAuthIfUnused(db, authUid, `adminDeleteMemberUser ${role}`);
 
   logger.info("adminDeleteMemberUser done", { academyId, memberDocId, role, authUid });
   return { ok: true as const };

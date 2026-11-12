@@ -1,7 +1,7 @@
 "use client";
 
 import { FirebaseError } from "firebase/app";
-import { httpsCallable } from "firebase/functions";
+import { AcademyDeleteDialog } from "@/components/owner/academy-delete-dialog";
 import {
   collection,
   doc,
@@ -26,7 +26,6 @@ import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import {
   getFirebaseAuth,
   getFirebaseDb,
-  getFirebaseFunctions,
 } from "@/lib/firebase/client-app";
 import { fetchIsOwner } from "@/lib/firebase/owner-profile";
 import { COLLECTIONS, type Academy } from "@/lib/firebase/attn-schema";
@@ -98,6 +97,8 @@ export function OwnerDashboard() {
   const [formName, setFormName] = useState("");
   const [formStatus, setFormStatus] = useState<"active" | "archived">("active");
   const [deleteTarget, setDeleteTarget] = useState<AcademyRow | null>(null);
+  /** 학원 삭제 끝 알림(2-N) */
+  const [deleteNotice, setDeleteNotice] = useState<string | null>(null);
   const [registrationOpen, setRegistrationOpen] = useState(false);
   const [registrationVariant, setRegistrationVariant] = useState<"first" | "add">("add");
   /** 학원 목록 첫 조회 완료 전에는 true로 두지 않음(빈 배열 레이스 방지) */
@@ -334,27 +335,6 @@ export function OwnerDashboard() {
     refreshAcademies,
   ]);
 
-  const onDelete = useCallback(async () => {
-    if (!deleteTarget) {
-      return;
-    }
-    setBusy(true);
-    setFormError(null);
-    try {
-      const delFn = httpsCallable(getFirebaseFunctions(), "deleteOwnerAcademy");
-      await delFn({ academyId: deleteTarget.id });
-      refreshAcademies();
-      closeModal();
-    } catch (err) {
-      if (err instanceof FirebaseError) {
-        setFormError(ownerFirebaseErrorMessage(err));
-      } else {
-        setFormError("삭제에 실패했습니다.");
-      }
-    } finally {
-      setBusy(false);
-    }
-  }, [closeModal, deleteTarget, refreshAcademies]);
 
   if (!configured) {
     return (
@@ -460,6 +440,16 @@ export function OwnerDashboard() {
         {listError ? (
           <p className="mb-4 rounded-2xl bg-red-500/10 px-3 py-2.5 text-center text-sm text-red-800 ring-1 ring-red-500/15">
             {listError}
+          </p>
+        ) : null}
+
+        {deleteNotice ? (
+          <p
+            className="mb-4 rounded-2xl bg-emerald-500/10 px-3 py-2.5 text-center text-sm text-emerald-900 ring-1 ring-emerald-500/15"
+            role="status"
+            data-testid="academy-delete-notice"
+          >
+            {deleteNotice}
           </p>
         ) : null}
 
@@ -639,50 +629,15 @@ export function OwnerDashboard() {
       ) : null}
 
       {modal === "delete" && deleteTarget ? (
-        <div
-          className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-black/25 p-4 py-8"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="delete-title"
-        >
-          <div className={`my-auto w-full max-w-md p-6 ${glassCard}`}>
-            <h3
-              id="delete-title"
-              className="text-lg font-semibold text-foreground"
-            >
-              학원 삭제
-            </h3>
-            <p className="mt-3 text-sm text-neutral-600">
-              <span className="font-medium text-foreground">
-                {deleteTarget.name}
-              </span>{" "}
-              정보를 삭제합니다. 하위 선생님·학부모 데이터는 자동으로 지워지지
-              않을 수 있습니다.
-            </p>
-            {formError ? (
-              <p className="mt-3 text-sm text-red-700" role="alert">
-                {formError}
-              </p>
-            ) : null}
-            <div className="mt-6 flex gap-2">
-              <button
-                type="button"
-                onClick={closeModal}
-                className="flex-1 rounded-2xl border border-neutral-300/70 py-3 text-sm font-medium text-neutral-700"
-              >
-                취소
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={onDelete}
-                className="flex-1 rounded-2xl bg-red-600 py-3 text-sm font-medium text-white dark:text-neutral-950 disabled:opacity-50"
-              >
-                {busy ? "처리 중…" : "삭제"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <AcademyDeleteDialog
+          academy={{ id: deleteTarget.id, name: deleteTarget.name }}
+          onCloseAction={closeModal}
+          onDeletedAction={(message) => {
+            setDeleteNotice(message);
+            closeModal();
+            refreshAcademies();
+          }}
+        />
       ) : null}
       {logoutModal}
     </div>

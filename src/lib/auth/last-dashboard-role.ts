@@ -20,6 +20,15 @@ export function setLastDashboardRoleHint(role: DashboardRole): void {
   }
 }
 
+/** 회원 탈퇴 뒤(2-N) — 첫 화면이 지운 계정의 대시보드를 미리 불러오지 않게 */
+export function clearLastDashboardRoleHint(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* 무시 */
+  }
+}
+
 export function getLastDashboardRoleHintPath(): string | null {
   try {
     const v = localStorage.getItem(STORAGE_KEY);

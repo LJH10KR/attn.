@@ -3,7 +3,6 @@ import type { DocumentReference } from "firebase-admin/firestore";
 import { FieldValue } from "firebase-admin/firestore";
 import { attnLoginIndexPath } from "./attn-id";
 import { normalizeParentLoginEmail } from "./parent-login-id";
-import { deleteAcademySignupLinks } from "./signup-links";
 
 export function chunkArray<T>(arr: T[], chunkSize: number): T[][] {
   const out: T[][] = [];
@@ -181,128 +180,33 @@ export async function syncUserAdminProfile(
   );
 }
 
-/** Auth 연동 사용자의 Firestore 프로필·미러·OTP 등 (서브컬렉션 먼저, 문서는 마지막) */
+/**
+ * Auth 연동 사용자의 Firestore 프로필·미러·OTP 등 (서브컬렉션 먼저, 문서는 마지막).
+ * 2-N: 원장 동의 기록(`legalConsents/{uid}`, ★8)과 이 계정에게 가는 출결 푸시 전달 문서(`_pushDeliveries`, F9)도.
+ */
 export async function purgeUserFirestoreData(
   db: admin.firestore.Firestore,
   userId: string,
 ): Promise<void> {
-  if (!userId || userId.startsWith("academy_")) return;
+  if (!userId || userId.includes("/") || userId.startsWith("academy_")) return;
 
   for (const sub of ["pushSubscriptions", "dashboardBellItems", "serverMirror"] as const) {
     await deleteCollectionDocs(db, `users/${userId}/${sub}`);
   }
+  await deleteQueryDocs(db, db.collection("_pushDeliveries").where("recipientUid", "==", userId));
 
-  try {
-    await db.doc(`emailVerificationOtps/${userId}`).delete();
-  } catch {
-    /* optional */
+  for (const path of [
+    `emailVerificationOtps/${userId}`,
+    `legalConsents/${userId}`,
+    `_accountWithdrawals/${userId}`,
+    `users/${userId}`,
+  ]) {
+    try {
+      await db.doc(path).delete();
+    } catch {
+      /* optional */
+    }
   }
-  try {
-    await db.doc(`users/${userId}`).delete();
-  } catch {
-    /* optional */
-  }
-}
-
-export type AcademyMemberSnapshot = {
-  docId: string;
-  authUid: string;
-  data: FirebaseFirestore.DocumentData;
-};
-
-/**
- * 학원 단위 Firestore 데이터 전부 삭제(고아 서브컬렉션·인덱스 포함).
- * Auth 삭제는 호출 측에서 별도 수행합니다.
- */
-export async function deleteAcademyFirestoreCascade(
-  db: admin.firestore.Firestore,
-  academyId: string,
-  members?: {
-    teachers: AcademyMemberSnapshot[];
-    parents: AcademyMemberSnapshot[];
-  },
-): Promise<{ teacherSnapshots: AcademyMemberSnapshot[]; parentSnapshots: AcademyMemberSnapshot[] }> {
-  const teachersSnap = members
-    ? null
-    : await db.collection(`academies/${academyId}/staff`).get();
-  const parentsSnap = members
-    ? null
-    : await db.collection(`academies/${academyId}/parents`).get();
-  const studentsSnap = await db.collection(`academies/${academyId}/students`).get();
-
-  const teacherSnapshots: AcademyMemberSnapshot[] =
-    members?.teachers ??
-    teachersSnap!.docs.map((d) => ({
-      docId: d.id,
-      authUid:
-        typeof d.get("authUid") === "string" && d.get("authUid")
-          ? (d.get("authUid") as string)
-          : d.id,
-      data: d.data(),
-    }));
-
-  const parentSnapshots: AcademyMemberSnapshot[] =
-    members?.parents ??
-    parentsSnap!.docs.map((d) => ({
-      docId: d.id,
-      authUid:
-        typeof d.get("authUid") === "string" && d.get("authUid")
-          ? (d.get("authUid") as string)
-          : d.id,
-      data: d.data(),
-    }));
-
-  const deleteOps: DocumentReference[] = [];
-
-  for (const t of teacherSnapshots) {
-    deleteOps.push(db.doc(`academies/${academyId}/staff/${t.docId}`));
-    deleteOps.push(
-      db.doc(`academies/${academyId}/staff/${t.docId}/secrets/login`),
-    );
-  }
-  for (const p of parentSnapshots) {
-    deleteOps.push(db.doc(`academies/${academyId}/parents/${p.docId}`));
-    deleteOps.push(
-      db.doc(`academies/${academyId}/parents/${p.docId}/secrets/login`),
-    );
-  }
-  // 학생 문서와 하위 기록·메모(남은 메모 문서까지). 반 출결은 학생마다 조회하지 않고 컬렉션을 한 번에(B6)
-  await deleteStudentDocs(db, academyId, studentsSnap.docs.map((s) => s.id), { classAttendance: "skip" });
-  await deleteCollectionDocs(db, `academies/${academyId}/attendance`);
-  await deleteCollectionDocs(db, `academies/${academyId}/studentNotes`);
-  await deleteCollectionDocs(db, `academies/${academyId}/parentPhones`);
-  await deleteCollectionDocs(db, `academies/${academyId}/classes`);
-  await deleteCollectionDocs(db, `academies/${academyId}/classHistory`);
-  // 출결 알림 기록과 그 푸시 전달 문서(최상위 `_pushDeliveries`, academyId 필드로 찾음).
-  // 결제 장부(`payments`)는 지우지 않는다 — 보존 정책은 4단계 수납에서(seed 삭제만 따로 지움).
-  await deleteCollectionDocs(db, `academies/${academyId}/attendanceNotifications`);
-  await deleteQueryDocs(db, db.collection("_pushDeliveries").where("academyId", "==", academyId));
-
-  const metaSnap = await db.collection(`academies/${academyId}/meta`).get();
-  metaSnap.docs.forEach((d) => deleteOps.push(d.ref));
-
-  const rolesSnap = await db.collection(`academies/${academyId}/roles`).get();
-  rolesSnap.docs.forEach((d) => deleteOps.push(d.ref));
-
-  const inboxSnap = await db.collection(`academies/${academyId}/adminInbox`).get();
-  inboxSnap.docs.forEach((d) => deleteOps.push(d.ref));
-
-  // 가입 QR 링크(2-K) — 최상위 해시 문서와 원문 secrets 문서
-  await deleteAcademySignupLinks(db, academyId);
-
-  const secretsLoginRef = db.doc(`academies/${academyId}/secrets/login`);
-  const secretsSnap = await secretsLoginRef.get();
-  if (secretsSnap.exists) deleteOps.push(secretsLoginRef);
-
-  deleteOps.push(db.doc(`academies/${academyId}`));
-
-  await batchDeleteRefs(db, deleteOps);
-
-  for (const m of [...teacherSnapshots, ...parentSnapshots]) {
-    await deleteAttnLoginIndexForMember(db, m.data, m.authUid);
-  }
-
-  return { teacherSnapshots, parentSnapshots };
 }
 
 /** 학생 하위 기록 컬렉션 — 학생·학원 삭제 때 함께 지운다 */

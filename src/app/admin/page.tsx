@@ -8,6 +8,7 @@ import {
   type User,
 } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
+import { AdminOrphanDataPanel } from "@/components/admin/admin-orphan-data-panel";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AcademyAttendanceLogPanel } from "@/components/academy/academy-attendance-log-panel";
 import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
@@ -366,7 +367,7 @@ export default function AdminSeedPage() {
   const onCascadeDeleteAcademy = useCallback(
     async (academyId: string, academyName: string) => {
       const ok = window.confirm(
-        `학원「${academyName || academyId}」(${academyId})와 소속 선생님·학부모·학생·오너 Auth 등을 모두 삭제합니다. 이 작업은 되돌릴 수 없습니다. 진행할까요?`,
+        `학원「${academyName || academyId}」(${academyId})의 원생·학부모·직원·출결·결제 기록을 모두 삭제합니다. 학부모·직원·원장 계정은 다른 학원에서 쓰이지 않을 때만 지웁니다. 이 작업은 되돌릴 수 없습니다. 진행할까요?`,
       );
       if (!ok) return;
       setCascadeBusyAcademyId(academyId);
@@ -387,7 +388,7 @@ export default function AdminSeedPage() {
   const onDeleteMemberUser = useCallback(
     async (academyId: string, memberDocId: string, role: "teacher" | "parent", label: string) => {
       const ok = window.confirm(
-        `「${label}」(${role === "teacher" ? "선생님" : "학부모"}) 계정을 삭제합니다. 학부모인 경우 자녀 학생 문서도 함께 삭제됩니다. 진행할까요?`,
+        `「${label}」(${role === "teacher" ? "선생님" : "학부모"}) 계정을 삭제합니다. 학부모는 자녀 연결만 해제되고 원생 정보는 남습니다. 다른 학원에서도 쓰는 로그인 계정은 남깁니다. 진행할까요?`,
       );
       if (!ok) return;
       const key = `${academyId}:${memberDocId}:${role}`;
@@ -733,6 +734,8 @@ export default function AdminSeedPage() {
               )}
             </div>
           </section>
+
+          <AdminOrphanDataPanel />
 
           <section className="glass-card-soft p-5">
             <h2 className="text-sm font-semibold text-foreground">출석/결석 알림 전송 기록</h2>

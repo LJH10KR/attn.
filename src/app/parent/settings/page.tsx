@@ -1,5 +1,6 @@
 "use client";
 
+import { AccountWithdrawalCard } from "@/components/account/account-withdrawal-card";
 import { FirebaseError } from "firebase/app";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
@@ -30,7 +31,8 @@ import { octomoPhoneKey } from "@/lib/phone/octomo-phone-key";
 import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
-import { useRoleLogout } from "@/lib/auth/use-role-logout";import { LegalLinks } from "@/components/legal/legal-links";
+import { useRoleLogout } from "@/lib/auth/use-role-logout";
+import { LegalLinks } from "@/components/legal/legal-links";
 
 const inputClass =
   "w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3 text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50";
@@ -344,6 +346,7 @@ export default function ParentSettingsPage() {
               iOS 안내 다시 보기
             </button>
           </SettingsAccordionItem>
+          <AccountWithdrawalCard role="parent" />
         </div>
 
         <IosPwaHintModal

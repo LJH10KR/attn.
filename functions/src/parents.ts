@@ -1,7 +1,6 @@
 import * as admin from "firebase-admin";
 import { FieldValue, Timestamp, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import * as logger from "firebase-functions/logger";
 import { reconcileUserActivationMirror } from "./user-activation-mirror";
 import { getRequireStudentCheckInPin } from "./kiosk";
 import { loadNextDueInvoiceSummaries } from "./tuition-invoices";
@@ -13,9 +12,8 @@ import {
   normalizeStudentStatus,
   type StudentStatus,
 } from "./lib/student-profile";
-import { purgeUserFirestoreData } from "./lib/firestore-cleanup";
+import { releaseAuthIfUnused } from "./lib/admin-user-cleanup";
 import {
-  authUidHasOtherMemberships,
   deleteParentAccountData,
   parentDocRef,
   parentStatusFromLinks,
@@ -371,13 +369,7 @@ export const deleteParentAccount = onCall(async (request) => {
   await assertPermission(db, academyId, request.auth.uid, request.auth.token, "operations.parents");
 
   const { authUid } = await deleteParentAccountData(db, academyId, parentUid);
-  if (!(await authUidHasOtherMemberships(db, authUid))) {
-    try {
-      await admin.auth().deleteUser(authUid);
-    } catch (e) {
-      logger.warn("deleteParentAccount: auth delete skipped", { authUid, e });
-    }
-    await purgeUserFirestoreData(db, authUid);
-  }
+  // 다른 학원 소속·소유 학원·원장 계정이면 Auth 유지(2-N 공용 판단 — 원장 계정 표시도 봄)
+  await releaseAuthIfUnused(db, authUid, "deleteParentAccount");
   return { ok: true };
 });

@@ -639,3 +639,31 @@ describe("학부모 — 승인 대기 계정·번호 색인(2-C)", () => {
     await assertFails(updateDoc(doc(db, academyPath("parents", PARENT_PENDING)), { status: "active" }));
   });
 });
+
+describe("학원 문서 쓰기(2-N B1)", () => {
+  it("원장은 이름·운영 상태만 고치고, 다른 필드·삭제는 거부", async () => {
+    const db = dbAs(OWNER);
+    const ref = doc(db, academyPath());
+    await assertSucceeds(updateDoc(ref, { name: "새 이름", status: "archived", updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(ref, { ownerUid: "someone-else" }));
+    await assertFails(updateDoc(ref, { attnId: "o9_a9" }));
+    await assertFails(updateDoc(ref, { deletingAt: serverTimestamp() }));
+    await assertFails(updateDoc(ref, { name: "이름", memberAuthUids: ["victim"] }));
+    await assertFails(updateDoc(ref, { status: "deleted" }));
+    await assertFails(deleteDoc(ref));
+  });
+
+  it("직원·학부모는 학원 문서를 고치거나 지우지 못하고, 삭제 표시(_academyDeletions)는 아무도 읽거나 쓰지 못한다", async () => {
+    for (const uid of ["staff-members", PARENT]) {
+      const db = dbAs(uid);
+      await assertFails(updateDoc(doc(db, academyPath()), { name: "x" }));
+      await assertFails(deleteDoc(doc(db, academyPath())));
+    }
+    for (const uid of [OWNER, "staff-members"]) {
+      const db = dbAs(uid);
+      await assertFails(getDoc(doc(db, `_academyDeletions/${ACADEMY}`)));
+      await assertFails(setDoc(doc(db, `_academyDeletions/${ACADEMY}`), { memberAuthUids: ["victim"] }));
+      await assertFails(setDoc(doc(db, `_accountWithdrawals/${uid}`), { staffAcademyIds: [ACADEMY] }));
+    }
+  });
+});
