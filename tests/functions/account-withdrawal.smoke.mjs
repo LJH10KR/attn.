@@ -169,6 +169,9 @@ assert.equal(pBell.displayName, "탈퇴 학부모");
 assert.ok(!JSON.stringify(pBell).includes("6310"), "벨에 전화번호 없음");
 // 다시 불러도 ok(응답을 잃은 재시도)
 assert.deepEqual(await call("withdrawAccount", {}), { ok: true }, "재호출 ok");
+// 탈퇴 직후 같은 토큰으로 푸시 끄기(예전 로그아웃 정리 경로) → 지운 users 문서를 다시 만들지 않음(2-N 배포 뒤 후속)
+assert.deepEqual(await call("syncParentPushSubscription", { enabled: false }), { ok: true, pushNotificationsEnabled: false });
+assert.equal((await db.doc(`users/${P}`).get()).exists, false, "푸시 끄기는 없는 users 문서를 만들지 않음");
 // 재설정 표 → no_match, 찾기에서 빠짐
 await signOut(auth);
 assert.equal((await call("resetPasswordWithPhone", { ticket: ticketRes.ticket, newPassword: "newpw123" })).status, "no_match");
@@ -187,6 +190,13 @@ const G = auth.currentUser.uid;
 // 두 번째 학원 소속(Google 가입은 로그인 ID가 전역에 하나라, 다른 학원 계정 문서는 Admin으로)
 await db.doc(`academies/${A2}/parents/${G}`).set({ authUid: G, displayName: "구글 학부모", status: "pending_approval", authProvider: "google" });
 assert.equal((await db.doc(`academies/${A2}/parents/${G}`).get()).exists, true);
+// 푸시 켜기 → 끄기(문서가 있으면 그대로 끄기 기록 + 구독 정리)
+await call("syncParentPushSubscription", { enabled: true, fcmToken: "f".repeat(120) });
+assert.equal((await db.doc(`users/${G}`).get()).get("pushNotificationsEnabled"), true);
+assert.equal((await db.collection(`users/${G}/pushSubscriptions`).get()).size, 1);
+await call("syncParentPushSubscription", { enabled: false });
+assert.equal((await db.doc(`users/${G}`).get()).get("pushNotificationsEnabled"), false, "있는 문서는 끄기 기록");
+assert.equal((await db.collection(`users/${G}/pushSubscriptions`).get()).size, 0, "구독 정리");
 const gInfo = await call("getAccountWithdrawalInfo", {});
 assert.equal(gInfo.memberships.length, 2);
 assert.equal(gInfo.reauth.google, true);

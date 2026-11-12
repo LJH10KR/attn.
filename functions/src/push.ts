@@ -41,18 +41,19 @@ export const syncParentPushSubscription = onCall(async (request) => {
   const userRef = db.doc(`users/${uid}`);
 
   if (!enabled) {
+    // 끄기는 구독 정리만 — `users/{uid}`가 없으면 새로 만들지 않는다(2-N: 탈퇴 직후 아직 유효한 토큰의 로그아웃 정리가
+    // 지운 사용자 문서를 다시 만들던 문제). 켜기는 그대로(문서를 만듦).
     const subs = await userRef.collection("pushSubscriptions").get();
-    const batch = db.batch();
-    subs.docs.forEach((d) => batch.delete(d.ref));
-    batch.set(
-      userRef,
-      {
-        pushNotificationsEnabled: false,
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
-    await batch.commit();
+    await db.runTransaction(async (tx) => {
+      const userSnap = await tx.get(userRef);
+      subs.docs.forEach((d) => tx.delete(d.ref));
+      if (userSnap.exists) {
+        tx.update(userRef, {
+          pushNotificationsEnabled: false,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+    });
     await syncParentPushSummary(db, uid, false, 0);
     return { ok: true as const, pushNotificationsEnabled: false };
   }
