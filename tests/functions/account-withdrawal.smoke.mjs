@@ -37,7 +37,6 @@ for (const [id, name] of [[A1, "탈퇴 학원"], [A2, "둘째 탈퇴 학원"]]) 
   await db.doc(`academies/${id}/meta/seq`).set({ nextTeacherSeq: 1, nextParentSeq: 1, nextStudentSeq: 1 });
 }
 const PA1 = await seedSignupToken(db, A1, "parent");
-const PA2 = await seedSignupToken(db, A2, "parent");
 const SA1 = await seedSignupToken(db, A1, "staff");
 
 const app = initializeApp({ projectId: PROJECT, apiKey: "fake" });

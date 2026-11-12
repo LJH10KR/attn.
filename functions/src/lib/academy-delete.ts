@@ -63,7 +63,7 @@ async function deletePushRateLimits(db: admin.firestore.Firestore, academyId: st
       db
         .collection("_pushRateLimits")
         .where(FieldPath.documentId(), ">=", prefix)
-        .where(FieldPath.documentId(), "<", `${prefix}`),
+        .where(FieldPath.documentId(), "<", `${prefix}\uf8ff`),
     );
   }
 }

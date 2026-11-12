@@ -17,6 +17,8 @@ import {
   type AcademyPaymentStatus,
 } from "@/lib/firebase/attn-schema";
 import { getFirebaseAuth, getFirebaseDb } from "@/lib/firebase/client-app";
+import { PAYMENT_CSV_COLUMNS, paymentsCsvFileName } from "@/lib/academy/payments-csv";
+import { downloadCsv } from "@/lib/ui/csv";
 
 const glassCard = "glass-card";
 
@@ -62,7 +64,7 @@ function paymentTypeBadgeClass(r: PaymentRow): string {
 
 /** 수납 › 결제 내역 — 권한(`billing.payments`) 확인은 학원 공통 레이아웃이 한다 */
 export default function AcademyPaymentsPage() {
-  const { academyId, permissions } = useAcademyShell();
+  const { academyId, academyName, permissions } = useAcademyShell();
   const canRefund = permissions.can("billing.refunds");
 
   const [year, setYear] = useState(() => nowKST().year);
@@ -174,6 +176,25 @@ export default function AcademyPaymentsPage() {
           다음 ›
         </button>
       </div>
+
+      {!loadingRows && rows.length > 0 ? (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() =>
+              downloadCsv(
+                paymentsCsvFileName(academyName ?? "", `${year}-${String(month).padStart(2, "0")}`),
+                PAYMENT_CSV_COLUMNS,
+                rows,
+              )
+            }
+            className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-1.5 text-xs font-medium hover:bg-white/90"
+            data-testid="payments-csv"
+          >
+            CSV 내려받기
+          </button>
+        </div>
+      ) : null}
 
       {loadError ? (
         <p className="rounded-2xl bg-red-500/10 px-3 py-2 text-center text-xs text-red-800 ring-1 ring-red-500/15">

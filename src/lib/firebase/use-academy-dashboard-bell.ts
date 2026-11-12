@@ -9,6 +9,7 @@ import {
   TEACHER_INVITE_TTL_MS,
   type AcademyAdminInboxDoc,
 } from "@/lib/firebase/attn-schema";
+import { memberWithdrawnBellText } from "@/lib/auth/account-withdrawal-text";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
 import { useDashboardRefetchOnFocus } from "@/lib/firebase/use-dashboard-refetch-on-focus";
 import { setAppIconBadgeCount } from "@/lib/ios/app-badge";
@@ -182,6 +183,21 @@ function mapInboxDoc(
       id,
       title: `${name} ${isParent ? "학부모" : "직원"}이 문자 확인으로 비밀번호를 바꿨습니다`,
       detail: "다른 기기의 로그인은 모두 끊겼습니다. 본인이 한 일이 아니라면 계정을 비활성화하고 확인해 주세요.",
+      href,
+      hrefLabel: isParent ? "학부모 관리" : "멤버 관리",
+    }];
+  }
+
+  // 2-N 본인 회원 탈퇴 — 학부모는 학부모 관리, 직원은 멤버 관리 권한일 때만(30일 만료)
+  if (kind === "member_withdrawn") {
+    const isParent = entityType !== "teacher";
+    const href = isParent ? links.parentsHref : links.membersHref;
+    if (!href) return [];
+    const exp = readTs(data.expiresAt);
+    if (exp && exp.toMillis() <= now) return [];
+    return [{
+      id,
+      ...memberWithdrawnBellText(name, isParent ? "parent" : "teacher", data.variant),
       href,
       hrefLabel: isParent ? "학부모 관리" : "멤버 관리",
     }];

@@ -95,7 +95,9 @@ export type AcademyAdminInboxKind =
   /** 직원 번호 확인 + 미리 등록 후보 1명 + 역할 → 바로 사용 중(ID `s-autoact-{uid}`) */
   | "staff_auto_activated"
   /** 2-M 문자 확인으로 비밀번호 재설정(전화번호 없음) */
-  | "member_password_reset";
+  | "member_password_reset"
+  /** 2-N 본인 회원 탈퇴(ID `withdrawn-{parent|teacher}-{uid}`, 전화번호 없음) — 직원은 `variant` kept_hr_record·removed */
+  | "member_withdrawn";
 
 export type AcademyAdminInboxDoc = {
   schemaVersion: typeof ACADEMY_ADMIN_INBOX_SCHEMA_VERSION;
@@ -117,7 +119,7 @@ export type AcademyAdminInboxDoc = {
   /** 2-L 학부모 알림 — 원생 id */
   studentId?: string;
   /** 2-L `parent_phone_changed` — self(학부모가 바꿈)·corrected(학원 번호 대신 확인한 번호)·reverted(바꾸지 않았어요) */
-  variant?: "self" | "corrected" | "reverted";
+  variant?: "self" | "corrected" | "reverted" | "kept_hr_record" | "removed";
   /** 2-L `staff_auto_activated` — 부여된 역할 */
   roleId?: string;
   roleName?: string;
