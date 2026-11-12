@@ -6,8 +6,8 @@ import { HttpsError } from "firebase-functions/v2/https";
  * 본문이 확정·개정되면 두 파일의 버전을 함께 올린다 → 원장은 다음 진입 때 다시 동의, 새 가입자는 새 버전으로 기록.
  */
 export const LEGAL_DOC_VERSIONS = {
-  terms: "2026-11-draft",
-  privacy: "2026-11-draft",
+  terms: "2026-11-v1",
+  privacy: "2026-11-v1",
 } as const;
 
 export type LegalDocKind = keyof typeof LEGAL_DOC_VERSIONS;

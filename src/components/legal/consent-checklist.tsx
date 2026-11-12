@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import {
+  CONSENT_REFUSAL_NOTE,
   CONSENT_SUMMARY_ROWS,
   LEGAL_DOC_PATHS,
   LEGAL_DOC_TITLES,
@@ -20,7 +21,7 @@ export const CONSENT_REQUIRED_MESSAGE = "이용약관과 개인정보 수집·�
 
 /**
  * 가입 동의(2-L) — [전체 동의] + [필수] 이용약관 + [필수] 개인정보 수집·이용(항목·목적·보관 기간 짧은 표) + 문서 링크.
- * 원장·학부모·직원 가입과 원장 다시 동의 시트 공용. 표 내용은 확정 전 자리 표시(`CONSENT_SUMMARY_ROWS`).
+ * 원장·학부모·직원 가입과 원장 다시 동의 시트 공용. 표 내용은 확정본 1차(`CONSENT_SUMMARY_ROWS`, 2-O).
  */
 export function ConsentChecklist({
   audience,
@@ -116,7 +117,7 @@ export function ConsentChecklist({
             </tbody>
           </table>
           <p className="break-keep border-t border-neutral-100 px-2 py-1.5 text-[10px] text-neutral-400">
-            동의를 거부할 수 있으나, 거부하면 가입할 수 없습니다. 자세한 내용은 개인정보 처리방침을 확인해 주세요.
+            {CONSENT_REFUSAL_NOTE} 자세한 내용은 개인정보 처리방침을 확인해 주세요.
           </p>
         </div>
       ) : null}

@@ -14,6 +14,7 @@ import {
   EMPTY_CONSENT,
   type ConsentState,
 } from "@/components/legal/consent-checklist";
+import { LegalLinks } from "@/components/legal/legal-links";
 import { PhoneVerificationStep } from "@/components/phone-verification/phone-verification-step";
 import { KrPhoneInput } from "@/components/ui/kr-phone-input";
 import { PasswordInput } from "@/components/ui/password-input";
@@ -467,6 +468,7 @@ export default function StaffJoinPage() {
           <StaffJoinForm />
         </Suspense>
       </div>
+      <LegalLinks className="mt-6 w-full max-w-[400px]" />
     </div>
   );
 }

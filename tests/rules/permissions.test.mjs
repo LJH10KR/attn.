@@ -667,3 +667,95 @@ describe("학원 문서 쓰기(2-N B1)", () => {
     }
   });
 });
+
+describe("법적 고지 정보 appConfig/legalInfo(2-O)", () => {
+  const ADMIN = "admin-uid";
+  const adminDb = () => dbAs(ADMIN, { admin: true });
+  const valid = (extra = {}) => ({
+    representativeName: "홍길동",
+    businessNumber: "123-45-67890",
+    address: "서울특별시 어딘가 1",
+    contactEmail: "attn.team@gmail.com",
+    privacyEffectiveDate: "2026-12-01",
+    termsEffectiveDate: "2026-12-01",
+    updatedAt: serverTimestamp(),
+    ...extra,
+  });
+  const empty = () =>
+    valid({
+      representativeName: "",
+      businessNumber: "",
+      address: "",
+      contactEmail: "",
+      privacyEffectiveDate: "",
+      termsEffectiveDate: "",
+    });
+
+  it("로그인 없이 legalInfo 한 문서만 읽고(없어도), 목록·다른 문서·쓰기는 거부", async () => {
+    const anon = testEnv.unauthenticatedContext().firestore();
+    await assertSucceeds(getDoc(doc(anon, "appConfig", "legalInfo")));
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "appConfig", "legalInfo"), { ...valid(), updatedAt: Timestamp.now() });
+      await setDoc(doc(ctx.firestore(), "appConfig", "other"), { secret: "x" });
+    });
+    const snap = await assertSucceeds(getDoc(doc(anon, "appConfig", "legalInfo")));
+    assert.equal(snap.get("representativeName"), "홍길동");
+    await assertFails(getDocs(collection(anon, "appConfig")));
+    await assertFails(getDoc(doc(anon, "appConfig", "other")));
+    await assertFails(setDoc(doc(anon, "appConfig", "legalInfo"), valid()));
+    await assertFails(deleteDoc(doc(anon, "appConfig", "legalInfo")));
+  });
+
+  it("원장·학부모·직원은 쓰지 못하고 읽기만", async () => {
+    for (const uid of [OWNER, PARENT, "staff-members"]) {
+      const db = dbAs(uid);
+      await assertSucceeds(getDoc(doc(db, "appConfig", "legalInfo")));
+      await assertFails(setDoc(doc(db, "appConfig", "legalInfo"), valid()));
+    }
+    await assertFails(setDoc(doc(dbAs(OWNER, { admin: false }), "appConfig", "legalInfo"), valid()));
+  });
+
+  it("admin은 맞는 값으로 만들고 고치며, 빈 문자열(아직 입력 안 함)도 저장", async () => {
+    const db = adminDb();
+    const ref = doc(db, "appConfig", "legalInfo");
+    await assertSucceeds(setDoc(ref, empty()));
+    await assertSucceeds(setDoc(ref, valid()));
+    await assertSucceeds(updateDoc(ref, { address: "부산광역시 다른 곳 2", updatedAt: serverTimestamp() }));
+    await assertSucceeds(setDoc(ref, valid({ contactEmail: "a.b+c@sub.example.co.kr", termsEffectiveDate: "2027-02-28" })));
+  });
+
+  it("admin도 형식이 틀리거나 필드가 다르면·다른 문서·삭제는 거부", async () => {
+    const db = adminDb();
+    const ref = doc(db, "appConfig", "legalInfo");
+    const bad = [
+      { businessNumber: "1234567890" },
+      { businessNumber: "123-45-6789" },
+      { businessNumber: "abc-de-fghij" },
+      { contactEmail: "not-an-email" },
+      { contactEmail: "a b@c.com" },
+      { contactEmail: "a@b" },
+      { privacyEffectiveDate: "2026-13-01" },
+      { privacyEffectiveDate: "2026/12/01" },
+      { termsEffectiveDate: "2026-12-32" },
+      { termsEffectiveDate: "26-12-01" },
+      { representativeName: "가".repeat(41) },
+      { address: "가".repeat(201) },
+      { contactEmail: `${"a".repeat(115)}@b.com` },
+      { representativeName: 123 },
+      { updatedAt: Timestamp.fromMillis(Date.now() - 60_000) },
+      { updatedBy: ADMIN },
+      { extra: "x" },
+    ];
+    for (const extra of bad) {
+      await assertFails(setDoc(ref, valid(extra)), JSON.stringify(extra));
+    }
+    for (const k of ["address", "updatedAt"]) {
+      const missing = valid();
+      delete missing[k];
+      await assertFails(setDoc(ref, missing), `${k} 빠짐`);
+    }
+    await assertFails(setDoc(doc(db, "appConfig", "other"), valid()));
+    await assertSucceeds(setDoc(ref, valid()));
+    await assertFails(deleteDoc(ref));
+  });
+});

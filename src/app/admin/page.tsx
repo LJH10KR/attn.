@@ -8,6 +8,7 @@ import {
   type User,
 } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
+import { AdminLegalInfoPanel } from "@/components/admin/admin-legal-info-panel";
 import { AdminOrphanDataPanel } from "@/components/admin/admin-orphan-data-panel";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AcademyAttendanceLogPanel } from "@/components/academy/academy-attendance-log-panel";
@@ -529,6 +530,8 @@ export default function AdminSeedPage() {
         </div>
 
         <div className="mt-6 space-y-4">
+          <AdminLegalInfoPanel />
+
           <section className="glass-card-soft p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
