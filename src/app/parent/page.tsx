@@ -42,7 +42,8 @@ import { useRoleLogout } from "@/lib/auth/use-role-logout";
 import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
 import { isLikelyIos, isStandaloneDisplayMode } from "@/lib/platform/ios-pwa";
-import { FirebaseError } from "firebase/app";
+import { FirebaseError } from "firebase/app";import { ParentDeclineChildButton } from "@/components/parent/parent-decline-child";
+import { PARENT_CHILDREN_CHANGED_EVENT } from "@/components/parent/parent-phone-notice";
 
 const glassCard = "glass-card";
 
@@ -85,6 +86,8 @@ export default function ParentDashboardPage() {
   const [googleLinked, setGoogleLinked] = useState(false);
   const [googleEmail, setGoogleEmail] = useState<string | null>(null);
   const [students, setStudents] = useState<ParentChildVM[]>([]);
+  /** "내 자녀가 아니에요" 처리 뒤 안내(2-L) */
+  const [declineNotice, setDeclineNotice] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
   const { logout: onLogout, logoutBusy, logoutModal } = useRoleLogout({
@@ -403,6 +406,13 @@ export default function ParentDashboardPage() {
     }
   }, [academyId]);
 
+  // 번호 변경 안내 처리(2-L L-3)로 자녀가 새로 연결되면 목록 다시 받기
+  useEffect(() => {
+    const onChanged = () => void refreshChildrenList();
+    window.addEventListener(PARENT_CHILDREN_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(PARENT_CHILDREN_CHANGED_EVENT, onChanged);
+  }, [refreshChildrenList]);
+
   // PWA에서 모바일 REDIRECTION 결제 시 나이스 결제 페이지가 시스템 브라우저로 열려
   // 결제 완료 후 PWA로 자동 복귀되지 않는다 — /payment/complete가 localStorage에 남긴
   // 결과를 PWA가 다시 포그라운드로 돌아왔을 때(visibilitychange) 읽어 학생 목록을 갱신한다.
@@ -603,6 +613,11 @@ export default function ParentDashboardPage() {
             {listError}
           </p>
         ) : null}
+        {declineNotice ? (
+          <p className="mb-2 rounded-2xl bg-emerald-500/10 px-3 py-2 text-center text-xs text-emerald-900" role="status">
+            {declineNotice}
+          </p>
+        ) : null}
 
         <div className="space-y-2">
           {listInitialLoading ? (
@@ -666,6 +681,14 @@ export default function ParentDashboardPage() {
                     onRefreshAction={refreshChildrenList}
                   />
                 ) : null}
+                <ParentDeclineChildButton
+                  studentId={s.id}
+                  studentName={s.name}
+                  onDeclinedAction={(message) => {
+                    setDeclineNotice(message);
+                    void refreshChildrenList();
+                  }}
+                />
               </div>
             ))
           )}

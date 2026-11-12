@@ -72,6 +72,34 @@
       ]
     },
     {
+      "collectionGroup": "parents",
+      "fieldPath": "phoneVerifiedKey",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "staff",
+      "fieldPath": "phoneVerifiedKey",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
+    {
       "collectionGroup": "payments",
       "fieldPath": "paymentId",
       "indexes": [

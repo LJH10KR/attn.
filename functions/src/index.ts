@@ -110,6 +110,10 @@ export {
   onAcademyStudentParentLinksWritten,
   saveStudent,
 } from "./students";
+export { createStudentsBulk } from "./students-bulk";
+export { createStaffPreRegistrations } from "./staff-bulk";
+export { getAcademyOnboarding, updateAcademyOnboarding } from "./onboarding";
+export { findLoginIdsByPhone, verifyPasswordResetTarget, resetPasswordWithPhone } from "./account-recovery";
 export {
   activateParent,
   deactivateParent,
@@ -139,7 +143,8 @@ export {
   registerStaffSignup,
   setStaffSignupRole,
 } from "./staff-signup";
-export { getSignupLink, regenerateSignupLink, setSignupLinkEnabled } from "./signup-links";
+export { getSignupLink, regenerateSignupLink, setParentAutoLink, setSignupLinkEnabled } from "./signup-links";
+export { declineParentChildLink, resolveParentPhoneNotice } from "./parent-self-service";
 export {
   assignStaffRole,
   deleteAcademyRole,
@@ -179,6 +184,8 @@ export {
   setStudentCheckInPin,
 } from "./kiosk";
 export { sendOwnerSignupVerificationEmail } from "./owner-auth-mail";
+export { startPhoneVerification, checkPhoneVerification } from "./phone-verification";
+export { getOwnerConsentState, recordOwnerConsent } from "./legal-consent";
 export { issueEmailVerificationOtp, verifyEmailVerificationOtp } from "./email-verification-otp";
 export { createAcademyEasy } from "./academy-provision";
 export {

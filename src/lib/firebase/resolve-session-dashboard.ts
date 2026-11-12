@@ -191,8 +191,9 @@ async function resolveKnownSessionDashboardPath(user: User): Promise<string | nu
   const generation = cacheGeneration(uid);
   const decisionPromise = (async (): Promise<string | null> => {
     const { claims } = await user.getIdTokenResult();
+    // 2-L 이전 이메일 인증 가입의 남은 학부모 계정(더 이상 만들지 않음) — 안내 화면
     if (claims.membershipStatus === "pending_email_verification") {
-      return claims.role === "parent" ? "/login/parent" : null;
+      return claims.role === "parent" ? "/parent/session?state=pending_email_verification" : null;
     }
 
     const authEmail = user.email ?? "";
@@ -299,7 +300,9 @@ async function resolveActivationState(
 
     if (isActivationMirrorClientReadEnabled()) {
       const fromMirror = await tryReadActivationRoleFromMirror(user, role);
-      if (fromMirror) return remember(fromMirror);
+      // 미러가 "대기·비활성 등 활성 아님"이면 믿지 않고 콜러블로 다시 확인(2-L L-3) — 서버가 문서에서 다시 계산해 클레임·미러를 맞춘다.
+      // 늦게 끝난 트리거가 옛 상태를 남겨도 "승인 대기"에 갇히지 않게. 활성·멤버십 없음(null)은 그대로 믿는다(활성 직원·원장 진입 속도 유지).
+      if (fromMirror && (fromMirror.anyActive || fromMirror.primaryStatus === null)) return remember(fromMirror);
     }
 
     const fn = httpsCallable(getFirebaseFunctions(), callable);

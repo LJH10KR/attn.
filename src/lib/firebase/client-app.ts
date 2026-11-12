@@ -17,7 +17,7 @@ let functionsEmulatorConnected = false;
 let firestoreInstance: Firestore | null = null;
 
 /**
- * App Check는 앱 전체에 켜지 않는다(2-K) — 가입 화면이 강제 함수를 부르기 직전에만 `ensureSignupAppCheck`로.
+ * App Check는 앱 전체에 켜지 않는다(2-K) — 가입 화면이 강제 함수를 부르기 직전에만 `ensureAppCheck`로.
  */
 export function getFirebaseApp(): FirebaseApp {
   if (!isFirebaseConfigured()) {

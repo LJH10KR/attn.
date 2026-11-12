@@ -453,6 +453,43 @@ describe("권한 없는 직원·비활성·무관한 계정", () => {
     await assertFails(getDoc(doc(testEnv.unauthenticatedContext().firestore(), "signupLinks", "hash-1")));
   });
 
+  it("번호 확인(2-L) 코드·카운터·원장 동의 기록·자동 연결 설정은 누구도 클라이언트로 읽거나 쓰지 못한다", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "phoneVerifications", "v-1"), { purpose: "parent_signup", phoneKey: "01012345678", code: "123456" });
+      await setDoc(doc(ctx.firestore(), "phoneVerificationCounters", "octomo_day_20261109"), { count: 1 });
+      await setDoc(doc(ctx.firestore(), "legalConsents", OWNER), { consents: {} });
+      await setDoc(doc(ctx.firestore(), academyPath("meta", "parentLinkSettings")), { autoLinkVerifiedParents: true });
+    });
+    const paths = [
+      ["phoneVerifications", "v-1"],
+      ["phoneVerificationCounters", "octomo_day_20261109"],
+      ["legalConsents", OWNER],
+      [academyPath("meta", "parentLinkSettings")],
+    ];
+    for (const who of [OWNER, "staff-members", "staff-parents", PARENT]) {
+      for (const p of paths) {
+        await assertFails(getDoc(doc(dbAs(who), ...p)));
+        await assertFails(setDoc(doc(dbAs(who), ...p), { x: 1 }));
+      }
+      await assertFails(getDocs(collection(dbAs(who), "phoneVerifications")));
+    }
+    const anon = testEnv.unauthenticatedContext().firestore();
+    for (const p of paths) await assertFails(getDoc(doc(anon, ...p)));
+    // 본인 동의 기록도 클라이언트로는 읽거나 쓰지 못함(서버 함수만)
+    await assertFails(setDoc(doc(dbAs(OWNER), "legalConsents", OWNER), { consents: { terms: { version: "x" } } }));
+  });
+
+  it("홈 시작하기 기록(2-M meta/onboarding)은 원장·직원·학부모 누구도 클라이언트로 읽거나 쓰지 못한다", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), academyPath("meta", "onboarding")), { hiddenAt: null });
+    });
+    for (const who of [OWNER, "staff-members", "staff-parents", PARENT]) {
+      await assertFails(getDoc(doc(dbAs(who), academyPath("meta", "onboarding"))));
+      await assertFails(setDoc(doc(dbAs(who), academyPath("meta", "onboarding")), { hiddenAt: "x" }));
+    }
+    await assertFails(getDoc(doc(testEnv.unauthenticatedContext().firestore(), academyPath("meta", "onboarding"))));
+  });
+
   it("로그인 비밀번호 해시·연속 실패 잠금(secrets/login)은 본인·원장도 읽거나 쓰지 못한다", async () => {
     const path = academyPath("staff", "staff-teacher", "secrets", "login");
     await testEnv.withSecurityRulesDisabled(async (ctx) => {

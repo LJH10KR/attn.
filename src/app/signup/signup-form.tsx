@@ -28,6 +28,26 @@ import {
   KR_PHONE_INPUT_MAX_LENGTH,
 } from "@/lib/phone/kr-phone";
 import { resolvePasswordConfirmHint } from "@/lib/ui/password-confirm-hint";
+import {
+  ConsentChecklist,
+  CONSENT_REQUIRED_MESSAGE,
+  consentComplete,
+  EMPTY_CONSENT,
+  type ConsentState,
+} from "@/components/legal/consent-checklist";
+import { currentConsentPayload } from "@/lib/legal/legal-docs";
+
+/**
+ * 원장 동의 기록(2-L) — 계정을 만든 뒤 따로 부른다. 실패해도 가입은 진행하고,
+ * 원장 화면에 들어올 때 동의 기록이 없으면 동의 시트가 다시 뜬다(`OwnerConsentGate`).
+ */
+async function recordOwnerConsentQuietly(): Promise<void> {
+  try {
+    await httpsCallable(getFirebaseFunctions(), "recordOwnerConsent")({ consents: currentConsentPayload() });
+  } catch {
+    /* 원장 화면에서 다시 묻기 */
+  }
+}
 
 const inputClass =
   "w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50 focus:bg-white/70";
@@ -71,6 +91,7 @@ export function SignupForm() {
     description?: string;
   } | null>(null);
   const [signupCompleteOpen, setSignupCompleteOpen] = useState(false);
+  const [consent, setConsent] = useState<ConsentState>(EMPTY_CONSENT);
 
   const configured = isFirebaseConfigured();
   const passwordConfirmHint = resolvePasswordConfirmHint(password, password2, confirmBlurred);
@@ -110,6 +131,10 @@ export function SignupForm() {
         setError("비밀번호가 서로 일치하지 않습니다.");
         return;
       }
+      if (!consentComplete(consent)) {
+        setError(CONSENT_REQUIRED_MESSAGE);
+        return;
+      }
       setBusy(true);
       try {
         const auth = getFirebaseAuth();
@@ -121,6 +146,7 @@ export function SignupForm() {
           displayName: trimmedName,
           phone: formattedPhone,
         });
+        await recordOwnerConsentQuietly();
         setSignupCompleteOpen(true);
         void httpsCallable(getFirebaseFunctions(), "issueEmailVerificationOtp")({ purpose: "owner" }).catch(
           () => {},
@@ -132,7 +158,7 @@ export function SignupForm() {
         setBusy(false);
       }
     },
-    [configured, displayName, email, password, password2, phone],
+    [configured, consent, displayName, email, password, password2, phone],
   );
 
   const onGoogleSignup = useCallback(async () => {
@@ -215,6 +241,10 @@ export function SignupForm() {
         setError(phoneErr);
         return;
       }
+      if (!consentComplete(consent)) {
+        setError(CONSENT_REQUIRED_MESSAGE);
+        return;
+      }
       setBusy(true);
       setLoadingModal({
         title: "오너 계정 등록 중",
@@ -228,6 +258,7 @@ export function SignupForm() {
           displayName: trimmedName,
           phone: formattedPhone,
         });
+        await recordOwnerConsentQuietly();
         setLoadingModal(null);
         router.replace("/owner");
       } catch (err) {
@@ -237,7 +268,7 @@ export function SignupForm() {
         setBusy(false);
       }
     },
-    [displayName, phone, router],
+    [consent, displayName, phone, router],
   );
 
   return (
@@ -353,6 +384,7 @@ export function SignupForm() {
                 placeholder="010-1234-5678"
               />
             </div>
+            <ConsentChecklist audience="owner" value={consent} onChangeAction={setConsent} disabled={formDisabled} />
             <button
               type="submit"
               disabled={formDisabled}
@@ -467,6 +499,7 @@ export function SignupForm() {
                 required
                 minLength={8}
               />
+              <ConsentChecklist audience="owner" value={consent} onChangeAction={setConsent} disabled={formDisabled} />
               <button
                 type="submit"
                 disabled={formDisabled || !configured}

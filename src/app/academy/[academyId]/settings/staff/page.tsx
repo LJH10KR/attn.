@@ -4,6 +4,7 @@ import { collection, getDocs } from "firebase/firestore";
 import { useCallback, useMemo, useState } from "react";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
 import { useAcademyShell } from "@/components/academy/academy-shell";
+import { StaffBulkSheet } from "@/components/academy/staff-bulk-sheet";
 import { StaffFormSheet } from "@/components/academy/staff-form-sheet";
 import { docToStaffRow, staffAccountLabel, staffSignupMatches, type StaffRowVM } from "@/lib/academy/staff-row";
 import type { PermissionViewer } from "@/lib/academy/role-policy";
@@ -13,6 +14,7 @@ import { academyStaffPath, STAFF_EMPLOYMENT_STATUS_LABELS } from "@/lib/firebase
 import { getFirebaseDb } from "@/lib/firebase/client-app";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
 import { formatKrPhoneDisplay, phoneMatchesSearch } from "@/lib/phone/kr-phone";
+import { useQueryFlag } from "@/lib/ui/use-query-flag";
 
 const glassCard = "glass-card";
 
@@ -52,6 +54,9 @@ function StaffListInner({
   const [queryText, setQueryText] = useState("");
   const [sheet, setSheet] = useState<{ target: StaffRowVM | null } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  // 2-M 홈 "시작하기" [미리 등록 표] — `?bulk=1`이면 표를 바로 연다
+  useQueryFlag("bulk", "1", true, () => setBulkOpen(true));
   const { items: jobTitles, save: saveJobTitles } = useAcademyOptionList(academyId, "jobTitles");
   // 미리 등록·계정 발급·권한 바꾸기에 쓸 권한 목록 — 멤버 초대/권한 관리 권한이 있을 때만(서버가 템플릿 보장)
   const { roles } = useAcademyRoles(academyId, canManageMembers);
@@ -121,8 +126,8 @@ function StaffListInner({
       ) : null}
 
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-foreground">직원 {counts.current}명</h2>
-        <div className="flex shrink-0 items-center gap-2">
+        <h2 className="shrink-0 text-sm font-semibold text-foreground">직원 {counts.current}명</h2>
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
           <AcademyPanelRefreshButton busy={listBusy} onRefreshAction={refresh} />
           <button
             type="button"
@@ -133,6 +138,17 @@ function StaffListInner({
             className="rounded-[8px] bg-[#222] px-3 py-2 text-[11px] font-medium text-white shadow-sm hover:bg-[#333]"
           >
             + 직원 추가
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setNotice(null);
+              setBulkOpen(true);
+            }}
+            className="rounded-[8px] border border-neutral-300/70 bg-white/55 px-3 py-2 text-[11px] font-medium text-neutral-700"
+            data-staff-bulk-open
+          >
+            여러 명 미리 등록
           </button>
         </div>
       </div>
@@ -236,6 +252,26 @@ function StaffListInner({
           signupMatches={
             sheet.target?.accountStatus === "pending_registration" ? staffSignupMatches(rows, sheet.target) : []
           }
+        />
+      ) : null}
+      {bulkOpen ? (
+        <StaffBulkSheet
+          academyId={academyId}
+          existing={rows.map((r) => ({
+            status: r.accountStatus,
+            employmentStatus: r.employmentStatus,
+            isGuest: r.isGuest,
+            phone: r.phone,
+          }))}
+          roles={roles ?? []}
+          canSetRole={canManageMembers}
+          viewer={viewer}
+          onCloseAction={() => setBulkOpen(false)}
+          onSavedAction={(message, closed) => {
+            if (closed) setBulkOpen(false);
+            setNotice(message);
+            refresh();
+          }}
         />
       ) : null}
     </div>

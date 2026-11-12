@@ -87,11 +87,17 @@ async function academyExists(db: admin.firestore.Firestore, academyId: string): 
   return (await db.doc(`academies/${academyId}`).get()).exists;
 }
 
-/** 홈 요약·히트맵용 집계 — 학원 규모에서 쓰기 시 전체 재계산(정합성 우선). 학원 문서가 없으면 쓰지 않음 */
+/**
+ * 홈 요약·히트맵용 집계 — 학원 규모에서 쓰기 시 전체 재계산(정합성 우선). 학원 문서가 없으면 쓰지 않음.
+ * 2-M: 세기 시작한 시각(`countStartedAtMs`)이 더 늦은 결과가 이미 있으면 쓰지 않는다 — 원생 여러 명 저장처럼
+ * 트리거가 한꺼번에 돌 때, 먼저 세고 늦게 끝난 실행이 최신 값을 옛 값으로 덮지 않게(마지막으로 센 실행은
+ * 마지막 쓰기 뒤에 시작했으므로 그 값이 남는다).
+ */
 export async function reconcileAcademyDashboardStats(
   db: admin.firestore.Firestore,
   academyId: string,
 ): Promise<void> {
+  const countStartedAtMs = Date.now();
   const [
     teachers,
     parents,
@@ -113,16 +119,22 @@ export async function reconcileAcademyDashboardStats(
   ]);
 
   if (!(await academyExists(db, academyId))) return;
-  await statsRef(db, academyId).set({
-    schemaVersion: ACADEMY_DASHBOARD_STATS_SCHEMA_VERSION,
-    teachers,
-    parents,
-    students,
-    teachersPending: teachersPending + teachersPendingSetup,
-    teachersInviteNeeded,
-    teachersInviteSent,
-    parentsPending,
-    updatedAt: FieldValue.serverTimestamp(),
+  const ref = statsRef(db, academyId);
+  await db.runTransaction(async (tx) => {
+    const prev = (await tx.get(ref)).get("countStartedAtMs");
+    if (typeof prev === "number" && prev > countStartedAtMs) return;
+    tx.set(ref, {
+      schemaVersion: ACADEMY_DASHBOARD_STATS_SCHEMA_VERSION,
+      teachers,
+      parents,
+      students,
+      teachersPending: teachersPending + teachersPendingSetup,
+      teachersInviteNeeded,
+      teachersInviteSent,
+      parentsPending,
+      countStartedAtMs,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
   });
 }
 

@@ -123,13 +123,17 @@ export const linkParentToStudents = onCall(async (request) => {
     await ref.update({
       approvedAt: FieldValue.serverTimestamp(),
       approvedByUid: callerUid,
+      approvedVia: "academy",
       updatedAt: FieldValue.serverTimestamp(),
     });
   }
   return { ok: true as const, ...result };
 });
 
-/** 원생 1명에서 계정 연결만 해제(보호자 연락처·계정은 남김) */
+/**
+ * 원생 1명에서 계정 연결만 해제(보호자 연락처·계정은 남김). 같은 학부모가 이 원생에 다시 **자동** 연결되지 않게 표시한다(2-L ★5) —
+ * 원장이 손으로 다시 연결하면 표시는 지워진다.
+ */
 export const unlinkParentFromStudent = onCall(async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
@@ -141,7 +145,7 @@ export const unlinkParentFromStudent = onCall(async (request) => {
   const db = admin.firestore();
   await assertPermission(db, academyId, request.auth.uid, request.auth.token, "operations.parents");
 
-  const changed = await unlinkParentFromStudentTx(db, academyId, parentUid, studentId);
+  const changed = await unlinkParentFromStudentTx(db, academyId, parentUid, studentId, { block: true });
   return { ok: true as const, changed };
 });
 

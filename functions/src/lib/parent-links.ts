@@ -46,7 +46,8 @@ export function isAutoLinkStatus(status: unknown): status is "pending_approval" 
 export function parentLinkTargetViolation(status: unknown): string | null {
   if (status === "pending_approval" || status === "active" || status === "pending_setup") return null;
   if (status === "pending_email_verification") {
-    return "이메일 인증을 마치지 않은 계정은 연결할 수 없습니다. 학부모가 로그인해 인증을 마친 뒤 연결해 주세요.";
+    // 2-L 이전 이메일 인증 가입의 남은 계정(더 이상 만들지 않음)
+    return "가입을 마치지 않은 예전 계정입니다. 가입을 거절(삭제)한 뒤 새 가입 QR로 다시 가입하게 해 주세요.";
   }
   if (status === "inactive") return "비활성 계정은 다시 활성화한 뒤 연결해 주세요.";
   return "연결할 수 없는 계정 상태입니다.";
@@ -141,13 +142,15 @@ export async function linkParentToStudentTx(
   academyId: string,
   target: LinkTarget,
   studentId: string,
-): Promise<"linked" | "already"> {
+  opts: { auto?: boolean } = {},
+): Promise<"linked" | "already" | "skipped"> {
   const ref = db.doc(`academies/${academyId}/students/${studentId}`);
+  const parentRef = parentDocRef(db, academyId, target.uid);
   const key = guardianPhoneKey(target.phone);
   return db.runTransaction(async (tx) => {
     const [snap, parentSnap] = await Promise.all([
       tx.get(ref),
-      tx.get(parentDocRef(db, academyId, target.uid)),
+      tx.get(parentRef),
     ]);
     if (!parentSnap.exists) {
       throw new HttpsError("not-found", "학부모 계정을 찾을 수 없습니다.");
@@ -165,7 +168,40 @@ export async function linkParentToStudentTx(
     }
     const guardians = readGuardians(snap.get("guardians"));
     if (guardians.some((g) => g.linkedParentUid === target.uid)) return "already";
+
+    if (opts.auto) {
+      // 자동 연결(2-L) — 조건을 트랜잭션 안에서 다시 확인(번호 확인·차단 표시·퇴원·같은 번호 빈 칸·색인), 안 맞으면 건너뜀
+      const status = parentSnap.get("status");
+      const blocked = readUidList(parentSnap.get("autoLinkBlockedStudentIds"));
+      const slot = guardians.find((g) => guardianPhoneKey(g.phone) === key);
+      if (
+        (status !== "pending_approval" && status !== "active") ||
+        parentSnap.get("phoneVerifiedKey") !== key ||
+        blocked.includes(studentId) ||
+        snap.get("status") === "withdrawn" ||
+        !slot ||
+        slot.linkedParentUid
+      ) {
+        return "skipped";
+      }
+      const indexSnap = await tx.get(parentPhoneIndexRef(db, academyId, target.phone));
+      if (indexSnap.exists && indexSnap.get("parentUid") !== target.uid) return "skipped";
+    }
     const writeIndex = await claimParentPhoneIndexInTx(tx, db, academyId, target.phone, target.uid);
+
+    if (opts.auto) {
+      if (parentSnap.get("approvedAt") == null) {
+        tx.update(parentRef, {
+          approvedAt: FieldValue.serverTimestamp(),
+          approvedByUid: null,
+          approvedVia: "phone_auto",
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+    } else if (readUidList(parentSnap.get("autoLinkBlockedStudentIds")).includes(studentId)) {
+      // 원장이 손으로 다시 연결 — 되살아남 방지 표시를 지운다(다시 해제하면 또 붙음)
+      tx.update(parentRef, { autoLinkBlockedStudentIds: FieldValue.arrayRemove(studentId) });
+    }
 
     const idx = guardians.findIndex((g) => guardianPhoneKey(g.phone) === key);
     if (idx >= 0) {
@@ -202,19 +238,38 @@ export async function linkParentToStudentTx(
   });
 }
 
-/** 학생 1명에서 계정 연결만 지움(보호자 연락처는 남김, 트랜잭션). 바뀌었으면 true */
+/** 되살아남 방지 표시 최대 개수(오래된 것부터 버림) */
+export const MAX_AUTO_LINK_BLOCKS = 100;
+
+/**
+ * 학생 1명에서 계정 연결만 지움(보호자 연락처는 남김, 트랜잭션). 바뀌었으면 true.
+ * `block`(원장 해제·"내 자녀가 아니에요") — 같은 학부모가 이 원생에 다시 **자동** 연결되지 않게 학부모 문서에 표시하고,
+ * 그 원생의 번호 변경 안내(`phoneNotice.byStudent`)도 지운다. 계정 삭제 경로는 표시하지 않는다.
+ */
 export async function unlinkParentFromStudentTx(
   db: admin.firestore.Firestore,
   academyId: string,
   uid: string,
   studentId: string,
+  opts: { block?: boolean } = {},
 ): Promise<boolean> {
   const ref = db.doc(`academies/${academyId}/students/${studentId}`);
+  const parentRef = parentDocRef(db, academyId, uid);
   return db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
+    const parentSnap = opts.block ? await tx.get(parentRef) : null;
     if (!snap.exists) return false;
     const before = readGuardians(snap.get("guardians"));
     if (!before.some((g) => g.linkedParentUid === uid)) return false;
+    if (parentSnap?.exists) {
+      const blocks = readUidList(parentSnap.get("autoLinkBlockedStudentIds")).filter((id) => id !== studentId);
+      blocks.push(studentId);
+      tx.update(parentRef, {
+        autoLinkBlockedStudentIds: blocks.slice(-MAX_AUTO_LINK_BLOCKS),
+        [`phoneNotice.byStudent.${studentId}`]: FieldValue.delete(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
     const guardians = before.map((g) => (g.linkedParentUid === uid ? { ...g, linkedParentUid: null } : g));
     tx.update(ref, {
       guardians,

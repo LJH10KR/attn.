@@ -38,6 +38,7 @@ import { AcademyRegistrationOverlay } from "@/components/owner/academy-registrat
 import { attnIdSortKey, compareAttnIdAsc } from "@/lib/attn-id-sort";
 import { academyPath } from "@/lib/academy/academy-routes";
 import { buildDashboardHeaderProfile } from "@/lib/ui/dashboard-header-profile";
+import { OwnerConsentGate } from "@/components/legal/owner-consent-gate";
 
 type AcademyRow = Academy & { id: string };
 
@@ -411,6 +412,7 @@ export function OwnerDashboard() {
 
   return (
     <div className="min-h-[100dvh] bg-background pb-28">
+      <OwnerConsentGate enabled />
       <DashboardRoleHeader
         title="오너 대시보드"
         affiliationLabel={

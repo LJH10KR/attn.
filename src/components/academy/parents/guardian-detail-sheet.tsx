@@ -280,7 +280,7 @@ export function GuardianDetailSheet({
       case "unlink":
         return {
           title: `${p.studentName}에서 연결을 해제할까요?`,
-          body: `${who} 계정에서 이 원생이 보이지 않게 됩니다. 보호자 연락처는 원생 정보에 그대로 남습니다.`,
+          body: `${who} 계정에서 이 원생이 보이지 않게 됩니다. 보호자 연락처는 원생 정보에 그대로 남습니다. 이 학부모는 이 원생에 다시 자동 연결되지 않아요(직접 연결은 가능).`,
           label: "연결 해제",
           danger: true,
         };

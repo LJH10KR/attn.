@@ -20,6 +20,7 @@ import {
   signOut,
 } from "firebase/auth";
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from "firebase/functions";
+import { CONSENTS } from "./_signup-token.mjs";
 
 const PROJECT = "demo-attn";
 initAdmin({ projectId: PROJECT });
@@ -87,14 +88,14 @@ const info = await call("getStaffSignupInfo", { token });
 assert.equal(info.academyName, "가입 학원");
 await call("checkStaffSignupLoginId", { token, loginId: "matchuser" });
 await assert.rejects(
-  call("registerStaffSignup", { token, method: "password", displayName: "", phone: "010-4000-1111", loginId: "x1234", password: "secret12" }),
+  call("registerStaffSignup", { consents: CONSENTS, token, method: "password", displayName: "", phone: "010-4000-1111", loginId: "x1234", password: "secret12" }),
   /이름/,
 );
 await assert.rejects(
-  call("registerStaffSignup", { token, method: "password", displayName: "번호 없음", loginId: "x1235", password: "secret12" }),
+  call("registerStaffSignup", { consents: CONSENTS, token, method: "password", displayName: "번호 없음", loginId: "x1235", password: "secret12" }),
   /전화번호/,
 );
-const accepted = await call("registerStaffSignup", {
+const accepted = await call("registerStaffSignup", { consents: CONSENTS,
   token, method: "password", displayName: "가입한 이름", phone: "01040001111", loginId: "matchuser", password: "secret12",
 });
 assert.equal(accepted.membershipStatus, "pending_registration");
@@ -121,7 +122,7 @@ await assert.rejects(
 await signOut(auth);
 
 // 번호가 다른 가입자
-await call("registerStaffSignup", {
+await call("registerStaffSignup", { consents: CONSENTS,
   token, method: "password", displayName: "다른 번호", phone: "010-4000-2222", loginId: "otheruser", password: "secret12",
 });
 const other = await staffByLogin("otheruser");
@@ -174,6 +175,18 @@ const otherActive = await other.ref.get();
 assert.equal(otherActive.get("status"), "active");
 assert.equal(otherActive.get("roleId"), "teacher", "새 직원으로 승인 = 기본 역할");
 
+// --- 2-L S1: 계정 삭제 + "인사 기록도 함께 지우기"(deleteHrRecord) → 사용 중 계정도 인사 기록까지 삭제 ---
+const otherName = otherActive.get("displayName");
+const wiped = await call("deleteTeacherInvite", { academyId: A, teacherId: other.id, deleteHrRecord: true });
+assert.equal(wiped.keptStaffId, null, "인사 기록 남기지 않음");
+assert.equal((await other.ref.get()).exists, false);
+assert.equal(
+  (await db.collection(`academies/${A}/staff`).where("displayName", "==", otherName).get()).size,
+  0,
+  "계정 없음 직원으로도 남지 않음",
+);
+await assert.rejects(adminAuth().getUser(other.id), /no user record|user-not-found/i, "Auth 사용자 삭제");
+
 // --- 직접 만들어 주기(그대로) ---
 const hr2 = await call("saveStaffMember", { academyId: A, displayName: "직접 만든 직원", employmentStatus: "employed" });
 const { accounts } = await call("createStaffAccounts", { academyId: A, items: [{ staffId: hr2.staffId, roleId: "teacher" }] });
@@ -190,19 +203,19 @@ assert.equal(
 
 // --- Google 가입: 승인 대기 / 이미 가입 거부 / 원장 계정 거부 ---
 const g = await asGoogle("google-staff-1", "gstaff1@gmail.com");
-await call("registerStaffSignup", { token, method: "google", displayName: "구글 직원", phone: "010-4000-3333" });
+await call("registerStaffSignup", { consents: CONSENTS, token, method: "google", displayName: "구글 직원", phone: "010-4000-3333" });
 const gDoc = await db.doc(`academies/${A}/staff/${g.uid}`).get();
 assert.equal(gDoc.get("status"), "pending_registration");
 assert.equal(gDoc.get("authProvider"), "google");
 assert.equal(gDoc.get("phone"), "010-4000-3333");
 await assert.rejects(
-  call("registerStaffSignup", { token, method: "google", displayName: "구글 직원", phone: "010-4000-3333" }),
+  call("registerStaffSignup", { consents: CONSENTS, token, method: "google", displayName: "구글 직원", phone: "010-4000-3333" }),
   /이미 이 학원에 가입된 계정/,
 );
 const gOwner = await asGoogle("google-owner-1", "gowner1@gmail.com");
 await db.doc(`users/${gOwner.uid}`).set({ platformRole: "owner" });
 await assert.rejects(
-  call("registerStaffSignup", { token, method: "google", displayName: "원장", phone: "010-4000-4444" }),
+  call("registerStaffSignup", { consents: CONSENTS, token, method: "google", displayName: "원장", phone: "010-4000-4444" }),
   /원장 계정으로는/,
 );
 await signOut(auth);

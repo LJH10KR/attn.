@@ -39,6 +39,12 @@ type BellLinks = {
    * (`settings.members`). null이면 그 권한이 없으므로 알림 자체를 보여 주지 않는다(벨 읽기 규칙은 더 넓음).
    */
   signupLinkHrefs?: { parent: string | null; staff: string | null };
+  /**
+   * 2-L 정보성 알림 바로 가기 — 학부모 알림(자동 연결·내 자녀 아님·번호 변경)은 학부모 관리(`operations.parents`),
+   * 직원 자동 활성은 멤버 관리(`settings.members`). null이면 그 권한이 없어 알림을 보여 주지 않는다.
+   */
+  parentsHref?: string | null;
+  membersHref?: string | null;
 };
 
 function mapInboxDoc(
@@ -113,6 +119,74 @@ function mapInboxDoc(
     ];
   }
 
+  if (kind === "parent_auto_linked" || kind === "parent_child_declined" || kind === "parent_phone_changed") {
+    if (!links.parentsHref) return [];
+    const exp = readTs(data.expiresAt);
+    if (exp && exp.toMillis() <= now) return [];
+    const studentName = typeof data.studentName === "string" && data.studentName.trim() ? data.studentName.trim() : "학생";
+    const common = { id, href: links.parentsHref, hrefLabel: "학부모 관리" };
+    if (kind === "parent_auto_linked") {
+      return [{
+        ...common,
+        title: `번호 확인으로 자동 연결: ${name} 학부모 ↔ ${studentName}`,
+        detail: "학부모가 문자로 번호를 확인해 학원에 등록된 보호자 번호와 연결됐습니다. 잘못 연결됐다면 학부모 관리에서 해제해 주세요.",
+      }];
+    }
+    if (kind === "parent_child_declined") {
+      return [{
+        ...common,
+        title: `${name} 학부모가 ${studentName} 연결을 해제했습니다`,
+        detail: "학부모가 「내 자녀가 아니에요」를 눌렀습니다. 원생의 보호자 번호를 확인해 주세요.",
+      }];
+    }
+    const variant = data.variant;
+    return [{
+      ...common,
+      title:
+        variant === "corrected"
+          ? `${name} 학부모가 확인한 번호로 바로잡았습니다`
+          : variant === "reverted"
+            ? `${name} 학부모가 번호를 바꾸지 않았다고 알려 왔습니다`
+            : `${name} 학부모가 번호를 바꿨습니다(문자 확인됨)`,
+      detail:
+        variant === "corrected"
+          ? "학원이 적은 번호 대신 학부모가 문자로 확인한 번호를 계정과 연결된 보호자 칸에 기록했습니다."
+          : variant === "reverted"
+            ? "연결된 보호자 칸 번호를 계정 번호(문자 확인됨)로 되돌렸습니다."
+            : "연결된 원생의 보호자 번호도 함께 바뀌었습니다.",
+    }];
+  }
+
+  if (kind === "staff_auto_activated") {
+    if (!links.membersHref) return [];
+    const exp = readTs(data.expiresAt);
+    if (exp && exp.toMillis() <= now) return [];
+    const roleName = typeof data.roleName === "string" && data.roleName.trim() ? data.roleName.trim() : "미리 정한 권한";
+    return [{
+      id,
+      title: `${name} 님이 번호 확인으로 바로 가입했습니다`,
+      detail: `미리 등록한 직원 정보와 「${roleName}」 권한으로 사용 중입니다.`,
+      href: links.membersHref,
+      hrefLabel: "멤버 관리",
+    }];
+  }
+
+  // 2-M 아이디·비밀번호 찾기 — 문자 확인으로 비밀번호 재설정(학부모는 학부모 관리, 직원은 멤버 관리 권한일 때만)
+  if (kind === "member_password_reset") {
+    const isParent = entityType !== "teacher";
+    const href = isParent ? links.parentsHref : links.membersHref;
+    if (!href) return [];
+    const exp = readTs(data.expiresAt);
+    if (exp && exp.toMillis() <= now) return [];
+    return [{
+      id,
+      title: `${name} ${isParent ? "학부모" : "직원"}이 문자 확인으로 비밀번호를 바꿨습니다`,
+      detail: "다른 기기의 로그인은 모두 끊겼습니다. 본인이 한 일이 아니라면 계정을 비활성화하고 확인해 주세요.",
+      href,
+      hrefLabel: isParent ? "학부모 관리" : "멤버 관리",
+    }];
+  }
+
   if (kind === "session_payment_received") {
     const studentName =
       typeof data.studentName === "string" && data.studentName.trim()
@@ -176,6 +250,8 @@ export function useAcademyDashboardBell(academyId: string | null, links: BellLin
   const parentsPendingHref = links.parentsPendingHref ?? null;
   const signupParentHref = links.signupLinkHrefs?.parent ?? null;
   const signupStaffHref = links.signupLinkHrefs?.staff ?? null;
+  const parentsHref = links.parentsHref ?? null;
+  const membersHref = links.membersHref ?? null;
   const [inboxDocs, setInboxDocs] = useState<{ id: string; data: Record<string, unknown> }[]>(
     [],
   );
@@ -237,12 +313,14 @@ export function useAcademyDashboardBell(academyId: string | null, links: BellLin
         ...mapInboxDoc(d.id, d.data, now, {
           parentsPendingHref,
           signupLinkHrefs: { parent: signupParentHref, staff: signupStaffHref },
+          parentsHref,
+          membersHref,
         }),
       );
     }
     out.sort((a, b) => a.title.localeCompare(b.title, "ko"));
     return out;
-  }, [inboxDocs, nowMs, parentsPendingHref, signupParentHref, signupStaffHref]);
+  }, [inboxDocs, nowMs, parentsPendingHref, signupParentHref, signupStaffHref, parentsHref, membersHref]);
 
   rawItemsRef.current = rawItems;
 

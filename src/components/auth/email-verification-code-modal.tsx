@@ -6,7 +6,8 @@ import { useCallback, useEffect, useState } from "react";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 
-export type EmailVerificationPurpose = "owner" | "parent";
+/** 원장 가입 이메일 인증만(2-L — 학부모는 휴대폰 번호 확인) */
+export type EmailVerificationPurpose = "owner";
 
 const inputClass =
   "w-full rounded-2xl border border-neutral-300/60 bg-white/50 dark:border-white/12 dark:bg-white/[0.08] px-4 py-3.5 text-center font-mono text-lg tracking-[0.35em] text-foreground shadow-inner outline-none focus:border-[#4a90e2]/50";

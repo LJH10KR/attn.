@@ -17,6 +17,8 @@ export type ParentAccountVM = {
   phone: string;
   /** 번호 숫자만 — 서버 `guardianPhoneKey`와 같음(없으면 "") */
   phoneKey: string;
+  /** 2-L — 계정 번호가 휴대폰 문자로 확인된 번호(`phoneVerifiedKey` = 지금 번호) */
+  phoneVerified: boolean;
   status: ParentAccountStatus;
   /** 첫 연결(승인) 기록이 있음 — `pending_approval`이면서 참이면 "연결 해제됨" */
   approved: boolean;
@@ -60,6 +62,7 @@ export function docToParentAccount(id: string, data: Record<string, unknown>): P
     loginId: typeof data.loginId === "string" && data.loginId ? data.loginId : attnId,
     phone,
     phoneKey: phoneKey(phone),
+    phoneVerified: phoneKey(phone).length > 0 && data.phoneVerifiedKey === phoneKey(phone),
     status,
     approved: data.approvedAt != null,
     authProvider: data.authProvider === "google" ? "google" : "password",

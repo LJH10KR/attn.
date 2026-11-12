@@ -8,21 +8,18 @@ import { assertPermission } from "./lib/academy-access";
 import { academySeqMetaPath, formatStudentAttnId } from "./lib/attn-id";
 import { deleteStudentDocs } from "./lib/firestore-cleanup";
 import { parseOptionalKrPhone } from "./lib/kr-phone";
-import { refreshParentLinkSummary, syncStudentPaymentParents } from "./lib/parent-links";
+import { parentDocRef, refreshParentLinkSummary, syncStudentPaymentParents } from "./lib/parent-links";
+import { autoLinkNewGuardianPhones, newGuardianPhoneKeys } from "./lib/parent-auto-link";
+import { changedLinkedGuardianPhones, phoneNoticeActionFor } from "./lib/parent-phone-change";
+import { sendParentAppPush } from "./lib/parent-push";
 import { readUidList } from "./lib/parent-recipients";
 import {
   deriveGuardianFields,
   parseGuardiansInput,
   readGuardians,
 } from "./lib/student-guardians";
-import {
-  displayGrade,
-  isGradeCode,
-  isStudentStatus,
-  kstYear,
-  type GradeCode,
-  type StudentStatus,
-} from "./lib/student-profile";
+import { isStudentStatus, kstYear, type StudentStatus } from "./lib/student-profile";
+import { newStudentDocFields, parseStudentName, parseStudentSchool, resolveGrade } from "./lib/student-create";
 import { isRetriableError, MAX_TRIGGER_RETRY_AGE_MS, triggerEventAgeMs } from "./lib/trigger-retry";
 
 /**
@@ -34,8 +31,6 @@ import { isRetriableError, MAX_TRIGGER_RETRY_AGE_MS, triggerEventAgeMs } from ".
  * 원비·회차 필드는 4단계까지 기존 화면이 규칙 범위 안에서 직접 쓴다.
  */
 
-const MAX_NAME_LENGTH = 40;
-const MAX_SCHOOL_LENGTH = 40;
 const MAX_MEMO_LENGTH = 1000;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -65,26 +60,6 @@ function parseStatus(raw: unknown): StudentStatus {
   throw new HttpsError("invalid-argument", "원생 상태가 올바르지 않습니다.");
 }
 
-/**
- * 화면은 "지금 보이는 학년"을 보낸다. 저장 값의 표시 학년과 같으면 저장 값(기준 연도 포함)을 그대로 두고,
- * 바뀌었으면 보낸 학년을 올해 기준으로 저장한다. 졸업은 저장 값이 졸업으로 보일 때만 그대로 받는다.
- */
-function resolveGrade(
-  raw: unknown,
-  stored: { grade: unknown; gradeYear: unknown } | null,
-  nowYear: number,
-): { grade: GradeCode; gradeYear: number } {
-  if (stored && isGradeCode(stored.grade) && typeof stored.gradeYear === "number") {
-    if (raw === displayGrade(stored.grade, stored.gradeYear, nowYear)) {
-      return { grade: stored.grade, gradeYear: stored.gradeYear };
-    }
-  }
-  if (!isGradeCode(raw)) {
-    throw new HttpsError("invalid-argument", "학년을 선택해 주세요.");
-  }
-  return { grade: raw, gradeYear: nowYear };
-}
-
 /** 원생 추가(studentId 없음)·수정 */
 export const saveStudent = onCall(async (request) => {
   if (!request.auth?.uid) {
@@ -98,14 +73,8 @@ export const saveStudent = onCall(async (request) => {
       ? null
       : requireString(studentIdRaw, "원생 정보가 올바르지 않습니다.");
 
-  const name = typeof request.data?.name === "string" ? request.data.name.trim() : "";
-  if (!name || name.length > MAX_NAME_LENGTH) {
-    throw new HttpsError("invalid-argument", `이름을 1~${MAX_NAME_LENGTH}자로 입력해 주세요.`);
-  }
-  const school = typeof request.data?.school === "string" ? request.data.school.trim() : "";
-  if (school.length > MAX_SCHOOL_LENGTH) {
-    throw new HttpsError("invalid-argument", `학교는 ${MAX_SCHOOL_LENGTH}자 이하로 입력해 주세요.`);
-  }
+  const name = parseStudentName(request.data?.name);
+  const school = parseStudentSchool(request.data?.school);
   const phone = parseOptionalKrPhone(request.data?.phone);
   const status = parseStatus(request.data?.status ?? "enrolled");
   const firstAttendedOn = parseOptionalDate(request.data?.firstAttendedOn);
@@ -140,20 +109,7 @@ export const saveStudent = onCall(async (request) => {
       const next = (seqSnap.get("nextStudentSeq") as number) || 1;
       const newAttnId = formatStudentAttnId(academyId, next);
       tx.set(seqRef, { nextStudentSeq: next + 1 }, { merge: true });
-      tx.create(ref, {
-        attnId: newAttnId,
-        ...profile,
-        ...grade,
-        status,
-        statusChangedAt: FieldValue.serverTimestamp(),
-        guardians,
-        ...deriveGuardianFields(guardians),
-        classIds: [],
-        teacherUids: [],
-        createdByUid: callerUid,
-        createdAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
+      tx.create(ref, newStudentDocFields({ attnId: newAttnId, profile, grade, status, guardians, callerUid }));
       if (memo) {
         tx.set(db.doc(`academies/${academyId}/studentNotes/${ref.id}`), {
           memo,
@@ -167,20 +123,20 @@ export const saveStudent = onCall(async (request) => {
   }
 
   const ref = studentsCol.doc(studentId);
-  const attnId = await db.runTransaction(async (tx) => {
+  const { attnId, noticeParentUids } = await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) {
       throw new HttpsError("not-found", "원생 정보를 찾을 수 없습니다.");
     }
     // 보호자 목록을 보내지 않으면 그대로 둔다([]만 전부 삭제). 연결(linkedParentUid)은 이 트랜잭션에서 읽은 값에서만 이어받는다
     const guardiansRaw = request.data?.guardians;
-    const guardiansPatch =
-      guardiansRaw === undefined || guardiansRaw === null
-        ? {}
-        : (() => {
-          const guardians = parseGuardiansInput(guardiansRaw, readGuardians(snap.get("guardians")), relationIds);
-          return { guardians, ...deriveGuardianFields(guardians) };
-        })();
+    const before = readGuardians(snap.get("guardians"));
+    const guardians =
+      guardiansRaw === undefined || guardiansRaw === null ? null : parseGuardiansInput(guardiansRaw, before, relationIds);
+    const guardiansPatch = guardians ? { guardians, ...deriveGuardianFields(guardians) } : {};
+    // 2-L L3-1-2(★4) — 연결된 칸 번호가 바뀌면 그 학부모 문서에 번호 확인 안내(계정 번호와 같아졌으면 안내 삭제)
+    const linkedChanges = guardians ? changedLinkedGuardianPhones(before, guardians) : [];
+    const parentSnaps = await Promise.all(linkedChanges.map((c) => tx.get(parentDocRef(db, academyId, c.uid))));
     const grade = resolveGrade(
       request.data?.grade,
       { grade: snap.get("grade"), gradeYear: snap.get("gradeYear") },
@@ -202,10 +158,39 @@ export const saveStudent = onCall(async (request) => {
         updatedAt: FieldValue.serverTimestamp(),
       });
     }
+    const notified: string[] = [];
+    linkedChanges.forEach((c, i) => {
+      const p = parentSnaps[i]!;
+      if (!p.exists) return;
+      const field = `phoneNotice.byStudent.${studentId}`;
+      if (phoneNoticeActionFor(p.get("phone"), c.phone) === "clear") {
+        if (p.get(field) !== undefined) {
+          tx.update(p.ref, { [field]: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp() });
+        }
+        return;
+      }
+      tx.update(p.ref, {
+        [field]: { studentName: name, phone: c.phone, changedAt: FieldValue.serverTimestamp() },
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      notified.push(typeof p.get("authUid") === "string" && p.get("authUid") ? (p.get("authUid") as string) : p.id);
+    });
     const existingAttnId = snap.get("attnId");
-    return typeof existingAttnId === "string" ? existingAttnId : "";
+    return { attnId: typeof existingAttnId === "string" ? existingAttnId : "", noticeParentUids: notified };
   });
-  return { ok: true as const, studentId, attnId };
+  // 커밋 뒤 그 학부모에게 푸시 1회(실패 무시, 번호는 넣지 않음) — 앱을 열면 안내 창
+  await Promise.all(
+    noticeParentUids.map((recipientUid) =>
+      sendParentAppPush(db, recipientUid, {
+        body: `학원에서 ${name} 학생의 보호자 번호를 바꿨어요. 앱을 열어 지금 쓰는 번호를 확인해 주세요.`,
+        type: "parent_phone_notice",
+        url: "/parent",
+        academyId,
+        studentId,
+      }),
+    ),
+  );
+  return { ok: true as const, studentId, attnId, phoneNoticeCount: noticeParentUids.length };
 });
 
 /** 원생 삭제 — 학생 문서·하위 기록·메모 */
@@ -243,7 +228,12 @@ export const onAcademyStudentParentLinksWritten = onDocumentWritten(
       ...before.filter((uid) => !after.includes(uid)),
       ...after.filter((uid) => !before.includes(uid)),
     ];
-    if (changed.length === 0) return;
+    // 2-L ★3 — 새로 생긴 보호자 번호(원생 추가·번호 입력·번호 변경, 2-M 여러 명 저장 포함). 연결 쓰기는 번호 목록을 바꾸지 않아
+    // 자동 연결이 이 트리거를 다시 깨워도 여기서 빈 목록 → 멈춤(재시도도 연결 "already"·벨 결정 ID로 한 번만)
+    const newKeys = event.data?.after?.exists
+      ? newGuardianPhoneKeys(event.data?.before?.get("guardianPhones"), event.data.after.get("guardianPhones"))
+      : [];
+    if (changed.length === 0 && newKeys.length === 0) return;
 
     const { academyId, studentId } = event.params;
     const eventAgeMs = triggerEventAgeMs(event.time);
@@ -257,8 +247,11 @@ export const onAcademyStudentParentLinksWritten = onDocumentWritten(
       for (const uid of changed) {
         await refreshParentLinkSummary(db, academyId, uid);
       }
-      if (event.data?.after?.exists) {
+      if (changed.length > 0 && event.data?.after?.exists) {
         await syncStudentPaymentParents(db, academyId, studentId);
+      }
+      if (newKeys.length > 0) {
+        await autoLinkNewGuardianPhones(db, academyId, studentId, newKeys);
       }
     } catch (e) {
       if (isRetriableError(e)) {

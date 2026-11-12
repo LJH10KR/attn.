@@ -2,7 +2,9 @@
 
 import { FirebaseError } from "firebase/app";
 import { httpsCallable } from "firebase/functions";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { academyPath } from "@/lib/academy/academy-routes";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { useBodyScrollLock } from "@/lib/ui/use-body-scroll-lock";
 
@@ -43,12 +45,15 @@ export function AcademyRegistrationOverlay({
   const [phase, setPhase] = useState<OverlayPhase>("input");
   const [error, setError] = useState<string | null>(null);
   const [academyAttnId, setAcademyAttnId] = useState("");
+  const [createdAcademyId, setCreatedAcademyId] = useState<string | null>(null);
+  const router = useRouter();
 
   const reset = useCallback(() => {
     setName("");
     setPhase("input");
     setError(null);
     setAcademyAttnId("");
+    setCreatedAcademyId(null);
   }, []);
 
   const handleClose = useCallback(() => {
@@ -76,6 +81,7 @@ export function AcademyRegistrationOverlay({
       const created = await create({ name: trimmed });
       const c = created.data as { academyId?: string; attnId?: string };
       setAcademyAttnId(c.attnId ?? c.academyId ?? "");
+      setCreatedAcademyId(c.academyId ?? null);
       setPhase("complete");
       onAcademyCreatedAction?.();
     } catch (e) {
@@ -137,9 +143,7 @@ export function AcademyRegistrationOverlay({
                 입니다.
               </p>
               <p className="mt-3 break-keep text-xs leading-relaxed text-neutral-500">
-                학부모 가입 QR은 운영 › 학부모 관리(홈에도 있어요)에서, 직원 가입 QR은 설정 › 멤버 초대/권한 관리 ›
-                「+ 멤버 초대」에서 공유할 수 있어요. 휴대폰이 없거나 가입이 어려운 분은 같은 곳에서 계정을 직접 만들어 줄
-                수 있어요.
+                홈의 「시작하기」에서 반·원생·학부모·직원 준비를 차례로 할 수 있어요.
               </p>
             </div>
           </div>
@@ -175,10 +179,19 @@ export function AcademyRegistrationOverlay({
           <div className="mx-auto flex max-w-lg justify-center">
             <button
               type="button"
-              onClick={phase === "complete" ? handleClose : () => void onSubmit()}
+              onClick={
+                phase === "complete"
+                  ? () => {
+                      // 2-M — [시작하기]: 새 학원 홈(맨 위 "시작하기" 체크리스트)으로
+                      const target = createdAcademyId;
+                      handleClose();
+                      if (target) router.push(academyPath(target));
+                    }
+                  : () => void onSubmit()
+              }
               className="w-full max-w-xs rounded-2xl bg-[#222] py-3.5 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-950"
             >
-              {phase === "complete" ? "확인" : "등록"}
+              {phase === "complete" ? (createdAcademyId ? "시작하기" : "확인") : "등록"}
             </button>
           </div>
         </footer>

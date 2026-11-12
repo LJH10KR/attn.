@@ -37,6 +37,7 @@ import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { useAcademyDashboardBell } from "@/lib/firebase/use-academy-dashboard-bell";
 import { useAuthProfile } from "@/lib/firebase/use-auth-profile";
 import { academyLabelForGreeting } from "@/lib/ui/dashboard-greetings";
+import { OwnerConsentGate } from "@/components/legal/owner-consent-gate";
 
 export type AcademyShellValue = {
   academyId: string;
@@ -172,6 +173,9 @@ export function AcademyShell({ children }: { children: ReactNode }) {
       parent: can("operations.parents") ? academyPath(academyId, "operations/parents") : null,
       staff: can("settings.members") ? academyPath(academyId, "settings/members") : null,
     },
+    // 2-L 정보성 알림 — 학부모 알림은 학부모 관리, 직원 자동 활성은 멤버 관리 권한
+    parentsHref: can("operations.parents") ? academyPath(academyId, "operations/parents") : null,
+    membersHref: can("settings.members") ? academyPath(academyId, "settings/members") : null,
   });
 
   const { logout, logoutBusy, logoutModal } = useRoleLogout({
@@ -382,6 +386,7 @@ export function AcademyShell({ children }: { children: ReactNode }) {
   return (
     <AcademyShellContext.Provider value={value}>
       <div className="min-h-[100dvh] bg-background pb-28">
+        <OwnerConsentGate enabled={actor === "owner"} />
         <DashboardRoleHeader
           title={route?.title ?? "학원 홈"}
           affiliationLabel={affiliationLabel}

@@ -43,7 +43,8 @@ function errMsg(err: unknown, fallback: string): string {
 
 /**
  * 멤버 초대 시트(2-K) — 두 갈래.
- * 직원 가입 QR: 학원 공용 직원 가입 링크(받은 사람이 가입 → 승인 대기, 번호가 미리 등록한 직원과 같으면 승인 때 합칠 수 있음).
+ * 직원 가입 QR: 학원 공용 직원 가입 링크(받은 사람이 가입 — 문자로 번호를 확인하고 미리 등록한 직원 1명·권한과 맞으면 바로 활성(2-L),
+ * 아니면 승인 대기 — 번호가 미리 등록한 직원과 같으면 승인 때 합칠 수 있음).
  * 계정 직접 만들기: 최대 10명, 로그인 ID·임시 비밀번호 즉시 발급(휴대폰이 없거나 가입이 어려운 사람용).
  * 새 이름이면 직원 목록에도 추가되고, 계정 없는 기존 직원을 고를 수도 있다.
  */
@@ -188,7 +189,7 @@ export function MemberInviteSheet({
                 <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="초대 방법">
                   {(
                     [
-                      { id: "qr", label: "직원 가입 QR", hint: "받은 사람이 가입 → 승인 후 이용" },
+                      { id: "qr", label: "직원 가입 QR", hint: "받은 사람이 가입 → 번호가 맞으면 바로, 아니면 승인 후 이용" },
                       { id: "account", label: "계정 직접 만들기", hint: "로그인 ID·임시 비밀번호 즉시 발급" },
                     ] as const
                   ).map((m) => (
@@ -216,8 +217,9 @@ export function MemberInviteSheet({
                   <>
                     <AcademySignupLinkCard academyId={academyId} kind="staff" />
                     <p className="break-keep text-[11px] text-neutral-500">
-                      직원 관리에서 번호와 「가입하면 줄 권한」을 미리 등록해 두면, 같은 번호로 가입한 사람을 승인할 때
-                      「이 직원으로 승인」으로 인사 정보와 권한을 합칠 수 있어요.
+                      직원 관리에서 번호와 「가입하면 줄 권한」을 미리 등록해 두면, 같은 번호로 가입하고 문자로 번호를
+                      확인한 사람은 바로 그 권한으로 이용할 수 있어요. 번호 확인을 건너뛰었거나 같은 번호 후보가 여럿이면
+                      승인할 때 「이 직원으로 승인」으로 합칠 수 있어요.
                     </p>
                   </>
                 ) : (

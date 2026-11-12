@@ -1,17 +1,23 @@
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
+import * as logger from "firebase-functions/logger";
 import { attnLoginIndexPath } from "./lib/attn-id";
+import { autoLinkVerifiedParent } from "./lib/parent-auto-link";
+import {
+  applyVerifiedParentPhone,
+  MSG_PHONE_CHANGE_NEEDS_PROOF,
+  writeParentPhoneBell,
+} from "./lib/parent-phone-change";
+import { accountProofExpectation, readOptionalPhoneProof } from "./lib/phone-proof";
+import { readPhoneProofInTx, verifiedPhoneFields } from "./lib/phone-verification";
 import {
   assertMemberLoginIdAvailable,
   normalizeMemberLoginId,
   validateMemberLoginIdFormat,
 } from "./lib/member-login-id";
 import { digitsOnlyKrPhone, parseOptionalKrPhone } from "./lib/kr-phone";
-import {
-  claimParentPhoneIndexInTx,
-  parentPhoneIndexRef,
-} from "./lib/parent-links";
+import { parentPhoneIndexRef } from "./lib/parent-links";
 import { verifyLoginPasswordThrottled } from "./lib/login-throttle";
 import { randomAuthPassword } from "./lib/member-credentials";
 import { hasLoginSecret, passwordSecretFields } from "./lib/password-hash";
@@ -105,35 +111,68 @@ function assertDisplayName(raw: unknown): string {
   return name;
 }
 
-/** 선생님 — 본인 표시 이름·전화번호 변경 */
+/** 요청에 이름이 있으면 검사(없으면 그대로 둠 — 번호 바꾸기 시트는 번호만 보냄) */
+function optionalDisplayName(data: Record<string, unknown> | undefined): string | undefined {
+  return data != null && "displayName" in data ? assertDisplayName(data.displayName) : undefined;
+}
+
+/**
+ * 선생님 — 본인 표시 이름·전화번호 변경. 번호를 바꾸면 새 번호 확인 증표(`phoneProof`, 목적 phone_change·본인)가 필요하고(2-L L3-1-3),
+ * 계정 번호와 확인 필드(`phoneVerifiedKey`·`phoneVerifiedAt`)를 한 트랜잭션에서 함께 바꾼다. 번호를 비우는 것은 증표 없이 되고 확인 필드도 지운다.
+ * 같은 번호에 증표를 붙이면 확인 표시만 남긴다(가입 때 건너뛴 번호를 나중에 확인).
+ */
 export const updateTeacherProfile = onCall(async (request) => {
   const { uid, academyId, memberDocId } = await assertTeacherAuth(request);
 
-  const displayName = assertDisplayName(request.data?.displayName);
+  const displayName = optionalDisplayName(request.data);
   const hasPhoneField = request.data != null && "phone" in request.data;
   const phone = hasPhoneField ? parseOptionalKrPhone(request.data?.phone) : undefined;
-  const ref = admin.firestore().doc(`academies/${academyId}/staff/${memberDocId}`);
-  const snap = await ref.get();
-  if (!snap.exists) {
-    throw new HttpsError("not-found", "선생님 정보를 찾을 수 없습니다.");
+  const phoneProof = readOptionalPhoneProof(request.data?.phoneProof);
+  if (displayName === undefined && phone === undefined) {
+    throw new HttpsError("invalid-argument", "바꿀 내용이 없습니다.");
+  }
+  const db = admin.firestore();
+  const ref = db.doc(`academies/${academyId}/staff/${memberDocId}`);
+
+  const result = await db.runTransaction(async (tx) => {
+    const proof =
+      phone && phoneProof ? await readPhoneProofInTx(tx, db, phoneProof, accountProofExpectation(uid, phone)) : null;
+    const snap = await tx.get(ref);
+    if (!snap.exists) {
+      throw new HttpsError("not-found", "선생님 정보를 찾을 수 없습니다.");
+    }
+    const oldPhone = typeof snap.get("phone") === "string" ? (snap.get("phone") as string) : "";
+    const patch: Record<string, unknown> = { updatedAt: FieldValue.serverTimestamp() };
+    if (displayName !== undefined) patch.displayName = displayName;
+    if (phone === null) {
+      patch.phone = null;
+      patch.phoneVerifiedKey = FieldValue.delete();
+      patch.phoneVerifiedAt = FieldValue.delete();
+    } else if (phone !== undefined) {
+      const changed = digitsOnlyKrPhone(phone) !== digitsOnlyKrPhone(oldPhone);
+      if (changed && !proof) {
+        throw new HttpsError("failed-precondition", MSG_PHONE_CHANGE_NEEDS_PROOF);
+      }
+      patch.phone = phone;
+      if (proof) Object.assign(patch, verifiedPhoneFields(proof.phoneKey));
+    }
+    tx.update(ref, patch);
+    proof?.markUsed(uid);
+    return {
+      status: snap.get("status"),
+      displayName: displayName ?? (typeof snap.get("displayName") === "string" ? (snap.get("displayName") as string) : ""),
+      phoneVerified: proof !== null,
+    };
+  });
+  if (displayName !== undefined) {
+    try {
+      await admin.auth().updateUser(uid, { displayName });
+    } catch {
+      /* Auth displayName은 부가 정보 */
+    }
   }
 
-  const patch: Record<string, unknown> = {
-    displayName,
-    updatedAt: FieldValue.serverTimestamp(),
-  };
-  if (phone !== undefined) {
-    patch.phone = phone;
-  }
-  await ref.update(patch);
-  try {
-    await admin.auth().updateUser(uid, { displayName });
-  } catch {
-    /* Auth displayName은 부가 정보 */
-  }
-
-  const membershipStatus =
-    typeof snap.get("status") === "string" ? snap.get("status") : "pending_setup";
+  const membershipStatus = typeof result.status === "string" ? result.status : "pending_setup";
   await admin.auth().setCustomUserClaims(uid, {
     role: "teacher",
     academyId,
@@ -143,12 +182,19 @@ export const updateTeacherProfile = onCall(async (request) => {
 
   return {
     ok: true,
-    displayName,
+    displayName: result.displayName,
     ...(phone !== undefined ? { phone } : {}),
+    phoneVerified: result.phoneVerified,
   };
 });
 
-/** 학부모 — 본인 표시 이름·휴대폰 번호 변경(학원에 연결된 계정은 번호 색인도 함께 옮김) */
+/**
+ * 학부모 — 본인 표시 이름·휴대폰 번호 변경(2-L L3-1-1). 번호를 바꾸면 새 번호 확인 증표가 필요하고,
+ * `applyVerifiedParentPhone` 한 트랜잭션이 계정 번호·확인 필드·번호 색인·연결된 모든 자녀 보호자 칸(★9 합치기)·안내 정리를 함께 한다.
+ * 그 뒤 원장 벨(번호가 바뀐 경우)과 ★8 자동 연결(연결 자녀 수와 상관없이 매번 — 그 번호의 원생 전체).
+ * 같은 번호에 증표를 붙이면 확인 표시만 남기고 자동 연결을 시도한다(가입 때 건너뛴 번호를 나중에 확인).
+ * 번호 비우기는 증표 없이 되지만 학원에 연결된 계정(번호 색인 보유)은 거부.
+ */
 export const updateParentProfile = onCall(async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
@@ -163,61 +209,78 @@ export const updateParentProfile = onCall(async (request) => {
     throw new HttpsError("failed-precondition", "학원 정보가 없습니다.");
   }
 
-  const displayName = assertDisplayName(request.data?.displayName);
+  const displayName = optionalDisplayName(request.data);
   const hasPhoneField = request.data != null && "phone" in request.data;
   const phone = hasPhoneField ? parseOptionalKrPhone(request.data?.phone) : undefined;
+  const phoneProof = readOptionalPhoneProof(request.data?.phoneProof);
+  if (displayName === undefined && phone === undefined) {
+    throw new HttpsError("invalid-argument", "바꿀 내용이 없습니다.");
+  }
   const db = admin.firestore();
   const ref = db.doc(`academies/${academyId}/parents/${uid}`);
 
-  const patch: Record<string, unknown> = {
-    displayName,
-    updatedAt: FieldValue.serverTimestamp(),
+  const finish = async (name: string | undefined) => {
+    if (name !== undefined) {
+      try {
+        await admin.auth().updateUser(uid, { displayName: name });
+      } catch {
+        /* optional */
+      }
+    }
+    await syncUserAdminProfile(db, uid);
   };
-  if (phone !== undefined) {
-    patch.phone = phone;
+
+  if (phone && phoneProof) {
+    // 문자로 확인된 번호 — 한 트랜잭션 적용 → 벨 → ★8 매번 자동 연결
+    const applied = await applyVerifiedParentPhone(db, academyId, uid, { phone, rawProof: phoneProof, displayName });
+    if (applied.phoneChanged) {
+      await writeParentPhoneBell(db, academyId, uid, applied.displayName, "self").catch((e) =>
+        logger.warn("updateParentProfile: 원장 벨 실패(무시)", { academyId, e }),
+      );
+    }
+    const auto = await autoLinkVerifiedParent(db, academyId, uid);
+    await finish(displayName);
+    return {
+      ok: true,
+      displayName: applied.displayName,
+      phone,
+      phoneVerified: true,
+      linkedCount: auto.linked.length,
+    };
   }
-  /**
-   * 판단·색인 이동·문서 수정을 한 트랜잭션에서 — 옛 번호 색인은 이 계정이 가졌든 아니든 항상 안에서 읽는다.
-   * 그래야 첫 연결(`linkParentToStudents`)이 같은 번호 색인을 만드는 것과 겹칠 때 충돌로 순서가 정해져,
-   * "계정 번호는 새 번호인데 색인·연결은 옛 번호"가 남지 않는다(연결 쪽은 학생별 트랜잭션에서 계정 번호를 다시 확인).
-   */
-  await db.runTransaction(async (tx) => {
+
+  // 증표 없음 — 이름만, 같은 번호, 번호 비우기(연결된 계정은 거부)만 된다
+  const name = await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) {
       throw new HttpsError("not-found", "학부모 정보를 찾을 수 없습니다.");
     }
-    const oldPhone = snap.get("phone");
-    const oldKey = digitsOnlyKrPhone(typeof oldPhone === "string" ? oldPhone : "");
-    const oldIndexRef = oldKey ? parentPhoneIndexRef(db, academyId, oldKey) : null;
-    const oldIdx = oldIndexRef ? await tx.get(oldIndexRef) : null;
-    const holdsIndex = Boolean(oldIdx?.exists && oldIdx.get("parentUid") === uid);
-    const phoneChanged = phone !== undefined && digitsOnlyKrPhone(phone ?? "") !== oldKey;
-
-    let writeIndex: (() => boolean) | null = null;
-    if (phoneChanged && holdsIndex) {
-      // 연결된 적 있는 계정(번호 색인 보유) — 색인을 새 번호로 옮긴다. 새 번호를 다른 계정이 잡고 있으면 거부
-      if (!phone) {
+    const oldPhone = typeof snap.get("phone") === "string" ? (snap.get("phone") as string) : "";
+    const oldKey = digitsOnlyKrPhone(oldPhone);
+    const patch: Record<string, unknown> = { updatedAt: FieldValue.serverTimestamp() };
+    if (displayName !== undefined) patch.displayName = displayName;
+    if (phone === null && oldKey) {
+      const idx = await tx.get(parentPhoneIndexRef(db, academyId, oldKey));
+      if (idx.exists && idx.get("parentUid") === uid) {
         throw new HttpsError("invalid-argument", "학원에 연결된 계정은 휴대폰 번호를 비울 수 없습니다.");
       }
-      writeIndex = await claimParentPhoneIndexInTx(tx, db, academyId, phone, uid);
-    }
-    if (writeIndex && oldIndexRef) {
-      writeIndex();
-      tx.delete(oldIndexRef);
+      patch.phone = null;
+      patch.phoneVerifiedKey = FieldValue.delete();
+      patch.phoneVerifiedAt = FieldValue.delete();
+    } else if (phone && digitsOnlyKrPhone(phone) !== oldKey) {
+      throw new HttpsError("failed-precondition", MSG_PHONE_CHANGE_NEEDS_PROOF);
     }
     tx.update(ref, patch);
+    return displayName ?? (typeof snap.get("displayName") === "string" ? (snap.get("displayName") as string) : "");
   });
-  try {
-    await admin.auth().updateUser(uid, { displayName });
-  } catch {
-    /* optional */
-  }
-  await syncUserAdminProfile(db, uid);
+  await finish(displayName);
 
   return {
     ok: true,
-    displayName,
+    displayName: name,
     ...(phone !== undefined ? { phone } : {}),
+    phoneVerified: false,
+    linkedCount: 0,
   };
 });
 

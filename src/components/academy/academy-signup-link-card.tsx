@@ -5,6 +5,7 @@ import { httpsCallable } from "firebase/functions";
 import { QRCodeCanvas } from "qrcode.react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ModalPortal } from "@/components/ui/modal-portal";
+import { SlideSwitch } from "@/components/ui/slide-switch";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { getPublicAppOrigin } from "@/lib/firebase/config";
 
@@ -21,7 +22,7 @@ const TEXT: Record<
 > = {
   parent: {
     title: "학부모 가입 QR",
-    hint: "이 QR·링크로만 가입할 수 있어요. 가입하면 승인 대기로 들어오고, 학원이 연결하면 자녀가 보입니다.",
+    hint: "이 QR·링크로만 가입할 수 있어요. 가입할 때 문자로 번호를 확인하고 학원에 등록된 보호자 번호와 같으면 자녀와 바로 연결돼요. 아니면 승인 대기로 들어옵니다.",
     shareTitle: "학부모 회원 가입",
     shareText: "학원 학부모 앱 가입 링크입니다.",
     fileName: "학부모-가입-QR.png",
@@ -29,29 +30,59 @@ const TEXT: Record<
   },
   staff: {
     title: "직원 가입 QR",
-    hint: "이 QR·링크로만 가입할 수 있어요. 가입하면 「가입 승인 대기」로 들어오고, 멤버 목록에서 승인해야 이용할 수 있습니다.",
+    hint: "이 QR·링크로만 가입할 수 있어요. 가입할 때 문자로 번호를 확인하고, 직원 관리에 미리 등록한 번호·권한과 맞으면 바로 이용할 수 있어요. 아니면 「가입 승인 대기」로 들어와 멤버 목록에서 승인합니다.",
     shareTitle: "attn. 직원 가입",
-    shareText: "학원 직원 가입 링크입니다. 가입한 뒤 학원의 승인을 기다려 주세요.",
+    shareText: "학원 직원 가입 링크입니다. 가입할 때 휴대폰 번호를 문자로 확인해 주세요.",
     fileName: "직원-가입-QR.png",
     who: "직원",
   },
 };
 
 type LinkState = { token: string; enabled: boolean };
+type LinkResponse = LinkState & { autoLinkVerifiedParents?: boolean };
 type Confirm = "regenerate" | "disable";
 
 function errMsg(err: unknown, fallback: string): string {
   return err instanceof FirebaseError && err.message ? err.message : fallback;
 }
 
+export const QR_SHARE_UNSUPPORTED = "이 기기에서는 이미지를 바로 공유할 수 없어요. [이미지 저장] 후 사진으로 보내 주세요.";
+
+/** 기기 안에서 만든 QR data URL → PNG 파일(네트워크 없이 — fetch(data:)는 CSP connect-src에 걸릴 수 있음) */
+function pngFileFromDataUrl(dataUrl: string, fileName: string): File {
+  const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+  return new File([bytes], fileName, { type: "image/png" });
+}
+
 /**
  * 가입 QR 카드(2-K) — 학부모(홈·학부모 관리)·직원(멤버 초대) 공용.
  * 링크에는 학원 ID가 아닌 무작위 토큰만 들어가고(서버가 처음 볼 때 만듦), 권한 있는 사람만 토큰을 받는다.
- * 공유창·링크 복사·QR(기기 안에서 그림, `<img>`로 보여 길게 눌러 저장)·이미지 저장, [다시 만들기]·[가입 받기 끄기/켜기].
+ * 공유창·링크 복사·QR(기기 안에서 그림, `<img>`로 보여 길게 눌러 저장)·QR 이미지 공유(2-L S2)·이미지 저장, [다시 만들기]·[가입 받기 끄기/켜기].
  */
-export function AcademySignupLinkCard({ academyId, kind }: { academyId: string; kind: SignupLinkKind }) {
+export function AcademySignupLinkCard({
+  academyId,
+  kind,
+  showAutoLinkSetting = false,
+  onShareAction,
+  qrOpenRequest = 0,
+}: {
+  academyId: string;
+  kind: SignupLinkKind;
+  /** 학부모 관리 화면 — 학원 설정 "번호 확인된 학부모 자동 연결"(2-L) 스위치를 카드 아래에 보임 */
+  showAutoLinkSetting?: boolean;
+  /** 2-M 홈 "시작하기" — [공유]·[링크 복사]·[QR 이미지 공유]·[이미지 저장]을 누르면(원장 화면에서만 넘김) */
+  onShareAction?: () => void;
+  /** 2-M 홈 "시작하기" [QR 보기] — 값이 바뀔 때마다 QR을 펼침 */
+  qrOpenRequest?: number;
+}) {
   const text = TEXT[kind];
   const [link, setLink] = useState<LinkState | null>(null);
+  const [autoLink, setAutoLink] = useState<boolean | null>(null);
+  const [autoLinkBusy, setAutoLinkBusy] = useState(false);
+  const [autoLinkError, setAutoLinkError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [showLink, setShowLink] = useState(false);
@@ -59,6 +90,7 @@ export function AcademySignupLinkCard({ academyId, kind }: { academyId: string; 
   const [canShare, setCanShare] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [qrShareError, setQrShareError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -68,8 +100,9 @@ export function AcademySignupLinkCard({ academyId, kind }: { academyId: string; 
   const callLink = useCallback(
     async (fn: "getSignupLink" | "regenerateSignupLink" | "setSignupLinkEnabled", extra: Record<string, unknown> = {}) => {
       const res = await httpsCallable(getFirebaseFunctions(), fn)({ academyId, kind, ...extra });
-      const data = res.data as LinkState;
+      const data = res.data as LinkResponse;
       setLink({ token: data.token, enabled: data.enabled });
+      if (typeof data.autoLinkVerifiedParents === "boolean") setAutoLink(data.autoLinkVerifiedParents);
     },
     [academyId, kind],
   );
@@ -86,6 +119,10 @@ export function AcademySignupLinkCard({ academyId, kind }: { academyId: string; 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (qrOpenRequest > 0) setQrOpen(true);
+  }, [qrOpenRequest]);
 
   useEffect(() => {
     setCanShare(typeof navigator !== "undefined" && typeof navigator.share === "function");
@@ -143,6 +180,23 @@ export function AcademySignupLinkCard({ academyId, kind }: { academyId: string; 
     }
   }, [qrOpen, signupUrl]);
 
+  /** S2(2-L) — QR을 PNG 파일로 공유창에 넘김(카톡 등에 사진으로). 파일 공유를 못 하는 기기는 [이미지 저장] 안내 */
+  const shareQrImage = useCallback(async () => {
+    if (!qrDataUrl) return;
+    setQrShareError(null);
+    try {
+      const file = pngFileFromDataUrl(qrDataUrl, text.fileName);
+      if (typeof navigator.canShare !== "function" || typeof navigator.share !== "function" || !navigator.canShare({ files: [file] })) {
+        setQrShareError(QR_SHARE_UNSUPPORTED);
+        return;
+      }
+      await navigator.share({ files: [file], title: text.shareTitle });
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      setQrShareError(QR_SHARE_UNSUPPORTED);
+    }
+  }, [qrDataUrl, text.fileName, text.shareTitle]);
+
   const saveQr = useCallback(() => {
     if (!qrDataUrl) return;
     try {
@@ -192,6 +246,19 @@ export function AcademySignupLinkCard({ academyId, kind }: { academyId: string; 
     }
   };
 
+  const changeAutoLink = async (next: boolean) => {
+    setAutoLinkBusy(true);
+    setAutoLinkError(null);
+    try {
+      const res = await httpsCallable(getFirebaseFunctions(), "setParentAutoLink")({ academyId, enabled: next });
+      setAutoLink((res.data as { autoLinkVerifiedParents: boolean }).autoLinkVerifiedParents);
+    } catch (e) {
+      setAutoLinkError(errMsg(e, "설정을 바꾸지 못했습니다."));
+    } finally {
+      setAutoLinkBusy(false);
+    }
+  };
+
   const enable = () =>
     void runAction(() => callLink("setSignupLinkEnabled", { enabled: true }), "가입 받기를 켰습니다.", "가입 받기를 켜지 못했습니다.");
 
@@ -237,14 +304,28 @@ export function AcademySignupLinkCard({ academyId, kind }: { academyId: string; 
           ) : null}
           <div className="flex flex-wrap gap-2">
             {canShare ? (
-              <button type="button" onClick={() => void share()} className={primaryBtnClass}>
+              <button type="button" onClick={() => {
+                onShareAction?.();
+                void share();
+              }} className={primaryBtnClass}>
                 공유
               </button>
             ) : null}
-            <button type="button" onClick={() => void copy()} className={canShare ? btnClass : primaryBtnClass}>
+            <button type="button" onClick={() => {
+              onShareAction?.();
+              void copy();
+            }} className={canShare ? btnClass : primaryBtnClass}>
               {copied ? "복사됨" : "링크 복사"}
             </button>
-            <button type="button" onClick={() => setQrOpen((v) => !v)} aria-expanded={qrOpen} className={btnClass}>
+            <button
+              type="button"
+              onClick={() => {
+                setQrShareError(null);
+                setQrOpen((v) => !v);
+              }}
+              aria-expanded={qrOpen}
+              className={btnClass}
+            >
               {qrOpen ? "QR 닫기" : "QR 보기"}
             </button>
           </div>
@@ -280,9 +361,36 @@ export function AcademySignupLinkCard({ academyId, kind }: { academyId: string; 
               <p className="break-keep text-center text-[11px] text-neutral-500">
                 휴대폰 카메라로 찍으면 가입 화면이 열립니다. 저장이 안 되면 QR을 길게 눌러 저장해 주세요.
               </p>
-              <button type="button" onClick={saveQr} disabled={!qrDataUrl} className={btnClass}>
-                이미지 저장
-              </button>
+              <div className="flex flex-wrap justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onShareAction?.();
+                    void shareQrImage();
+                  }}
+                  disabled={!qrDataUrl}
+                  className={primaryBtnClass}
+                  data-qr-share
+                >
+                  QR 이미지 공유
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onShareAction?.();
+                    saveQr();
+                  }}
+                  disabled={!qrDataUrl}
+                  className={btnClass}
+                >
+                  이미지 저장
+                </button>
+              </div>
+              {qrShareError ? (
+                <p className="break-keep text-center text-[11px] text-amber-800" role="status" data-qr-share-error>
+                  {qrShareError}
+                </p>
+              ) : null}
             </div>
           ) : null}
           <div className="flex flex-wrap gap-2 border-t border-neutral-200/70 pt-3">
@@ -319,6 +427,31 @@ export function AcademySignupLinkCard({ academyId, kind }: { academyId: string; 
             <p className="break-keep text-[11px] text-red-700" role="alert">
               {actionError}
             </p>
+          ) : null}
+          {showAutoLinkSetting && kind === "parent" && autoLink !== null ? (
+            <div className="border-t border-neutral-200/70 pt-3" data-auto-link-setting>
+              <div className="flex items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold text-foreground">번호 확인된 학부모 자동 연결</p>
+                  <p className="break-keep text-[11px] text-neutral-500">
+                    {autoLink
+                      ? "문자로 번호를 확인한 학부모를 보호자 번호가 같은 원생과 바로 연결하고 알림을 보내요."
+                      : "꺼져 있어요. 번호가 확인돼도 승인 대기로 들어오고, 승인 화면에 일치 원생이 보여요."}
+                  </p>
+                </div>
+                <SlideSwitch
+                  checked={autoLink}
+                  disabled={autoLinkBusy}
+                  onCheckedChangeAction={(v) => void changeAutoLink(v)}
+                  ariaLabel="번호 확인된 학부모 자동 연결"
+                />
+              </div>
+              {autoLinkError ? (
+                <p className="mt-1 break-keep text-[11px] text-red-700" role="alert">
+                  {autoLinkError}
+                </p>
+              ) : null}
+            </div>
           ) : null}
         </>
       )}

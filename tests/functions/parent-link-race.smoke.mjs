@@ -25,6 +25,10 @@ const PROJECT = "demo-attn";
 fadmin.initializeApp({ projectId: PROJECT });
 const db = fadmin.firestore();
 const A = "o10_a1";
+// 앞 스모크가 쓴 IP 발급 카운터(127.0.0.1) 정리 — 이 스모크도 번호 확인을 씀(2-L L-3)
+for (const d of (await db.collection("phoneVerificationCounters").get()).docs) {
+  if (d.id.startsWith("ip_hr_")) await d.ref.delete();
+}
 
 const owner = await fadmin.auth().createUser({ email: "owner10@t.dev", password: "pass1234", emailVerified: true });
 await db.doc(`academies/${A}`).set({ ownerUid: owner.uid, name: "경합 학원", status: "active" });
@@ -107,7 +111,6 @@ async function assertIndexMatchesPhone(uid, label) {
   const linked = await db.collection(`academies/${A}/students`).where("parentUids", "array-contains", uid).get();
   if (!linked.empty) assert.deepEqual(held, [digits(phone)], `${label}: 연결된 계정 색인 = 계정 번호`);
   else assert.ok(held.every((k) => k === digits(phone)), `${label}: 남은 색인 = 계정 번호`);
-  // (연결이 먼저 끝난 뒤 번호를 바꾸면 원생 쪽 보호자 번호는 그대로 — 2-G B2 "번호 다름" 표시, 의도된 동작)
   return { linked: !linked.empty, phone };
 }
 
@@ -126,10 +129,13 @@ for (let i = 0; i < ROUNDS; i++) {
   await ownerDev.call("unlinkParentFromStudent", { academyId: A, parentUid: acct.uid, studentId: acct.holder });
   await indexDoc(oldPhone).delete(); // 처음 연결 전 상태(색인 없음)로
   const target = await mkStudent(`경합 원생 ${i}`, oldPhone);
+  // 2-L L-3 — 번호 변경은 새 번호 확인 증표가 있어야 함(가짜 OCTOMO)
+  const started = await parentDev.call("startPhoneVerification", { purpose: "phone_change", phone: newPhone });
+  const { proof } = await parentDev.call("checkPhoneVerification", { verificationId: started.verificationId });
 
   const [linkRes, profileRes] = await Promise.allSettled([
     ownerDev.call("linkParentToStudents", { academyId: A, parentUid: acct.uid, studentIds: [target] }),
-    parentDev.call("updateParentProfile", { displayName: `엄마 경합${i}`, phone: newPhone }),
+    parentDev.call("updateParentProfile", { displayName: `엄마 경합${i}`, phone: newPhone, phoneProof: proof }),
   ]);
   assert.equal(profileRes.status, "fulfilled", `번호 변경 성공(${i})`);
   if (linkRes.status === "fulfilled" && linkRes.value.failures.length) {
@@ -137,6 +143,11 @@ for (let i = 0; i < ROUNDS; i++) {
   }
   const r = await assertIndexMatchesPhone(acct.uid, `라운드 ${i}`);
   assert.equal(digits(r.phone), digits(newPhone));
+  if (r.linked) {
+    // 연결이 먼저 끝났으면 번호 변경이 연결된 보호자 칸도 새 번호로(2-L L3-1-1)
+    const slot = (await db.doc(`academies/${A}/students/${target}`).get()).get("guardians").find((g) => g.linkedParentUid === acct.uid);
+    assert.equal(digits(slot.phone), digits(newPhone), `라운드 ${i}: 연결된 칸 = 계정 번호`);
+  }
   outcomes.push(r.linked ? "linked" : "rejected");
   await deleteApp(parentDev.app);
 }

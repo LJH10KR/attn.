@@ -18,7 +18,7 @@ import {
   signOut,
 } from "firebase/auth";
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from "firebase/functions";
-import { seedSignupToken } from "./_signup-token.mjs";
+import { CONSENTS, seedSignupToken } from "./_signup-token.mjs";
 
 const PROJECT = "demo-attn";
 initAdmin({ projectId: PROJECT });
@@ -99,7 +99,7 @@ await assertNoDirectLogin("staff", acct.authUid, "ownpass2", "변경한 비밀�
 
 // 공용 직원 가입 링크 가입(본인이 정한 비밀번호)
 await signOut(auth);
-await call("registerStaffSignup", {
+await call("registerStaffSignup", { consents: CONSENTS,
   token: STAFF_TOKEN, method: "password", displayName: "링크 직원", phone: "010-5000-0001",
   loginId: "linkhard", password: "linkpw12",
 });
@@ -109,7 +109,7 @@ await assertNoDirectLogin("staff", linkUid, "linkpw12", "공용 링크 가입 �
 // 학부모 자가 가입
 await call("registerParentSelfSignup", {
   token: PARENT_TOKEN, loginId: "parenthard", displayName: "학부모", password: "parentpw1",
-  phone: "010-7777-8888", contactEmail: "p5@t.dev", agreeTerms: true,
+  phone: "010-7777-8888", consents: CONSENTS,
 });
 const parentUid = (await db.collection(`academies/${A}/parents`).where("loginId", "==", "parenthard").get()).docs[0].id;
 await assertNoDirectLogin("parents", parentUid, "parentpw1", "학부모 가입 비밀번호");

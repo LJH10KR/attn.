@@ -9,6 +9,7 @@ import {
   PaymentReminderModal,
   type PaymentReminderPayload,
 } from "@/components/parent/payment-reminder-modal";
+import { ParentPhoneNoticeGate } from "@/components/parent/parent-phone-notice";
 
 const glassOverlay =
   "rounded-[1.75rem] border border-white/70 bg-[rgba(252,251,248,0.98)] p-6 shadow-[0_24px_80px_-20px_rgba(0,0,0,0.2)]";
@@ -22,11 +23,17 @@ export function ParentChrome({ children }: { children: React.ReactNode }) {
   const [simpleOpen, setSimpleOpen] = useState(false);
   const [simpleBody, setSimpleBody] = useState("");
   const [paymentPayload, setPaymentPayload] = useState<PaymentReminderPayload | null>(null);
+  const [phoneNoticeRefresh, setPhoneNoticeRefresh] = useState(0);
 
   useBodyScrollLock(simpleOpen);
   useParentPushLifecycleResync();
 
   const handleMessage = useCallback((body: string, data: Record<string, string>) => {
+    if (data.type === "parent_phone_notice") {
+      // 학원 번호 변경 안내(2-L L-3) — 단순 알림 창 대신 안내 창을 다시 읽어 띄움
+      setPhoneNoticeRefresh((n) => n + 1);
+      return;
+    }
     if (isPaymentType(data.type ?? "")) {
       setPaymentPayload({
         body,
@@ -55,6 +62,7 @@ export function ParentChrome({ children }: { children: React.ReactNode }) {
   return (
     <>
       {children}
+      <ParentPhoneNoticeGate refreshKey={phoneNoticeRefresh} />
       {paymentPayload ? (
         <PaymentReminderModal
           payload={paymentPayload}

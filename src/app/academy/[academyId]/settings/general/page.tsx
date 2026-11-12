@@ -12,6 +12,34 @@ import { SettingsAccordionItem } from "@/components/ui/settings-accordion-item";
 import { OwnerTuitionSettingsCard } from "@/components/owner/owner-tuition-settings-card";
 import { OwnerSessionTuitionSettingsCard } from "@/components/owner/owner-session-tuition-settings-card";
 import { OwnerAbsenceDeductionSettingsCard } from "@/components/owner/owner-absence-deduction-settings-card";
+import { useAcademyOnboarding } from "@/lib/academy/use-academy-onboarding";
+
+/** 2-M 홈 "시작하기" 체크리스트 다시 켜기·숨기기 — 원장만(체크리스트가 원장 전용) */
+function OnboardingSettingItem({ academyId }: { academyId: string }) {
+  const { view, error, busy, act } = useAcademyOnboarding(academyId, true);
+  return (
+    <SettingsAccordionItem title="시작하기 안내">
+      <p className="break-keep text-xs text-neutral-500 dark:text-neutral-400">
+        홈 맨 위에 반·원생·학부모·직원 준비 단계를 보여 주는 체크리스트예요. 다 끝내거나 숨기면 사라지고, 여기서 다시 켤 수 있어요.
+      </p>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm text-neutral-800 dark:text-neutral-200">홈에 시작하기 체크리스트 보이기</span>
+        <SlideSwitch
+          checked={view?.settingOn ?? false}
+          disabled={busy || !view}
+          ariaLabel="홈에 시작하기 체크리스트 보이기"
+          onCheckedChangeAction={(next) => void act(next ? "show" : "hide")}
+        />
+      </div>
+      {view ? (
+        <p className="text-[11px] text-neutral-500" data-onboarding-setting-progress>
+          준비 {view.doneCount}/4 단계 완료
+        </p>
+      ) : null}
+      {error ? <p className="text-xs text-red-600">{error}</p> : null}
+    </SettingsAccordionItem>
+  );
+}
 
 function callableMessage(err: unknown, fallback: string): string {
   if (err instanceof FirebaseError && err.message) return err.message;
@@ -88,6 +116,8 @@ export default function AcademyGeneralSettingsPage() {
         {toast ? (
           <p className="text-sm text-center text-neutral-600 dark:text-neutral-400">{toast}</p>
         ) : null}
+
+        {permissions.actor === "owner" ? <OnboardingSettingItem academyId={academyId} /> : null}
 
         <SettingsAccordionItem title="키오스크 종료 PIN">
           <p className="text-xs text-neutral-500 dark:text-neutral-400">

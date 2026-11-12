@@ -11,6 +11,8 @@ export type StaffRowVM = {
   id: string;
   displayName: string;
   phone: string;
+  /** 2-L — 직원 본인이 문자로 확인한 번호(원장이 인사 정보 번호를 바꾸면 확인 해제) */
+  phoneVerified: boolean;
   jobTitleId: string | null;
   hireDate: string | null;
   employmentStatus: StaffEmploymentStatus;
@@ -32,6 +34,10 @@ export function docToStaffRow(id: string, data: Record<string, unknown>): StaffR
     id,
     displayName: typeof data.displayName === "string" ? data.displayName : "",
     phone: typeof data.phone === "string" ? data.phone : "",
+    phoneVerified:
+      typeof data.phone === "string" &&
+      typeof data.phoneVerifiedKey === "string" &&
+      data.phone.replace(/\D/g, "") === data.phoneVerifiedKey,
     jobTitleId: typeof data.jobTitleId === "string" ? data.jobTitleId : null,
     hireDate: typeof data.hireDate === "string" ? data.hireDate : null,
     employmentStatus: readStaffEmploymentStatus(data.employmentStatus),

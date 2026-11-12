@@ -187,8 +187,11 @@ export const deleteTeacherInvite = onCall(async (request) => {
 
   const authUid = (snap.get("authUid") as string | undefined) || teacherId;
   const data = snap.data() ?? {};
-  // 써 오던 계정(사용 중·비활성)은 계정만 지우고 인사 기록 유지 — 초대 취소·가입 거절(첫 로그인 전·승인 대기)과 게스트는 전체 삭제
-  const keepStaffRecord = (st === "active" || st === "inactive") && snap.get("isGuest") !== true;
+  // 써 오던 계정(사용 중·비활성)은 계정만 지우고 인사 기록 유지 — 초대 취소·가입 거절(첫 로그인 전·승인 대기)과 게스트는 전체 삭제.
+  // `deleteHrRecord`(2-L S1, 삭제 창 "인사 기록도 함께 지우기")면 써 오던 계정도 인사 기록까지 지운다(권한은 같음)
+  const deleteHrRecord = request.data?.deleteHrRecord === true;
+  const keepStaffRecord =
+    (st === "active" || st === "inactive") && snap.get("isGuest") !== true && !deleteHrRecord;
 
   await deleteMemberLoginSecrets(db, academyId, "teacher", teacherId);
   await deleteAttnLoginIndexForMember(db, data, authUid);

@@ -16,6 +16,7 @@ import { useAcademyRoles, type AcademyRoleVM } from "@/lib/academy/use-academy-r
 import { academyStaffPath, type StaffAccountStatus } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
+import { useQueryFlag } from "@/lib/ui/use-query-flag";
 
 const glassCard = "glass-card";
 
@@ -83,6 +84,8 @@ function MembersInner({
   const [inviteOpen, setInviteOpen] = useState(false);
   const [roleSheet, setRoleSheet] = useState<{ role: AcademyRoleVM | null } | null>(null);
   const { roles, error: rolesError, refresh: refreshRoles } = useAcademyRoles(academyId, true);
+  // 2-M 홈 "시작하기" [직원 가입 QR] — `?invite=qr`이면 멤버 초대 시트(직원 가입 QR)를 바로 연다(권한 목록을 받은 뒤)
+  useQueryFlag("invite", "qr", Boolean(roles), () => setInviteOpen(true));
   const { items: jobTitles } = useAcademyOptionList(academyId, "jobTitles");
 
   const loadStaff = useCallback(async () => {
@@ -278,6 +281,11 @@ function MembersInner({
                           {m.isGuest ? (
                             <span className="rounded-full bg-neutral-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-700">
                               게스트
+                            </span>
+                          ) : null}
+                          {m.accountStatus === "pending_registration" && m.phoneVerified ? (
+                            <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-900" data-phone-verified-badge>
+                              번호 확인됨
                             </span>
                           ) : null}
                           {matchesFor(m).length > 0 ? (

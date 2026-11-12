@@ -16,7 +16,7 @@ import {
   signOut,
 } from "firebase/auth";
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from "firebase/functions";
-import { seedSignupToken } from "./_signup-token.mjs";
+import { CONSENTS, seedSignupToken } from "./_signup-token.mjs";
 
 const PROJECT = "demo-attn";
 initAdmin({ projectId: PROJECT });
@@ -55,7 +55,7 @@ async function loginTeacher(loginId, password) {
 await signInWithEmailAndPassword(auth, "owner3@t.dev", "pass1234");
 await call("listAcademyRoles", { academyId: A });
 await signOut(auth);
-await call("registerStaffSignup", {
+await call("registerStaffSignup", { consents: CONSENTS,
   token: STAFF_TOKEN, method: "password", displayName: "링크 가입자", phone: "010-3000-0001",
   loginId: "linkjoiner", password: "linkpass1",
 });
@@ -115,7 +115,7 @@ await signOut(auth);
 // --- 학부모 자가 가입 ---
 await call("registerParentSelfSignup", {
   token: PARENT_TOKEN, loginId: "parentself", displayName: "학부모", password: "parentpw1",
-  phone: "010-1111-2222", contactEmail: "p@t.dev", agreeTerms: true,
+  phone: "010-1111-2222", consents: CONSENTS,
 });
 const parentUid = (await db.collection(`academies/${A}/parents`).where("loginId", "==", "parentself").get()).docs[0].id;
 await assertNoPlaintext(`academies/${A}/parents/${parentUid}/secrets/login`, "parentpw1");

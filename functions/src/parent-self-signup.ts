@@ -2,15 +2,15 @@ import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { academySeqMetaPath, attnLoginIndexPath, formatParentAttnId } from "./lib/attn-id";
-import { SIGNUP_APP_CHECK_OPTIONS } from "./lib/app-check";
+import { assertFreshAppCheck, ONE_SHOT_APP_CHECK_OPTIONS, SIGNUP_APP_CHECK_OPTIONS } from "./lib/app-check";
 import { consumeSignupQuota, resolveSignupLink } from "./lib/signup-links";
 import { assertKrPhoneRequired } from "./lib/kr-phone";
+import { parseRequiredConsents } from "./lib/legal-docs";
 import { randomAuthPassword } from "./lib/member-credentials";
 import { passwordSecretFields } from "./lib/password-hash";
-import {
-  assertContactEmail,
-  issueEmailVerificationOtpForUid,
-} from "./lib/email-verification-otp";
+import { autoLinkVerifiedParent } from "./lib/parent-auto-link";
+import { assertPhoneProofUsable, readOptionalPhoneProof, signupProofExpectation } from "./lib/phone-proof";
+import { readPhoneProofInTx, verifiedPhoneFields, type PhoneProofExpectation } from "./lib/phone-verification";
 import {
   assertParentLoginIdAvailable,
   normalizeParentLoginId,
@@ -44,8 +44,10 @@ async function allocateParentAttnId(
 }
 
 /**
- * 학부모 가입(2-K) — 모든 함수가 가입 QR 토큰(`token`)을 받아 서버가 학원을 찾는다(학원 ID를 받지 않음).
- * App Check 강제(플래그)는 로그인 ID 확인·가입 2개만 — 학원 정보·Google 상태 조회는 토큰으로만 막는다.
+ * 학부모 가입(2-K 토큰 + 2-L 번호 확인) — 모든 함수가 가입 QR 토큰(`token`)을 받아 서버가 학원을 찾는다(학원 ID를 받지 않음).
+ * 가입은 항상 승인 대기(`pending_approval`)로 만들고, 휴대폰 번호 확인 증표(`phoneProof`)가 있으면 계정에 확인된 번호를 기록한다
+ * (증표 소비는 계정 쓰기와 같은 트랜잭션). 증표가 없으면(건너뛰기·한도·OCTOMO 실패) 번호 확인 없이 승인 대기.
+ * App Check: 로그인 ID 확인은 일반 토큰, 가입 2개는 1회용 토큰. 학원 정보·Google 상태 조회는 토큰으로만 막는다.
  */
 
 /** 공개 — 가입 QR 토큰으로 학원 정보(가입 폼을 보여 주기 전) */
@@ -98,31 +100,52 @@ export const getParentSignupGoogleStatus = onCall(async (request) => {
 });
 
 /**
- * 인증 — Google 계정으로 학부모 가입 완료(이름·전화번호 필수) → 승인 대기(`pending_approval`).
- * 번호 중복은 막지 않고 응답에 번호·원생 정보를 담지 않는다(번호 색인은 학원이 연결할 때 잡음).
+ * 가입 마무리 — 번호가 확인됐으면 자동 연결(2-L L1, 학원 설정·후보 1개·빈 보호자 칸 조건)을 시도하고 클레임을 맞춘다.
+ * 연결된 원생 수는 번호가 확인된 가입에만 알려 준다(번호 확인 없이 원생 정보를 알아내지 못하게).
  */
-export const registerParentGoogleSignup = onCall(SIGNUP_APP_CHECK_OPTIONS, async (request) => {
-  if (!request.auth?.uid) {
-    throw new HttpsError("unauthenticated", "Google 로그인 후 다시 시도해 주세요.");
-  }
-  const uid = request.auth.uid;
-  const displayNameRaw =
-    typeof request.data?.displayName === "string" ? request.data.displayName : "";
-  const displayName = displayNameRaw.trim();
-  const agreeTerms = request.data?.agreeTerms === true;
+async function finishParentSignup(
+  db: admin.firestore.Firestore,
+  academyId: string,
+  uid: string,
+  phoneVerified: boolean,
+): Promise<{ membershipStatus: "pending_approval" | "active"; linkedCount: number }> {
+  const linkedCount = phoneVerified ? (await autoLinkVerifiedParent(db, academyId, uid)).linked.length : 0;
+  const membershipStatus = linkedCount > 0 ? "active" : "pending_approval";
+  await admin.auth().setCustomUserClaims(uid, { role: "parent", academyId, membershipStatus });
+  return { membershipStatus, linkedCount };
+}
 
-  const db = admin.firestore();
-  const { academyId } = await resolveSignupLink(db, request.data?.token, "parent");
+/** 이름·번호·동의·증표(공통 입력 검사) */
+function readParentSignupProfile(data: Record<string, unknown> | undefined) {
+  const displayName = typeof data?.displayName === "string" ? data.displayName.trim() : "";
   if (!displayName) {
     throw new HttpsError("invalid-argument", "이름을 입력해 주세요.");
   }
   if (displayName.length > 60) {
     throw new HttpsError("invalid-argument", "이름은 60자 이하로 입력해 주세요.");
   }
-  const phone = assertKrPhoneRequired(request.data?.phone);
-  if (!agreeTerms) {
-    throw new HttpsError("invalid-argument", "서비스 이용에 동의해 주세요.");
+  const phone = assertKrPhoneRequired(data?.phone);
+  const consents = parseRequiredConsents(data?.consents);
+  const phoneProof = readOptionalPhoneProof(data?.phoneProof);
+  return { displayName, phone, consents, phoneProof };
+}
+
+/**
+ * 인증 — Google 계정으로 학부모 가입 완료(이름·번호 필수, 번호 확인 선택) → 승인 대기.
+ * 번호 중복은 막지 않는다(번호 색인은 학원이 연결할 때 잡음). 응답에 원생 정보를 담지 않는다.
+ */
+export const registerParentGoogleSignup = onCall(ONE_SHOT_APP_CHECK_OPTIONS, async (request) => {
+  assertFreshAppCheck(request);
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "Google 로그인 후 다시 시도해 주세요.");
   }
+  const uid = request.auth.uid;
+  const db = admin.firestore();
+  const { academyId } = await resolveSignupLink(db, request.data?.token, "parent");
+  const { displayName, phone, consents, phoneProof } = readParentSignupProfile(request.data);
+  const proofExpect: PhoneProofExpectation | null = phoneProof
+    ? signupProofExpectation(request.data?.token, "parent_signup", phone)
+    : null;
 
   const existingMember = await db.doc(`academies/${academyId}/parents/${uid}`).get();
   if (existingMember.exists) {
@@ -140,6 +163,7 @@ export const registerParentGoogleSignup = onCall(SIGNUP_APP_CHECK_OPTIONS, async
       );
     }
   }
+  if (phoneProof && proofExpect) await assertPhoneProofUsable(db, phoneProof, proofExpect);
 
   // 입력·중복 검사를 모두 통과한 뒤 계정을 만들기 직전에 한 건을 센다(링크별 시간당 한도)
   await consumeSignupQuota(db, request.data?.token, "parent");
@@ -148,38 +172,47 @@ export const registerParentGoogleSignup = onCall(SIGNUP_APP_CHECK_OPTIONS, async
   const memberRef = db.doc(`academies/${academyId}/parents/${uid}`);
   const googleEmail = loginId;
 
-  const batch = db.batch();
-  batch.set(memberRef, {
-    attnId,
-    loginId,
-    displayName,
-    phone,
-    email: googleEmail,
-    academyId,
-    status: "pending_approval",
-    authUid: uid,
-    authProvider: "google",
-    signupSource: "parent_link_google",
-    linkedStudentIds: [],
-    approvedAt: null,
-    approvedByUid: null,
-    createdAt: FieldValue.serverTimestamp(),
-    updatedAt: FieldValue.serverTimestamp(),
+  const phoneVerified = await db.runTransaction(async (tx) => {
+    const proof = phoneProof && proofExpect ? await readPhoneProofInTx(tx, db, phoneProof, proofExpect) : null;
+    const memberSnap = await tx.get(memberRef);
+    if (memberSnap.exists) {
+      throw new HttpsError("already-exists", "이미 이 학원에 가입된 계정입니다. 로그인해 주세요.");
+    }
+    tx.set(memberRef, {
+      attnId,
+      loginId,
+      displayName,
+      phone,
+      ...(proof ? verifiedPhoneFields(proof.phoneKey) : {}),
+      email: googleEmail,
+      academyId,
+      status: "pending_approval",
+      authUid: uid,
+      authProvider: "google",
+      signupSource: "parent_link_google",
+      linkedStudentIds: [],
+      approvedAt: null,
+      approvedByUid: null,
+      consents,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    tx.set(db.doc(`academies/${academyId}/parents/${uid}/secrets/login`), {
+      authProvider: "google",
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    tx.set(db.doc(attnLoginIndexPath(loginId)), {
+      attnId,
+      loginId,
+      academyId,
+      authUid: uid,
+      role: "parent",
+      authProvider: "google",
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    proof?.markUsed(uid);
+    return proof !== null;
   });
-  batch.set(db.doc(`academies/${academyId}/parents/${uid}/secrets/login`), {
-    authProvider: "google",
-    updatedAt: FieldValue.serverTimestamp(),
-  });
-  batch.set(db.doc(attnLoginIndexPath(loginId)), {
-    attnId,
-    loginId,
-    academyId,
-    authUid: uid,
-    role: "parent",
-    authProvider: "google",
-    createdAt: FieldValue.serverTimestamp(),
-  });
-  await batch.commit();
 
   try {
     await admin.auth().updateUser(uid, { displayName });
@@ -187,51 +220,37 @@ export const registerParentGoogleSignup = onCall(SIGNUP_APP_CHECK_OPTIONS, async
     /* optional */
   }
 
-  await admin.auth().setCustomUserClaims(uid, {
-    role: "parent",
-    academyId,
-    membershipStatus: "pending_approval",
-  });
+  const { membershipStatus, linkedCount } = await finishParentSignup(db, academyId, uid, phoneVerified);
 
   return {
     attnId,
     loginId,
     academyId,
-    membershipStatus: "pending_approval" as const,
+    membershipStatus,
+    phoneVerified,
+    linkedCount,
   };
 });
 
 /**
- * 공개 — 학부모 자가 가입(비밀번호·이름·로그인 ID 직접 설정) → 이메일 인증(OTP) 후 승인 대기.
- * 번호 중복은 막지 않고 응답에 번호·원생 정보를 담지 않는다(인증 없는 함수로 번호 소속을 알아내거나 선점하지 못하게).
+ * 공개 — 학부모 자가 가입(이름·번호·번호 확인(선택)·로그인 ID·비밀번호) → 승인 대기.
+ * 이메일·이메일 인증 코드는 받지 않는다(2-L — 휴대폰 번호 확인으로 대체).
+ * 번호 중복은 막지 않고, 번호 확인이 없으면 응답에 원생 정보를 담지 않는다(인증 없이 번호 소속을 알아내지 못하게).
  */
-export const registerParentSelfSignup = onCall(SIGNUP_APP_CHECK_OPTIONS, async (request) => {
+export const registerParentSelfSignup = onCall(ONE_SHOT_APP_CHECK_OPTIONS, async (request) => {
+  assertFreshAppCheck(request);
   const loginIdRaw =
     typeof request.data?.loginId === "string" ? request.data.loginId : "";
-  const displayNameRaw =
-    typeof request.data?.displayName === "string" ? request.data.displayName : "";
-  const displayName = displayNameRaw.trim();
   const password = typeof request.data?.password === "string" ? request.data.password : "";
-  const agreeTerms = request.data?.agreeTerms === true;
 
   const db = admin.firestore();
   await resolveSignupLink(db, request.data?.token, "parent");
-  if (!displayName) {
-    throw new HttpsError("invalid-argument", "이름을 입력해 주세요.");
-  }
-  if (displayName.length > 60) {
-    throw new HttpsError("invalid-argument", "이름은 60자 이하로 입력해 주세요.");
-  }
-  const phone = assertKrPhoneRequired(request.data?.phone);
-  const contactEmail = assertContactEmail(request.data?.contactEmail);
+  const { displayName, phone, consents, phoneProof } = readParentSignupProfile(request.data);
   if (!password) {
     throw new HttpsError("invalid-argument", "비밀번호를 입력해 주세요.");
   }
   if (password.length < 6) {
     throw new HttpsError("invalid-argument", "비밀번호는 6자 이상이어야 합니다.");
-  }
-  if (!agreeTerms) {
-    throw new HttpsError("invalid-argument", "서비스 이용에 동의해 주세요.");
   }
   if (!loginIdRaw.trim()) {
     throw new HttpsError("invalid-argument", "로그인 ID를 입력해 주세요.");
@@ -239,11 +258,16 @@ export const registerParentSelfSignup = onCall(SIGNUP_APP_CHECK_OPTIONS, async (
   validateParentLoginIdFormat(loginIdRaw);
   const normalizedLoginId = normalizeParentLoginId(loginIdRaw);
   await assertParentLoginIdAvailable(db, normalizedLoginId);
+  const proofExpect: PhoneProofExpectation | null = phoneProof
+    ? signupProofExpectation(request.data?.token, "parent_signup", phone)
+    : null;
+  if (phoneProof && proofExpect) await assertPhoneProofUsable(db, phoneProof, proofExpect);
 
   // 입력 검사를 모두 통과한 뒤 계정을 만들기 직전에 한 건을 센다(링크별 시간당 한도)
   const { academyId } = await consumeSignupQuota(db, request.data?.token, "parent");
 
   const attnId = await allocateParentAttnId(db, academyId, normalizedLoginId);
+  const secretFields = await passwordSecretFields(password);
 
   const email = internalEmailForAttnId(attnId);
   let userRecord: admin.auth.UserRecord;
@@ -265,65 +289,66 @@ export const registerParentSelfSignup = onCall(SIGNUP_APP_CHECK_OPTIONS, async (
 
   const authUid = userRecord.uid;
   const memberRef = db.doc(`academies/${academyId}/parents/${authUid}`);
+  const loginIndexRef = db.doc(attnLoginIndexPath(normalizedLoginId));
 
-  const batch = db.batch();
-  batch.set(memberRef, {
-    attnId,
-    loginId: normalizedLoginId,
-    displayName,
-    phone,
-    email: "",
-    contactEmail,
-    contactEmailVerified: false,
-    academyId,
-    status: "pending_email_verification",
-    authUid,
-    authProvider: "password",
-    linkedStudentIds: [],
-    approvedAt: null,
-    approvedByUid: null,
-    signupSource: "parent_link",
-    createdAt: FieldValue.serverTimestamp(),
-    updatedAt: FieldValue.serverTimestamp(),
-  });
-  batch.set(
-    db.doc(`academies/${academyId}/parents/${authUid}/secrets/login`),
-    { authProvider: "password", ...(await passwordSecretFields(password)) },
-    { merge: true },
-  );
-  batch.set(db.doc(attnLoginIndexPath(normalizedLoginId)), {
-    attnId,
-    loginId: normalizedLoginId,
-    academyId,
-    authUid,
-    role: "parent",
-    authProvider: "password",
-    createdAt: FieldValue.serverTimestamp(),
-  });
-  await batch.commit();
-
-  await admin.auth().setCustomUserClaims(authUid, {
-    role: "parent",
-    academyId,
-    membershipStatus: "pending_email_verification",
-  });
-
+  let phoneVerified: boolean;
   try {
-    await issueEmailVerificationOtpForUid({
-      uid: authUid,
-      email: contactEmail,
-      displayName,
-      purpose: "parent",
+    phoneVerified = await db.runTransaction(async (tx) => {
+      const proof = phoneProof && proofExpect ? await readPhoneProofInTx(tx, db, phoneProof, proofExpect) : null;
+      const loginIndexSnap = await tx.get(loginIndexRef);
+      if (loginIndexSnap.exists) {
+        throw new HttpsError("already-exists", "이미 사용 중인 로그인 ID입니다.");
+      }
+      tx.set(memberRef, {
+        attnId,
+        loginId: normalizedLoginId,
+        displayName,
+        phone,
+        ...(proof ? verifiedPhoneFields(proof.phoneKey) : {}),
+        email: "",
+        academyId,
+        status: "pending_approval",
+        authUid,
+        authProvider: "password",
+        linkedStudentIds: [],
+        approvedAt: null,
+        approvedByUid: null,
+        signupSource: "parent_link",
+        consents,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      tx.set(
+        db.doc(`academies/${academyId}/parents/${authUid}/secrets/login`),
+        { authProvider: "password", ...secretFields },
+        { merge: true },
+      );
+      tx.set(loginIndexRef, {
+        attnId,
+        loginId: normalizedLoginId,
+        academyId,
+        authUid,
+        role: "parent",
+        authProvider: "password",
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      proof?.markUsed(authUid);
+      return proof !== null;
     });
-  } catch {
-    /* 가입은 완료 — 로그인 화면에서 재발송 가능 */
+  } catch (e) {
+    // 계정 문서를 쓰지 못했으면(증표 경합·로그인 ID 경합) 방금 만든 Auth 계정을 되돌린다
+    await admin.auth().deleteUser(authUid).catch(() => undefined);
+    throw e;
   }
+
+  const { membershipStatus, linkedCount } = await finishParentSignup(db, academyId, authUid, phoneVerified);
 
   return {
     attnId,
     loginId: normalizedLoginId,
     academyId,
-    membershipStatus: "pending_email_verification" as const,
-    contactEmail,
+    membershipStatus,
+    phoneVerified,
+    linkedCount,
   };
 });

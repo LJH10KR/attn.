@@ -23,6 +23,7 @@ import { teacherSummary, useClassTeacherCandidates } from "@/lib/academy/use-cla
 import { academyStudentsPath, type AcademyClassStatus } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb, getFirebaseFunctions } from "@/lib/firebase/client-app";
 import { useAcademyListPoll } from "@/lib/firebase/use-academy-list-poll";
+import { useQueryFlag } from "@/lib/ui/use-query-flag";
 
 type StatusFilter = AcademyClassStatus | "all";
 const STATUS_FILTERS: AcademyClassStatus[] = ["active", "preparing", "ended"];
@@ -58,6 +59,8 @@ export function AcademyClassesScreen() {
   const [reorderError, setReorderError] = useState<string | null>(null);
   const [openClassId, setOpenClassId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(null);
+  // 2-M 홈 "시작하기" [반 추가] — `?new=1`이면 만들기 시트를 바로 연다
+  useQueryFlag("new", "1", permissions.can("operations.classes"), () => setForm({ kind: "create" }));
   const [assignClass, setAssignClass] = useState<AcademyClassBrief | null>(null);
   const { items: rooms, save: saveRooms } = useAcademyOptionList(academyId, "rooms");
   const teachers = useClassTeacherCandidates(academyId, permissions.viewer?.uid ?? null);

@@ -1,14 +1,13 @@
 /**
  * 학부모 계정 연결 통합 스모크 — `npm run test:functions` (Auth·Firestore·Functions 에뮬레이터)
- * 자가 가입 → OTP → 승인 대기, 같은 번호 두 계정 가입 허용 → 첫 연결이 번호 색인 → 다른 계정 연결 거부,
+ * 자가 가입(번호 확인 건너뜀) → 승인 대기, 같은 번호 두 계정 가입 허용 → 첫 연결이 번호 색인 → 다른 계정 연결 거부,
  * 연결 → active·parentUids·approvedAt·결제 parentUids, 해제 → pending_approval(approvedAt 유지)·결제에서 빠짐,
  * 직접 만들기 → 첫 로그인 → active, 연결 대기 비밀번호 초기화, 비활성 계정 푸시 제외·자동 전환과 겹쳐도 inactive 유지,
- * 이메일 인증 전·비활성 계정 연결 거부, 연결된 보호자 항목 삭제 거부, 계정 삭제(원생 유지·색인 해제),
+ * 예전 이메일 인증 전 계정·비활성 계정 연결 거부, 연결된 보호자 항목 삭제 거부, 계정 삭제(원생 유지·색인 해제),
  * 학생 삭제 시 결제 parentUids 유지, 권한 없는 직원 거부, 학부모 앱 자녀 반 정보(이름·시간만, 종강 제외),
  * 연결 전부 실패 시 새로 잡은 색인 되돌림(기존 색인·동시 연결 성공 시 유지), 원생 저장 시 보호자 생략 = 변경 없음을 확인한다.
  */
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { initializeApp as initAdmin } from "firebase-admin/app";
 import { getAuth as adminAuth } from "firebase-admin/auth";
 import { getFirestore as adminDb, Timestamp } from "firebase-admin/firestore";
@@ -21,7 +20,7 @@ import {
   signOut,
 } from "firebase/auth";
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from "firebase/functions";
-import { seedSignupToken } from "./_signup-token.mjs";
+import { CONSENTS, seedSignupToken } from "./_signup-token.mjs";
 
 const PROJECT = "demo-attn";
 initAdmin({ projectId: PROJECT });
@@ -75,22 +74,19 @@ async function asParent(loginId, password) {
   return res;
 }
 
-/** 자가 가입 + (에뮬레이터) 인증 코드를 알려진 값으로 바꿔 OTP 확인 */
+/**
+ * 자가 가입(2-L — 이메일 인증 없음, 번호 확인 건너뜀 → 바로 승인 대기). `verify`는 예전 이메일 인증 자리 —
+ * 이제는 학부모로 로그인만 한다(호출 순서를 그대로 두어 아래 시나리오가 같은 상태에서 이어지게).
+ */
 async function selfSignupAndVerify(loginId, displayName, phone) {
   await signOut(auth);
   const res = await call("registerParentSelfSignup", {
-    token: PARENT_TOKEN, loginId, displayName, phone, contactEmail: `${loginId}@mail.dev`, password: "pw123456", agreeTerms: true,
+    token: PARENT_TOKEN, loginId, displayName, phone, password: "pw123456", consents: CONSENTS,
   });
   const index = await db.doc(`attnLoginIndex/${res.loginId}`).get();
   const uid = index.get("authUid");
   return { res, uid, verify: async () => {
-    await db.doc(`emailVerificationOtps/${uid}`).set({
-      codeHash: createHash("sha256").update("123456").digest("hex"),
-      email: `${loginId}@mail.dev`, purpose: "parent", attempts: 0,
-      expiresAt: Timestamp.fromMillis(Date.now() + 10 * 60 * 1000),
-    });
     await asParent(loginId, "pw123456");
-    await call("verifyEmailVerificationOtp", { code: "123456", purpose: "parent" });
   } };
 }
 
@@ -102,19 +98,25 @@ const s2 = (await mk("동생", [{ relationId: "mother", name: "엄마", phone: P
 const s3 = (await mk("다른 집", [{ relationId: "father", phone: "010-6666-7777" }])).studentId;
 await db.doc(`academies/${A}/payments/pay-s1`).set({ studentId: s1, parentUids: [], amount: 100000, status: "PAID", createdAt: Timestamp.now() });
 
-// --- 자가 가입 → 응답에 번호·원생 정보 없음, 이메일 인증 전 ---
+// --- 자가 가입(번호 확인 건너뜀) → 응답에 번호·원생 정보 없음, 바로 승인 대기 ---
 const mom = await selfSignupAndVerify("momseven", "엄마", PHONE);
-assert.deepEqual(Object.keys(mom.res).sort(), ["academyId", "attnId", "contactEmail", "loginId", "membershipStatus"]);
-assert.equal(mom.res.membershipStatus, "pending_email_verification");
+assert.deepEqual(Object.keys(mom.res).sort(), ["academyId", "attnId", "linkedCount", "loginId", "membershipStatus", "phoneVerified"]);
+assert.equal(mom.res.membershipStatus, "pending_approval");
+assert.equal(mom.res.phoneVerified, false);
 let momSnap = await parentDoc(mom.uid);
 assert.equal(momSnap.get("approvedAt"), null, "생성 때 approvedAt null 명시");
 assert.equal(momSnap.get("childrenCount"), undefined);
+assert.equal(momSnap.get("contactEmail"), undefined, "이메일은 받지 않음");
+assert.equal(momSnap.get("phoneVerifiedKey"), undefined, "번호 확인 없이 가입");
+assert.equal(momSnap.get("consents").terms.version, CONSENTS.terms, "동의 기록");
 
-// 이메일 인증 전 계정은 연결 대상이 될 수 없다
+// 2-L 이전 이메일 인증 가입의 남은 계정은 연결 대상이 될 수 없다
 await asOwner();
-await assert.rejects(call("linkParentToStudents", { academyId: A, parentUid: mom.uid, studentIds: [s1] }), /이메일 인증/);
+await db.doc(`academies/${A}/parents/${mom.uid}`).update({ status: "pending_email_verification" });
+await assert.rejects(call("linkParentToStudents", { academyId: A, parentUid: mom.uid, studentIds: [s1] }), /예전 계정/);
+await db.doc(`academies/${A}/parents/${mom.uid}`).update({ status: "pending_approval" });
 
-// OTP → 연결 0명이라 승인 대기
+// 로그인 → 연결 0명이라 승인 대기
 await mom.verify();
 assert.equal((await parentDoc(mom.uid)).get("status"), "pending_approval");
 assert.equal((await adminAuth().getUser(mom.uid)).customClaims.membershipStatus, "pending_approval");

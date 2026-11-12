@@ -25,9 +25,6 @@ export function activationPathFromState(
   if (role === "parent" && state.primaryStatus === "pending_approval") {
     return "/parent";
   }
-  if (state.primaryStatus === "pending_email_verification") {
-    return `/login/${role}`;
-  }
   const q = new URLSearchParams();
   q.set("state", state.primaryStatus);
   if (state.primaryAcademyId) q.set("academyId", state.primaryAcademyId);
