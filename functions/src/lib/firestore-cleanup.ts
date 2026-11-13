@@ -213,7 +213,7 @@ export async function purgeUserFirestoreData(
 const STUDENT_SUBCOLLECTIONS = ["attendanceRecords", "tuitionInvoices", "sessionLogs"] as const;
 
 /**
- * 학생 문서 + serverSecrets + 하위 기록 + 학원 메모(studentNotes) + 반 출결(`attendance`, 2-I) 삭제.
+ * 학생 문서 + serverSecrets + 하위 기록 + 학원 메모(studentNotes) + 반 출결(`attendance`, 2-I)·정정 이력(3-A) 삭제.
  * 학원 전체 삭제는 반 출결 컬렉션을 따로 한 번에 지우므로 `classAttendance: "skip"`.
  */
 export async function deleteStudentDocs(
@@ -225,11 +225,14 @@ export async function deleteStudentDocs(
   const refs: DocumentReference[] = [];
   for (const studentId of studentIds) {
     if (opts.classAttendance === "per_student") {
-      const att = await db
-        .collection(`academies/${academyId}/attendance`)
-        .where("studentId", "==", studentId)
-        .get();
-      refs.push(...att.docs.map((d) => d.ref));
+      // 반 출결(2-I)·출결 정정 이력(3-A B6) — 학원 전체 삭제는 recursiveDelete가 함께 지운다
+      for (const col of ["attendance", "attendanceCorrections"] as const) {
+        const snap = await db
+          .collection(`academies/${academyId}/${col}`)
+          .where("studentId", "==", studentId)
+          .get();
+        refs.push(...snap.docs.map((d) => d.ref));
+      }
     }
     refs.push(db.doc(`academies/${academyId}/studentNotes/${studentId}`));
     for (const sub of STUDENT_SUBCOLLECTIONS) {

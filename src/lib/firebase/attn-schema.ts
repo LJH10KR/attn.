@@ -541,8 +541,9 @@ export function isAbsenceReason(raw: unknown): raw is AbsenceReason {
  * **등원 기록**(2-I) `academies/{academyId}/students/{studentId}/attendanceRecords/{YYYY-MM-DD}` — 학생·날짜당 1건,
  * present = 등원, absent = 미등원(사유 있는 미등원은 월정액 차감 근거).
  * 쓰기는 Functions(`recordStudentArrival`, `submitKioskCheckIn`, `recordStudentAbsences`,
- * `deleteStudentAttendanceRecord`, 예전 `sendStudentAttendanceNotification`)만,
- * 읽기는 출결·청구서 권한과 담당 선생님(학생 `teacherUids`).
+ * `deleteStudentAttendanceRecord`, 3-A `correctStudentArrival`·`updateAttendanceDetails`·`recordAttendanceBatch`)만,
+ * 읽기는 출결·청구서 권한과 담당 선생님(학생 `teacherUids`). 날짜별 학원 전체 목록은 컬렉션 그룹(`academyId ==`·`date ==`,
+ * 출결·청구서 권한만, 3-A).
  */
 export type AttendanceRecordDoc = {
   /** 서울 기준 날짜 — 문서 ID와 동일 */

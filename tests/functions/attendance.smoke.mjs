@@ -3,7 +3,7 @@
  * 권한(원장·출결 직원·그 반 선생님·다른 반 선생님·반 관리만 직원), 반 출결 조건별 오류, 상태 전환(같은 상태 = 그대로),
  * 등원→미등원은 반 출결 0건일 때만, 기간 결석·기록 삭제 거부(반 출결 있는 날), via 허용 목록,
  * 키오스크 재체크인, 하루 10회 제한, 등원 키 공유(기간 결석 60초 쿨다운과 서로 막지 않음, B5),
- * 예전 sendStudentAttendanceNotification 호환(B3), 월정액 결석 차감 회귀 + 차감 잠금(★8·B2),
+ * 상태 전환 시 사유·메모·등원 시각(3-A ★3·B3), 오늘 날짜 확인(3-A B1), 월정액 결석 차감 회귀 + 차감 잠금(★8·B2),
  * 알림 문서 context·className·벨 문구, 알림 기록 응답, saveClass 요일당 1칸, 학생 삭제 시 반 출결 삭제를 확인한다.
  */
 import assert from "node:assert/strict";
@@ -25,6 +25,9 @@ const TODAY = now.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
 const WD = SEOUL_WEEKDAY[new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Seoul", weekday: "short" }).format(now)];
 const OTHER_WD = (WD % 7) + 1;
 const TOMORROW = new Date(Date.parse(`${TODAY}T12:00:00+09:00`) + 86400000).toLocaleDateString("en-CA", {
+  timeZone: "Asia/Seoul",
+});
+const YESTERDAY = new Date(Date.parse(`${TODAY}T12:00:00+09:00`) - 86400000).toLocaleDateString("en-CA", {
   timeZone: "Asia/Seoul",
 });
 const DAY_AFTER = new Date(Date.parse(`${TODAY}T12:00:00+09:00`) + 2 * 86400000).toLocaleDateString("en-CA", {
@@ -275,22 +278,48 @@ await call("recordStudentArrival", { ...arrival("s5"), status: "present" }).catc
 if ((await arrivalDoc("s5")).status !== "present") throw new Error("s5 등원 상태여야 함");
 assert.notEqual((await call("recordClassAttendance", { ...klass("cA", "s5"), status: "present" })).notification.reason, "daily_limit");
 
-// --- 예전 호출 호환(B3) ---
+// --- 3-A ★3·B3: 상태가 바뀌어도 메모는 유지, 등원이면 사유 지움, 미등원이면 사유 기타 + 등원 시각 지움 ---
 await as(tA);
-const legacy1 = await call("sendStudentAttendanceNotification", { ...arrival("s6"), kind: "absent" });
-assert.equal(legacy1.ok, true);
-assert.notEqual(legacy1.reason, "unchanged");
-assert.equal((await arrivalDoc("s6")).status, "absent");
-assert.equal((await arrivalDoc("s6")).via, "legacy");
-assert.equal((await call("sendStudentAttendanceNotification", { ...arrival("s6"), kind: "absent" })).reason, "unchanged");
-const legacy2 = await call("sendStudentAttendanceNotification", { ...arrival("s6"), kind: "present" });
-assert.notEqual(legacy2.reason, "unchanged");
+await call("recordStudentArrival", { ...arrival("s6"), status: "absent" });
+await db.doc(`academies/${A}/students/s6/attendanceRecords/${TODAY}`).update({ note: "감기 기운" });
+await call("recordStudentArrival", { ...arrival("s6"), status: "present" });
+let s6 = await arrivalDoc("s6");
+assert.equal(s6.status, "present");
+assert.equal(s6.note, "감기 기운", "메모 유지");
+assert.equal(s6.reason, undefined, "등원이면 사유 없음");
+assert.ok(s6.arrivedAt, "등원 시각");
+await db.doc(`academies/${A}/students/s6/attendanceRecords/${TODAY}`).update({ arrivedAtManual: true });
+await call("recordStudentArrival", { ...arrival("s6"), status: "absent" });
+s6 = await arrivalDoc("s6");
+assert.equal(s6.reason, "general");
+assert.equal(s6.note, "감기 기운");
+assert.equal(s6.arrivedAt, undefined, "B3 미등원이면 등원 시각 지움");
+assert.equal(s6.arrivedAtManual, undefined);
+assert.ok(s6.createdAt, "처음 만든 시각 유지");
+await call("recordStudentArrival", { ...arrival("s6"), status: "present" });
 assert.match((await lastBell("s6")).body, /^S6 학생이 안전하게 등원하였습니다\./);
-assert.equal((await call("sendStudentAttendanceNotification", { ...arrival("s6"), kind: "present" })).reason, "unchanged");
+
+// --- 3-A B1: 오늘 기록 함수에 오늘이 아닌 날짜 → 거부, 오늘 날짜 → 통과 ---
 await assert.rejects(
-  call("sendStudentAttendanceNotification", { ...arrival("s6"), kind: "absent" }),
-  /이미 등원한 학생입니다/,
+  call("recordStudentArrival", { ...arrival("s6"), status: "present", date: YESTERDAY }),
+  /오늘 기록만 처리할 수 있습니다\. 화면을 새로고침해 주세요\./,
 );
+await assert.rejects(
+  call("recordClassAttendance", { ...klass("cA", "s6"), status: "present", date: YESTERDAY }),
+  /오늘 기록만 처리할 수 있습니다/,
+);
+await assert.rejects(call("recordStudentArrival", { ...arrival("s6"), status: "present", date: "11-05" }), /요청이 올바르지 않습니다/);
+assert.equal((await call("recordStudentArrival", { ...arrival("s6"), status: "present", date: TODAY })).changed, false);
+// 반 출결 ★3: 결석 사유 기타 → 출석이면 사유 지움, 코멘트 유지
+await call("recordClassAttendance", { ...klass("cA", "s6"), status: "absent", date: TODAY });
+const s6ClassRef = db.doc(`academies/${A}/attendance/${TODAY}_cA_s6`);
+assert.equal((await s6ClassRef.get()).get("reason"), "general");
+await s6ClassRef.update({ comment: "조퇴" });
+await call("recordClassAttendance", { ...klass("cA", "s6"), status: "present", via: "attendance_screen" });
+assert.equal((await s6ClassRef.get()).get("reason"), undefined);
+assert.equal((await s6ClassRef.get()).get("comment"), "조퇴");
+assert.equal((await s6ClassRef.get()).get("via"), "attendance_screen");
+await call("cancelClassAttendance", { ...klass("cA", "s6"), date: TODAY, via: "attendance_screen" });
 assert.equal((await arrivalDoc("s6")).status, "present");
 
 // --- 월정액 결석 차감 회귀 + 차감 잠금(★8·B2) ---

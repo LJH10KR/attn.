@@ -222,6 +222,7 @@ export function StudentDetailSheet({
         studentId: student.id,
         status: "present",
         via: "student_detail",
+        date: today.date,
       });
       showNotice(attendanceActionMessage("등원", res.data as AttendanceActionResult));
     } catch (e) {

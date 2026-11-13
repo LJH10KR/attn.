@@ -5,6 +5,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
 import { useAcademyShell } from "@/components/academy/academy-shell";
 import {
+  AttendanceCancelDialog,
+  type AttendanceCancelTarget,
+} from "@/components/academy/attendance/attendance-cancel-dialog";
+import {
   StudentDetailSheet,
   STUDENT_STATUS_BADGE_CLASS,
 } from "@/components/academy/student-detail/student-detail-sheet";
@@ -33,7 +37,10 @@ import {
 } from "@/lib/academy/student-profile";
 import { useAcademyClasses, type AcademyClassBrief } from "@/lib/academy/use-academy-classes";
 import { useAcademyOptionList } from "@/lib/academy/use-academy-option-list";
+import { arrivalSummary } from "@/lib/academy/attendance-labels";
 import { useAttendanceActions } from "@/lib/academy/use-attendance-actions";
+import { useSeoulToday } from "@/lib/academy/use-class-today-attendance";
+import { useDayArrivals, useDayClassRecords } from "@/lib/academy/use-day-attendance";
 import { useStudentAccess } from "@/lib/academy/use-student-access";
 import { academyStudentsPath, type AcademyOptionItem } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
@@ -153,7 +160,13 @@ export function AcademyStudentsScreen() {
 
   const showNotice = useCallback((message: string) => setNotice(message), []);
 
-  // 등원·미등원(2-I ★1) — 오늘 상태는 읽지 않고, 누른 결과만 그 카드에 잠깐 보여 준다
+  // 3-A A10 — 출결·청구서 권한이면 오늘 등원 상태(컬렉션 그룹 1번)와 그날 반 출결(등원 취소 미리 확인)을 구독.
+  // 권한이 없으면 지금처럼 읽지 않고 누른 결과만 그 카드에 잠깐 보여 준다(2-I ★1).
+  const today = useSeoulToday();
+  const canSeeToday = permissions.can(["lessons.attendance", "billing.invoices"]);
+  const todayArrivals = useDayArrivals(academyId, today.date, canSeeToday);
+  const todayRecords = useDayClassRecords(academyId, today.date, canSeeToday);
+  const [cancelTarget, setCancelTarget] = useState<AttendanceCancelTarget | null>(null);
   const [cardResults, setCardResults] = useState<Record<string, { text: string; ok: boolean }>>({});
   const resultTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const onArrivalDone = useCallback((text: string, ok: boolean, studentId: string) => {
@@ -416,7 +429,7 @@ export function AcademyStudentsScreen() {
                     ) : null}
                   </div>
                 </button>
-                {markable ? (
+                {markable || canSeeToday ? (
                   <div className="flex items-center gap-2 border-t border-neutral-200/60 px-4 py-2">
                     <span
                       className={`min-w-0 flex-1 break-keep text-[11px] leading-snug ${
@@ -425,20 +438,51 @@ export function AcademyStudentsScreen() {
                       role={result ? "status" : undefined}
                       title={result?.text}
                     >
-                      {result ? result.text : active ? "오늘 등원" : "재원 아님"}
+                      {result
+                        ? result.text
+                        : canSeeToday
+                          ? `오늘 ${arrivalSummary(todayArrivals.loaded ? todayArrivals.data.get(s.id) ?? null : todayArrivals.error ? null : undefined)}`
+                          : active
+                            ? "오늘 등원"
+                            : "재원 아님"}
                     </span>
-                    {(["present", "absent"] as const).map((status) => (
+                    {markable ? (["present", "absent"] as const).map((status) => {
+                      const cur = canSeeToday && todayArrivals.loaded ? todayArrivals.data.get(s.id) ?? null : undefined;
+                      const selected = cur?.status === status;
+                      return (
                       <button
                         key={status}
                         type="button"
-                        disabled={!active || attendance.busyKey !== null}
-                        onClick={() => void attendance.markArrival(s.id, status, "student_list")}
+                        aria-pressed={selected}
+                        // 선택된 버튼은 재원 여부와 상관없이 눌러 취소할 수 있다(2-J ★8과 같음)
+                        disabled={(!active && !selected) || attendance.busyKey !== null}
+                        onClick={() => {
+                          if (selected && cur) {
+                            setCancelTarget({
+                              kind: "arrival",
+                              studentId: s.id,
+                              studentName: s.name,
+                              status: cur.status,
+                              reason: cur.reason,
+                              billed: cur.billed,
+                              knownClassRecords: todayRecords.data
+                                .filter((r) => r.studentId === s.id)
+                                .map((r) => ({ className: r.className, status: r.status })),
+                            });
+                            return;
+                          }
+                          void attendance.markArrival(s.id, status, "student_list", today.date);
+                        }}
                         className={`shrink-0 rounded-[8px] border px-2.5 py-1.5 text-[11px] font-medium disabled:cursor-not-allowed ${
-                          !active
+                          !active && !selected
                             ? "border-neutral-300/60 bg-neutral-100/60 text-neutral-400"
-                            : status === "present"
-                              ? "border-emerald-400/60 bg-emerald-500/15 text-emerald-950 hover:bg-emerald-500/25 disabled:opacity-50"
-                              : "border-neutral-400/60 bg-white/60 text-neutral-800 hover:bg-white disabled:opacity-50"
+                            : selected
+                              ? status === "present"
+                                ? "border-emerald-600 bg-emerald-600 text-white disabled:opacity-50"
+                                : "border-neutral-700 bg-neutral-700 text-white disabled:opacity-50"
+                              : status === "present"
+                                ? "border-emerald-400/60 bg-emerald-500/15 text-emerald-950 hover:bg-emerald-500/25 disabled:opacity-50"
+                                : "border-neutral-400/60 bg-white/60 text-neutral-800 hover:bg-white disabled:opacity-50"
                         }`}
                       >
                         {attendance.busyKey === `${s.id}:arrival:${status}`
@@ -447,7 +491,8 @@ export function AcademyStudentsScreen() {
                             ? "등원"
                             : "미등원"}
                       </button>
-                    ))}
+                      );
+                    }) : null}
                   </div>
                 ) : null}
               </li>
@@ -456,6 +501,23 @@ export function AcademyStudentsScreen() {
         )}
       </ul>
 
+      {cancelTarget ? (
+        <AttendanceCancelDialog
+          target={cancelTarget}
+          onConfirmAction={() =>
+            cancelTarget.kind === "arrival"
+              ? attendance.cancelArrival({
+                  studentId: cancelTarget.studentId,
+                  status: cancelTarget.status,
+                  date: today.date,
+                  via: "student_list",
+                  studentName: cancelTarget.studentName,
+                })
+              : Promise.resolve(null)
+          }
+          onCloseAction={() => setCancelTarget(null)}
+        />
+      ) : null}
       {detail.studentId ? (
         <StudentDetailSheet
           key={detail.studentId}

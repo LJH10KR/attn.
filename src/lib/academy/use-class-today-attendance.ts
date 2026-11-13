@@ -1,5 +1,6 @@
 "use client";
 
+import { FirebaseError } from "firebase/app";
 import { collection, doc, onSnapshot, query, where } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 import { seoulDateString, seoulWeekday, type ArrivalSnapshot } from "@/lib/academy/attendance-rules";
@@ -52,6 +53,32 @@ export type ClassTodayAttendance = {
 const LOAD_ERROR = "출결 상태를 불러오지 못했습니다. 화면을 새로고침해 주세요.";
 
 /**
+ * 3-A B2 — 반에서 빠진 선생님은 그 반 출결·학생 등원 구독이 permission-denied를 받는다. 목록 갱신(반·학생이 사라져
+ * 이 구독이 끝남)과 오류의 도착 순서가 정해져 있지 않으므로, 권한 오류는 잠시 기다렸다가 그때도 구독이 살아 있을 때만
+ * 보여 준다(사라질 반·학생이면 cleanup이 타이머를 지워 조용히 정리). 그 밖의 오류는 바로 보여 준다.
+ */
+const PERMISSION_ERROR_GRACE_MS = 2500;
+
+function deferredErrorReporter(report: () => void): { onError: (e: unknown) => void; dispose: () => void } {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let disposed = false;
+  return {
+    onError: (e) => {
+      if (disposed) return;
+      if (e instanceof FirebaseError && e.code === "permission-denied") {
+        if (!timer) timer = setTimeout(() => !disposed && report(), PERMISSION_ERROR_GRACE_MS);
+        return;
+      }
+      report();
+    },
+    dispose: () => {
+      disposed = true;
+      if (timer) clearTimeout(timer);
+    },
+  };
+}
+
+/**
  * 반 하나의 오늘 출결 실시간 구독(2-I) — 학생별 등원 문서 + 반 출결 `classId == && date ==` 목록.
  * **읽기 권한이 있을 때만 켠다(B1)**: `enabled`는 `studentAccess.readClassAttendance(cls)`,
  * `arrivalStudentIds`는 등원 기록을 읽을 수 있는 학생만(출결·청구서 권한이면 모두, 아니면 학생 teacherUids에 본인).
@@ -76,16 +103,20 @@ export function useClassTodayAttendance(params: {
     setError(null);
     if (!enabled || !idsKey) return;
     const db = getFirebaseDb();
+    const errors = deferredErrorReporter(() => setError(LOAD_ERROR));
     const unsubs = idsKey.split("|").map((studentId) =>
       onSnapshot(
         doc(db, academyStudentAttendanceRecordsPath(academyId, studentId), date),
         (snap) => {
           setArrivals((prev) => new Map(prev).set(studentId, toTodayArrival(snap)));
         },
-        () => setError(LOAD_ERROR),
+        errors.onError,
       ),
     );
-    return () => unsubs.forEach((u) => u());
+    return () => {
+      errors.dispose();
+      unsubs.forEach((u) => u());
+    };
   }, [academyId, date, enabled, idsKey]);
 
   useEffect(() => {
@@ -97,7 +128,8 @@ export function useClassTodayAttendance(params: {
       where("classId", "==", classId),
       where("date", "==", date),
     );
-    return onSnapshot(
+    const errors = deferredErrorReporter(() => setError(LOAD_ERROR));
+    const unsub = onSnapshot(
       q,
       (snap) => {
         const next = new Map<string, "present" | "absent">();
@@ -108,8 +140,12 @@ export function useClassTodayAttendance(params: {
         setRecords(next);
         setRecordsLoaded(true);
       },
-      () => setError(LOAD_ERROR),
+      errors.onError,
     );
+    return () => {
+      errors.dispose();
+      unsub();
+    };
   }, [academyId, classId, date, enabled]);
 
   return { arrivals, records, recordsLoaded, error };

@@ -121,7 +121,7 @@ export function ClassDetailSheet({
     }
     if (action.kind !== "class") return;
     setNotice(null);
-    void markClass(cls.id, cls.name, s.id, action.status, "class_detail", s.name);
+    void markClass(cls.id, cls.name, s.id, action.status, "class_detail", today.date, s.name);
   };
 
   useEffect(() => {

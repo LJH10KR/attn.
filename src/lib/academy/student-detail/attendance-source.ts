@@ -25,6 +25,8 @@ export type StudentAttendanceRow = {
   billedInvoicePeriod: string | null;
   /** 등원 시각(2-I 이후 기록만) */
   arrivedAtMs: number | null;
+  /** 3-A 지난 날짜 정정·사유 바꾸기를 거친 기록 */
+  corrected: boolean;
 };
 
 /** 반 출결 한 건 */
@@ -34,6 +36,10 @@ export type StudentClassAttendanceRow = {
   className: string;
   status: "present" | "absent";
   slots: { start: string; end: string }[];
+  /** 3-A 수업 결석 사유·코멘트·정정 표시 */
+  reason: AbsenceReason | null;
+  comment: string;
+  corrected: boolean;
 };
 
 /** `from`~`to`(YYYY-MM-DD, 양 끝 포함) 기록, 최근 날짜부터 */
@@ -61,6 +67,7 @@ export async function loadStudentAttendance(
       billedInvoicePeriod:
         typeof x.billedInvoicePeriod === "string" && x.billedInvoicePeriod ? x.billedInvoicePeriod : null,
       arrivedAtMs: x.arrivedAt && typeof x.arrivedAt.toMillis === "function" ? x.arrivedAt.toMillis() : null,
+      corrected: x.correctedAt != null,
     };
   });
 }
@@ -95,6 +102,9 @@ export async function loadStudentClassAttendance(
         className: typeof x.className === "string" && x.className ? x.className : "반",
         status: x.status === "absent" ? ("absent" as const) : ("present" as const),
         slots,
+        reason: isAbsenceReason(x.reason) ? x.reason : null,
+        comment: typeof x.comment === "string" ? x.comment : "",
+        corrected: x.correctedAt != null,
       };
     })
     .sort((a, b) => b.date.localeCompare(a.date) || a.className.localeCompare(b.className, "ko"));

@@ -4,6 +4,7 @@ import { FirebaseError } from "firebase/app";
 import { httpsCallable } from "firebase/functions";
 import { useCallback, useEffect, useState } from "react";
 import { AbsenceRecordModal } from "@/components/academy/absence-record-modal";
+import { AttendanceReasonSheet } from "@/components/academy/attendance/attendance-reason-sheet";
 import { formatRecordDate, seoulDateString } from "@/lib/academy/attendance-records";
 import {
   loadStudentAttendance,
@@ -218,6 +219,7 @@ export function StudentAttendanceTab({
                             </span>
                           ) : null}
                           <span className="text-[10px] text-neutral-500">{roleLabel(r.recordedByRole)}</span>
+                          {r.corrected ? <span className="text-[10px] text-sky-800">정정됨</span> : null}
                         </>
                       ) : (
                         <span className="text-[10px] text-neutral-500">등원 기록 없음</span>
@@ -228,7 +230,15 @@ export function StudentAttendanceTab({
                   {canRecord && r ? (
                     <div className="flex shrink-0 gap-1.5">
                       {r.billedInvoicePeriod ? (
-                        <span className="text-[10px] text-neutral-500">수정 잠금</span>
+                        <>
+                          {/* 3-A ★4: 차감 잠금 날도 메모는 저장 가능(사유는 시트에서 잠김) */}
+                          {r.status === "absent" ? (
+                            <button type="button" className={smallBtn} onClick={() => setEditTarget(r)}>
+                              메모
+                            </button>
+                          ) : null}
+                          <span className="self-center text-[10px] text-neutral-500">수정 잠금</span>
+                        </>
                       ) : confirming ? (
                         <>
                           <button
@@ -279,7 +289,8 @@ export function StudentAttendanceTab({
                 {classesOfDay.length > 0 ? (
                   <ul className="mt-1.5 space-y-1 border-t border-neutral-200/60 pt-1.5">
                     {classesOfDay.map((c) => (
-                      <li key={c.classId} className="flex items-center gap-1.5 text-[11px]">
+                      <li key={c.classId} className="text-[11px]">
+                        <div className="flex items-center gap-1.5">
                         <span className="min-w-0 truncate text-neutral-700">{c.className}</span>
                         {c.slots.length > 0 ? (
                           <span className="shrink-0 text-[10px] text-neutral-400">
@@ -293,8 +304,11 @@ export function StudentAttendanceTab({
                               : "bg-amber-500/20 text-amber-950"
                           }`}
                         >
-                          {c.status === "present" ? "출석" : "결석"}
+                          {c.status === "present" ? "출석" : c.reason && c.reason !== "general" ? `결석(${ABSENCE_REASON_LABELS[c.reason]})` : "결석"}
                         </span>
+                        {c.corrected ? <span className="shrink-0 text-[10px] text-sky-800">정정됨</span> : null}
+                        </div>
+                        {c.comment ? <p className="truncate pl-1 text-[10px] text-neutral-500">💬 {c.comment}</p> : null}
                       </li>
                     ))}
                   </ul>
@@ -306,15 +320,17 @@ export function StudentAttendanceTab({
       )}
 
       {editTarget ? (
-        <AbsenceRecordModal
+        // 3-A ★8: 기간 결석 창으로 다시 쓰지 않고 기록을 유지한 채 사유·메모만(updateAttendanceDetails)
+        <AttendanceReasonSheet
           academyId={academyId}
           studentId={studentId}
           studentName={studentName}
-          initialDate={editTarget.date}
-          initialReason={editTarget.reason ?? "general"}
-          initialNote={editTarget.note}
-          onClose={() => setEditTarget(null)}
-          onSaved={(message) => {
+          date={editTarget.date}
+          reason={editTarget.reason}
+          note={editTarget.note}
+          billed={Boolean(editTarget.billedInvoicePeriod)}
+          onCloseAction={() => setEditTarget(null)}
+          onSavedAction={(message) => {
             setEditTarget(null);
             onNoticeAction(message);
             void fetchRows();

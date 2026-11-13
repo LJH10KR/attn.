@@ -36,7 +36,6 @@ export { deleteOwnerAcademy } from "./academy-delete";
 export { getAccountWithdrawalInfo, withdrawAccount } from "./account-withdrawal";
 export { adminOrphanData } from "./admin-orphan-data";
 export {
-  sendStudentAttendanceNotification,
   syncParentPushSubscription,
   listAttendanceNotifications,
 } from "./push";
@@ -51,6 +50,13 @@ export {
   cancelClassAttendance,
   cancelStudentArrival,
 } from "./attendance";
+// 3-A 지난 날짜 정정·사유와 코멘트·일괄 처리
+export {
+  correctStudentArrival,
+  correctClassAttendance,
+  updateAttendanceDetails,
+} from "./attendance-correct";
+export { recordAttendanceBatch } from "./attendance-batch";
 export {
   addTuitionInvoiceAdjustment,
   applyAbsenceDeduction,
