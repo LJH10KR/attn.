@@ -172,10 +172,10 @@ const myClasses = await getDocs(
   query(collection(clientDb, `academies/${A}/classes`), where("teacherUids", "array-contains", t1.uid)),
 );
 assert.deepEqual(myClasses.docs.map((d) => d.id), [cA], "내 반 쿼리");
-const notify = await call("sendStudentAttendanceNotification", { academyId: A, studentId: s2, kind: "present" });
-assert.equal(notify.reason, "no_parent", "담당 반 학생은 보낼 수 있음(보호자 없음)");
+const notify = await call("recordStudentArrival", { academyId: A, studentId: s2, status: "present" });
+assert.equal(notify.notification.reason, "no_parent", "담당 반 학생은 등원 처리할 수 있음(보호자 없음)");
 await assert.rejects(
-  call("sendStudentAttendanceNotification", { academyId: A, studentId: s4, kind: "present" }),
+  call("recordStudentArrival", { academyId: A, studentId: s4, status: "present" }),
   /담당 반 학생만/,
 );
 

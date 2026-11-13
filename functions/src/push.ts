@@ -2,12 +2,6 @@ import * as crypto from "node:crypto";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import {
-  assertArrivalAccess,
-  sendArrivalNotification,
-  writeArrival,
-} from "./attendance";
-import { seoulDateString } from "./lib/attendance-rules";
 import { pruneStalePushSubscriptions } from "./push-subscription-delivery";
 import { actorHasPermission, resolveAcademyActor } from "./lib/academy-access";
 import { readUidList } from "./lib/parent-recipients";
@@ -113,45 +107,6 @@ async function syncParentPushSummary(
   }
   await batch.commit();
 }
-
-/**
- * **예전 PWA 호환용(2-I) — 3단계 배포 때 삭제.** 2-I 이전 화면(선생님 출석·결석 버튼, 학생 상세 "출석 알림")이
- * 캐시된 채로 부를 수 있어 남긴다. 새 화면은 `recordStudentArrival`·`recordClassAttendance`를 쓴다.
- * - present → 등원(같은 상태면 그대로, 응답 reason "unchanged")
- * - absent → "기록 없음 → 미등원"만. 이미 등원한 날은 거부(예전 버튼의 결석 = 수업 결석이었음, B3)
- * 응답 형식은 예전 그대로 `{ ok, sent, reason? }`.
- */
-export const sendStudentAttendanceNotification = onCall(async (request) => {
-  if (!request.auth?.uid) {
-    throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
-  }
-  const academyId =
-    typeof request.data?.academyId === "string" ? request.data.academyId.trim() : "";
-  const studentId =
-    typeof request.data?.studentId === "string" ? request.data.studentId.trim() : "";
-  const kindRaw = request.data?.kind;
-  const kind = kindRaw === "absent" ? "absent" : kindRaw === "present" ? "present" : "";
-  if (!academyId || !studentId || academyId.includes("/") || studentId.includes("/") || !kind) {
-    throw new HttpsError("invalid-argument", "요청이 올바르지 않습니다.");
-  }
-
-  const db = admin.firestore();
-  const { studentData, sender } = await assertArrivalAccess(db, academyId, studentId, request.auth.uid);
-  const date = seoulDateString();
-  const result = await writeArrival(db, {
-    academyId,
-    studentId,
-    status: kind,
-    sender,
-    via: "legacy",
-    mode: "legacy",
-    date,
-  });
-  if (!result.changed) {
-    return { ok: true as const, sent: 0, reason: "unchanged" as const };
-  }
-  return sendArrivalNotification(db, { academyId, studentId, status: kind, sender, studentData, date });
-});
 
 function clampInt(raw: unknown, fallback: number, min: number, max: number): number {
   const n = typeof raw === "number" ? raw : Number(raw);

@@ -16,13 +16,14 @@ import {
 } from "@/lib/academy/attendance-rules";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
 
-export type ArrivalVia = "teacher_my_classes" | "student_list" | "student_detail" | "class_detail";
-export type ClassVia = "teacher_my_classes" | "class_detail";
-/** 등원 취소 경로(2-J) */
-export type ArrivalCancelVia = "teacher_my_classes" | "student_detail";
+export type ArrivalVia = "teacher_my_classes" | "student_list" | "student_detail" | "class_detail" | "attendance_screen";
+export type ClassVia = "teacher_my_classes" | "class_detail" | "attendance_screen";
+/** 등원 취소 경로(2-J, 3-A: 원생 카드·원장 출결 화면) */
+export type ArrivalCancelVia = "teacher_my_classes" | "student_detail" | "student_list" | "attendance_screen";
 
 /**
  * 등원·반 출결 버튼 호출(2-I) — 한 번에 하나만 처리, 결과는 `onDone(message, ok, result)`로 화면에 넘긴다.
+ * 3-A B1: 기록 함수에 항상 화면 날짜(`date`)를 보낸다 — 화면이 자정을 넘긴 채 열려 있으면 서버가 거부(새로고침 안내).
  * `busyKey`: `${studentId}:${classId|"arrival"}:${status|"arrive"|"cancel"}`
  */
 export function useAttendanceActions(
@@ -32,7 +33,7 @@ export function useAttendanceActions(
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
   const markArrival = useCallback(
-    async (studentId: string, status: AttendanceStatus, via: ArrivalVia, studentName?: string) => {
+    async (studentId: string, status: AttendanceStatus, via: ArrivalVia, date: string, studentName?: string) => {
       if (!academyId) return;
       setBusyKey(`${studentId}:arrival:${status}`);
       const label = ARRIVAL_STATUS_LABELS[status];
@@ -43,6 +44,7 @@ export function useAttendanceActions(
           studentId,
           status,
           via,
+          date,
         });
         const data = res.data as AttendanceActionResult;
         onDone(`${who}${attendanceActionMessage(label, data)}`, true, studentId, data);
@@ -62,6 +64,7 @@ export function useAttendanceActions(
       studentId: string,
       status: AttendanceStatus,
       via: ClassVia,
+      date: string,
       studentName?: string,
     ) => {
       if (!academyId) return;
@@ -75,6 +78,7 @@ export function useAttendanceActions(
           studentId,
           status,
           via,
+          date,
         });
         const data = res.data as AttendanceActionResult;
         onDone(`${who}${attendanceActionMessage(label, data)}`, true, studentId, data);

@@ -367,6 +367,15 @@ service cloud.firestore {
       }
 
       /**
+       * 출결 정정 이력(3-A) — 지난 날짜 정정·사유와 코멘트 바꾸기(누가·언제·전→후).
+       * 쓰기는 Functions(`attendance-correct.ts` 등)만, 읽기는 출결 권한(원장 포함).
+       */
+      match /attendanceCorrections/{correctionId} {
+        allow read: if isAdmin() || hasPermission(academyId, 'lessons.attendance');
+        allow write: if false;
+      }
+
+      /**
        * 반 출결(문서 ID = `{date}_{classId}_{studentId}`, 2-I) — 쓰기는 Functions(`recordClassAttendance`)만.
        * 읽기는 출결·청구서 권한, 그리고 그 반 선생님(반 `teacherUids`) — 선생님은 `classId ==` 조건 목록 조회로 읽는다.
        */
@@ -464,6 +473,17 @@ service cloud.firestore {
 
         allow create, update, delete: if isAdmin() || isAcademyOwner(academyId);
       }
+    }
+
+    /**
+     * 등원 기록 컬렉션 그룹 조회(3-A 원장 출결 화면·원생 카드) — `academyId ==`·`date ==` 목록 1번.
+     * 학원 블록 밖에 두는 재귀 경로라 문서의 `academyId`(서버만 씀)로 권한을 본다: 출결·청구서 권한만.
+     * 학생 하위 단건·목록 읽기(담당 선생님 포함)는 학원 블록 안 `students/{studentId}/attendanceRecords` 규칙 그대로.
+     */
+    match /{path=**}/attendanceRecords/{date} {
+      allow read: if isAdmin()
+        || (resource.data.academyId is string
+            && hasAnyPermission(resource.data.academyId, ['lessons.attendance', 'billing.invoices']));
     }
 
     /** attnId 로그인 조회 — Functions(Admin SDK)만 쓰기 */

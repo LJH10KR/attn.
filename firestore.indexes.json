@@ -17,6 +17,14 @@
       ]
     },
     {
+      "collectionGroup": "attendanceRecords",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "academyId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "attendanceNotifications",
       "queryScope": "COLLECTION",
       "fields": [

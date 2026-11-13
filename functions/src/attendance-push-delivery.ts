@@ -226,7 +226,7 @@ export async function deliverAttendancePushOnce(
     buckets,
     responses: resp.responses,
     logContext: opts.allowScheduleRetries
-      ? "sendStudentAttendanceNotification"
+      ? "attendanceNotification"
       : "retryAttendancePushDelivery",
   });
 

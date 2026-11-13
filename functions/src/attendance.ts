@@ -6,7 +6,7 @@ import {
   type AttendanceNotifyOutcome,
   type AttendanceSender,
 } from "./attendance-send-core";
-import { actorHasPermission, resolveAcademyActor } from "./lib/academy-access";
+import { actorHasPermission, resolveAcademyActor, type AcademyActor } from "./lib/academy-access";
 import {
   ARRIVAL_CANCEL_REASON_LOCKED_MESSAGE,
   arrivalCancelBlock,
@@ -20,9 +20,11 @@ import {
   classAttendanceDocId,
   classPushBody,
   CLASS_ATTENDANCE_BLOCK_MESSAGES,
+  RECORD_NOT_TODAY_MESSAGE,
+  reasonForStatus,
   seoulDateString,
-  seoulWeekday,
   slotsOnWeekday,
+  weekdayOfDate,
   type ArrivalSnapshot,
   type AttendanceStatus,
 } from "./lib/attendance-rules";
@@ -38,29 +40,41 @@ import { isActiveStudent } from "./lib/student-profile";
  * 알림은 상태가 실제로 바뀔 때만 보낸다(같은 상태 다시 누르기 = 기록·알림 그대로).
  */
 
-/** 기록용 경로 — 권한·조건 판단에는 쓰지 않는다 */
-const ARRIVAL_VIA = ["teacher_my_classes", "student_list", "student_detail", "class_detail"] as const;
-const CLASS_VIA = ["teacher_my_classes", "class_detail"] as const;
-/** 2-J 취소 경로 */
-const ARRIVAL_CANCEL_VIA = ["teacher_my_classes", "student_detail"] as const;
-const CLASS_CANCEL_VIA = ["teacher_my_classes", "class_detail"] as const;
+/** 기록용 경로 — 권한·조건 판단에는 쓰지 않는다(3-A: 원장 출결 화면 `attendance_screen`, 일괄은 서버 내부 `attendance_batch`) */
+const ARRIVAL_VIA = ["teacher_my_classes", "student_list", "student_detail", "class_detail", "attendance_screen"] as const;
+const CLASS_VIA = ["teacher_my_classes", "class_detail", "attendance_screen"] as const;
+/** 2-J 취소 경로(3-A: 원생 카드 `student_list`, 원장 출결 화면) */
+const ARRIVAL_CANCEL_VIA = ["teacher_my_classes", "student_detail", "student_list", "attendance_screen"] as const;
+const CLASS_CANCEL_VIA = ["teacher_my_classes", "class_detail", "attendance_screen"] as const;
 export type AttendanceVia =
   | (typeof ARRIVAL_VIA)[number]
   | (typeof CLASS_VIA)[number]
   | "kiosk"
   | "absence_period"
-  | "legacy";
+  | "attendance_batch";
 
-function parseVia<T extends string>(raw: unknown, allowed: readonly T[], fallback: T): T {
+export function parseVia<T extends string>(raw: unknown, allowed: readonly T[], fallback: T): T {
   if (raw === undefined || raw === null) return fallback;
   if (typeof raw === "string" && (allowed as readonly string[]).includes(raw)) return raw as T;
   throw new HttpsError("invalid-argument", "요청 경로가 올바르지 않습니다.");
 }
 
-function requireId(raw: unknown): string {
+export function requireId(raw: unknown): string {
   const s = typeof raw === "string" ? raw.trim() : "";
   if (!s || s.includes("/")) throw new HttpsError("invalid-argument", "요청이 올바르지 않습니다.");
   return s;
+}
+
+/**
+ * 오늘 기록 함수의 선택 입력 날짜(3-A B1) — 주면 서울 오늘과 같아야 한다.
+ * 화면이 자정을 넘긴 채 열려 있으면 화면 날짜(D)와 서버 오늘(D+1)이 달라 기록이 엉뚱한 날에 들어가는 것을 막는다.
+ */
+export function assertRecordDate(raw: unknown, today: string): void {
+  if (raw === undefined || raw === null) return;
+  if (typeof raw !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    throw new HttpsError("invalid-argument", "요청이 올바르지 않습니다.");
+  }
+  if (raw !== today) throw new HttpsError("failed-precondition", RECORD_NOT_TODAY_MESSAGE);
 }
 
 /** 취소 요청의 날짜(2-J ★2) — 형식이 틀리면 invalid-argument, 서울 오늘이 아니면 거부 */
@@ -72,7 +86,7 @@ function requireTodayDate(raw: unknown, today: string): string {
   return raw;
 }
 
-function parseStatus(raw: unknown): AttendanceStatus {
+export function parseStatus(raw: unknown): AttendanceStatus {
   if (raw === "present" || raw === "absent") return raw;
   throw new HttpsError("invalid-argument", "요청이 올바르지 않습니다.");
 }
@@ -105,7 +119,7 @@ export function isBilledRecord(data: FirebaseFirestore.DocumentData | undefined)
   return typeof data?.billedInvoicePeriod === "string" && data.billedInvoicePeriod.length > 0;
 }
 
-function arrivalSnapshotOf(snap: FirebaseFirestore.DocumentSnapshot): ArrivalSnapshot {
+export function arrivalSnapshotOf(snap: FirebaseFirestore.DocumentSnapshot): ArrivalSnapshot {
   if (!snap.exists) return null;
   return { status: snap.get("status") === "absent" ? "absent" : "present", billed: isBilledRecord(snap.data()) };
 }
@@ -135,7 +149,7 @@ function studentName(data: Record<string, unknown>): string {
   return typeof data.name === "string" && data.name ? data.name : "학생";
 }
 
-type ArrivalMode = "button" | "kiosk" | "legacy";
+type ArrivalMode = "button" | "kiosk";
 
 export type ArrivalResult = {
   /** 기록 상태가 바뀌었는지 */
@@ -147,10 +161,11 @@ export type ArrivalResult = {
 };
 
 /**
- * 등원 기록 쓰기(트랜잭션) — 버튼·키오스크·예전 호출 공용.
+ * 등원 기록 쓰기(트랜잭션) — 버튼·키오스크 공용.
  * - button: 같은 상태 그대로, 차감 잠금이면 거부, 등원→미등원은 그날 반 출결 0건일 때만
  * - kiosk: 이미 등원이면 그대로, 차감 잠금이면 기록 그대로(알림은 호출한 쪽이 보냄)
- * - legacy(예전 sendStudentAttendanceNotification): button과 같되 absent는 "기록 없음 → 미등원"만(B3)
+ * 3-A ★3·B3: 문서 전체를 덮지 않고 부분 갱신 — 메모(`note`)·정정 표시는 유지, 등원이면 사유를 지우고
+ * 미등원이면 사유 "기타"(이전 사유가 있으면 유지) + 등원 시각(`arrivedAt`·`arrivedAtManual`)을 지운다.
  */
 export async function writeArrival(
   db: admin.firestore.Firestore,
@@ -175,12 +190,6 @@ export async function writeArrival(
       if (prev?.status === "present") return { changed: false, billedKept: false, status: "present" };
       if (prev?.billed) return { changed: false, billedKept: true, status: prev.status };
     }
-    if (mode === "legacy" && status === "absent" && prev?.status === "present") {
-      throw new HttpsError(
-        "failed-precondition",
-        "이미 등원한 학생입니다. 수업 결석은 앱을 새로고침한 뒤 반별 출석·결석 버튼으로 기록해 주세요.",
-      );
-    }
 
     // 미등원으로 바꿀 때만 그날 반 출결 수를 본다(읽기는 쓰기보다 먼저)
     const classCount =
@@ -197,20 +206,27 @@ export async function writeArrival(
       );
     }
 
-    tx.set(ref, {
-      date,
-      status,
-      ...(status === "absent" ? { reason: "general" } : { arrivedAt: FieldValue.serverTimestamp() }),
-      academyId,
-      studentId,
-      recordedByUid: sender.actorUid,
-      recordedByRole: sender.role,
-      source: sender.source,
-      via,
-      statusChangedAt: FieldValue.serverTimestamp(),
-      createdAt: snap.exists && snap.get("createdAt") ? snap.get("createdAt") : FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-    });
+    const reason = reasonForStatus(status, snap.get("reason"));
+    tx.set(
+      ref,
+      {
+        date,
+        status,
+        reason: reason ?? FieldValue.delete(),
+        arrivedAt: status === "present" ? FieldValue.serverTimestamp() : FieldValue.delete(),
+        arrivedAtManual: FieldValue.delete(),
+        academyId,
+        studentId,
+        recordedByUid: sender.actorUid,
+        recordedByRole: sender.role,
+        source: sender.source,
+        via,
+        statusChangedAt: FieldValue.serverTimestamp(),
+        ...(snap.exists && snap.get("createdAt") ? {} : { createdAt: FieldValue.serverTimestamp() }),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
     return { changed: true, billedKept: false, status };
   });
 }
@@ -270,7 +286,32 @@ export async function assertArrivalAccess(
   return { studentData, sender: senderForActor(actor) };
 }
 
-/** 원장·출결 권한 직원·담당 선생님 — 오늘 등원/미등원 */
+export type RecordOutcome = {
+  ok: true;
+  status: AttendanceStatus;
+  changed: boolean;
+  notification: AttendanceNotifyOutcome | null;
+};
+
+/**
+ * 오늘 등원/미등원 처리 — `recordStudentArrival`·일괄(`recordAttendanceBatch`) 공용.
+ * `date`는 화면이 본 날짜(B1) — 서울 오늘이 아니면 거부한다(일괄은 항상 넘김).
+ */
+export async function recordArrivalCore(
+  db: admin.firestore.Firestore,
+  params: { academyId: string; studentId: string; status: AttendanceStatus; via: AttendanceVia; callerUid: string; date?: unknown },
+): Promise<RecordOutcome> {
+  const { academyId, studentId, status, via, callerUid } = params;
+  const date = seoulDateString();
+  assertRecordDate(params.date, date);
+  const { studentData, sender } = await assertArrivalAccess(db, academyId, studentId, callerUid);
+  const result = await writeArrival(db, { academyId, studentId, status, sender, via, mode: "button", date });
+  if (!result.changed) return { ok: true, status, changed: false, notification: null };
+  const notification = await sendArrivalNotification(db, { academyId, studentId, status, sender, studentData, date });
+  return { ok: true, status, changed: true, notification };
+}
+
+/** 원장·출결 권한 직원·담당 선생님 — 오늘 등원/미등원(선택 입력 `date` = 화면 날짜, B1) */
 export const recordStudentArrival = onCall(async (request) => {
   if (!request.auth?.uid) throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
   const data = (request.data ?? {}) as Record<string, unknown>;
@@ -278,47 +319,40 @@ export const recordStudentArrival = onCall(async (request) => {
   const studentId = requireId(data.studentId);
   const status = parseStatus(data.status);
   const via = parseVia(data.via, ARRIVAL_VIA, "student_detail");
-
-  const db = admin.firestore();
-  const { studentData, sender } = await assertArrivalAccess(db, academyId, studentId, request.auth.uid);
-  const date = seoulDateString();
-  const result = await writeArrival(db, { academyId, studentId, status, sender, via, mode: "button", date });
-  if (!result.changed) {
-    return { ok: true as const, status, changed: false as const, notification: null };
-  }
-  const notification = await sendArrivalNotification(db, { academyId, studentId, status, sender, studentData, date });
-  return { ok: true as const, status, changed: true as const, notification };
+  return recordArrivalCore(admin.firestore(), {
+    academyId,
+    studentId,
+    status,
+    via,
+    callerUid: request.auth.uid,
+    date: data.date,
+  });
 });
 
-/** 원장·출결 권한 직원·그 반 선생님 — 오늘 반 출석/결석 */
-export const recordClassAttendance = onCall(async (request) => {
-  if (!request.auth?.uid) throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
-  const callerUid = request.auth.uid;
-  const data = (request.data ?? {}) as Record<string, unknown>;
-  const academyId = requireId(data.academyId);
-  const classId = requireId(data.classId);
-  const studentId = requireId(data.studentId);
-  const status = parseStatus(data.status);
-  const via = parseVia(data.via, CLASS_VIA, "class_detail");
-
-  const db = admin.firestore();
-  const actor = await resolveAcademyActor(db, academyId, callerUid);
-  if (!actor) throw new HttpsError("permission-denied", "이 반 출결을 기록할 권한이 없습니다.");
-  const classRef = db.doc(`academies/${academyId}/classes/${classId}`);
-  const classSnap = await classRef.get();
-  if (!classSnap.exists) throw new HttpsError("not-found", "반을 찾을 수 없습니다.");
-  if (
-    actor.kind === "staff" &&
-    !actorHasPermission(actor, "lessons.attendance") &&
-    !readUidList(classSnap.get("teacherUids")).includes(callerUid)
-  ) {
-    throw new HttpsError("permission-denied", "이 반 출결을 기록할 권한이 없습니다.");
-  }
+/**
+ * 오늘 반 출석/결석 처리 — `recordClassAttendance`·일괄 공용. `actor`는 호출한 쪽이 `resolveAcademyActor`로 구한 값.
+ * - A11: 그 반 선생님 확인은 트랜잭션 안에서 읽은 반 문서로(확인 직후 선생님에서 빠지는 경합 없음).
+ * - ★3: 부분 갱신 — 코멘트·정정 표시 유지, 출석이면 사유를 지우고 결석이면 사유 "기타"(이전 결석 사유가 있으면 유지).
+ */
+export async function recordClassCore(
+  db: admin.firestore.Firestore,
+  params: {
+    actor: AcademyActor;
+    academyId: string;
+    classId: string;
+    studentId: string;
+    status: AttendanceStatus;
+    via: AttendanceVia;
+    date?: unknown;
+  },
+): Promise<RecordOutcome> {
+  const { actor, academyId, classId, studentId, status, via } = params;
+  const canAll = actor.kind === "owner" || actorHasPermission(actor, "lessons.attendance");
   const sender = senderForActor(actor);
-
-  const now = new Date();
-  const date = seoulDateString(now);
-  const weekday = seoulWeekday(now);
+  const date = seoulDateString();
+  assertRecordDate(params.date, date);
+  const weekday = weekdayOfDate(date);
+  const classRef = db.doc(`academies/${academyId}/classes/${classId}`);
   const studentRef = db.doc(`academies/${academyId}/students/${studentId}`);
   const recordRef = classAttendanceCol(db, academyId).doc(classAttendanceDocId(date, classId, studentId));
 
@@ -329,8 +363,11 @@ export const recordClassAttendance = onCall(async (request) => {
       arrivalRecordRef(db, academyId, studentId, date),
       recordRef,
     );
-    if (!studentSnap!.exists) throw new HttpsError("not-found", "학생을 찾을 수 없습니다.");
     if (!clsSnap!.exists) throw new HttpsError("not-found", "반을 찾을 수 없습니다.");
+    if (!canAll && !readUidList(clsSnap!.get("teacherUids")).includes(actor.uid)) {
+      throw new HttpsError("permission-denied", "이 반 출결을 기록할 권한이 없습니다.");
+    }
+    if (!studentSnap!.exists) throw new HttpsError("not-found", "학생을 찾을 수 없습니다.");
     const student = studentSnap!.data() as Record<string, unknown>;
     const cls = clsSnap!.data() as Record<string, unknown>;
     const slots = slotsOnWeekday(readSchedule(cls.schedule), weekday);
@@ -348,28 +385,32 @@ export const recordClassAttendance = onCall(async (request) => {
     if (recordSnap!.exists && recordSnap!.get("status") === status) {
       return { changed: false as const, student, className, slotTimes };
     }
-    tx.set(recordRef, {
-      academyId,
-      date,
-      classId,
-      studentId,
-      status,
-      className,
-      slots: slotTimes,
-      markedByUid: sender.actorUid,
-      markedByRole: sender.role,
-      source: sender.source,
-      via,
-      statusChangedAt: FieldValue.serverTimestamp(),
-      createdAt: recordSnap!.exists && recordSnap!.get("createdAt") ? recordSnap!.get("createdAt") : FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-    });
+    const reason = reasonForStatus(status, recordSnap!.exists ? recordSnap!.get("reason") : null);
+    tx.set(
+      recordRef,
+      {
+        academyId,
+        date,
+        classId,
+        studentId,
+        status,
+        reason: reason ?? FieldValue.delete(),
+        className,
+        slots: slotTimes,
+        markedByUid: sender.actorUid,
+        markedByRole: sender.role,
+        source: sender.source,
+        via,
+        statusChangedAt: FieldValue.serverTimestamp(),
+        ...(recordSnap!.exists && recordSnap!.get("createdAt") ? {} : { createdAt: FieldValue.serverTimestamp() }),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
     return { changed: true as const, student, className, slotTimes };
   });
 
-  if (!outcome.changed) {
-    return { ok: true as const, status, changed: false as const, notification: null };
-  }
+  if (!outcome.changed) return { ok: true, status, changed: false, notification: null };
   const notification = await sendStudentAttendanceNotificationCore(db, {
     academyId,
     studentId,
@@ -381,7 +422,24 @@ export const recordClassAttendance = onCall(async (request) => {
     limit: "daily_change",
     date,
   });
-  return { ok: true as const, status, changed: true as const, notification };
+  return { ok: true, status, changed: true, notification };
+}
+
+/** 원장·출결 권한 직원·그 반 선생님 — 오늘 반 출석/결석(선택 입력 `date` = 화면 날짜, B1) */
+export const recordClassAttendance = onCall(async (request) => {
+  if (!request.auth?.uid) throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+  const callerUid = request.auth.uid;
+  const data = (request.data ?? {}) as Record<string, unknown>;
+  const academyId = requireId(data.academyId);
+  const classId = requireId(data.classId);
+  const studentId = requireId(data.studentId);
+  const status = parseStatus(data.status);
+  const via = parseVia(data.via, CLASS_VIA, "class_detail");
+
+  const db = admin.firestore();
+  const actor = await resolveAcademyActor(db, academyId, callerUid);
+  if (!actor) throw new HttpsError("permission-denied", "이 반 출결을 기록할 권한이 없습니다.");
+  return recordClassCore(db, { actor, academyId, classId, studentId, status, via, date: data.date });
 });
 
 /*
@@ -419,7 +477,10 @@ export const cancelClassAttendance = onCall(async (request) => {
 
   const outcome = await db.runTransaction(async (tx): Promise<CancelOutcome & { className?: string }> => {
     const [clsSnap, studentSnap, recordSnap] = await tx.getAll(classRef, studentRef, recordRef);
-    if (!clsSnap!.exists) throw new HttpsError("not-found", "반을 찾을 수 없습니다.");
+    // 3-A: 그날 삭제된 반에 남은 기록은 원장·출결 권한만 취소(반 문서가 없으면 그 반 선생님을 알 수 없음)
+    if (!clsSnap!.exists && !(canAll && recordSnap!.exists)) {
+      throw new HttpsError("not-found", "반을 찾을 수 없습니다.");
+    }
     if (!canAll && !readUidList(clsSnap!.get("teacherUids")).includes(callerUid)) {
       throw new HttpsError("permission-denied", "이 반 출결을 취소할 권한이 없습니다.");
     }

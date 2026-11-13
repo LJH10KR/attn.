@@ -105,8 +105,8 @@ assert.equal(s1.guardians[2].linkedParentUid, null);
 assert.deepEqual(s1.parentUids, ["p-active", "p-inactive"]);
 
 // --- 출결 알림 수신자: 활성 보호자만(비활성은 parentUids에 있어도 제외) ---
-const notify = await call("sendStudentAttendanceNotification", {
-  academyId: A, studentId: created.studentId, kind: "present",
+const notify = await call("recordStudentArrival", {
+  academyId: A, studentId: created.studentId, status: "present",
 });
 assert.equal(notify.ok, true);
 const notifSnap = await db.collection(`academies/${A}/attendanceNotifications`)
@@ -201,7 +201,7 @@ assert.equal((await db.doc(`academies/${A}/studentNotes/${created.studentId}`).g
 
 // --- 상태 제외: 휴원 원생은 출결 알림·키오스크 체크인 거부 ---
 await assert.rejects(
-  call("sendStudentAttendanceNotification", { academyId: A, studentId: created.studentId, kind: "present" }),
+  call("recordStudentArrival", { academyId: A, studentId: created.studentId, status: "present" }),
   /재원/,
 );
 await assert.rejects(

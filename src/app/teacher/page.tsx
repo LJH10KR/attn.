@@ -2,7 +2,7 @@
 
 import { FirebaseError } from "firebase/app";
 import { onAuthStateChanged } from "firebase/auth";
-import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, onSnapshot, query, where } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StudentDetailSheet } from "@/components/academy/student-detail/student-detail-sheet";
@@ -47,23 +47,42 @@ const glassCard = "glass-card";
 type MyClassesData = { students: StudentVM[]; classes: AcademyClassBrief[] };
 
 /**
- * 내 반·담당 학생 — 클라이언트 쿼리(규칙: 활성 선생님 + `teacherUids`에 본인).
+ * 내 반·담당 학생 실시간 구독(3-A ★10) — 클라이언트 쿼리(규칙: 활성 선생님 + `teacherUids`에 본인).
  * 학생 `teacherUids`는 반(종강 제외)에서 서버가 계산하고, 반 문서의 `teacherUids`는 반 선생님 그대로.
+ * 반에서 빠지면 그 반·학생이 목록에서 바로 사라지고, 그 반 출결 구독도 함께 끝난다(B2).
+ * 두 목록이 모두 한 번 도착하면 `onData`, 오류(계정 비활성 등)는 `onError`. 반환값 = 구독 해제.
  */
-async function loadMyClasses(academyId: string, uid: string): Promise<MyClassesData> {
+function subscribeMyClasses(
+  academyId: string,
+  uid: string,
+  onData: (data: MyClassesData) => void,
+  onError: (err: unknown) => void,
+): () => void {
   const db = getFirebaseDb();
-  const [studentSnap, classSnap] = await Promise.all([
-    getDocs(query(collection(db, academyStudentsPath(academyId)), where("teacherUids", "array-contains", uid))),
-    getDocs(
-      query(
-        collection(db, COLLECTIONS.academies, academyId, "classes"),
-        where("teacherUids", "array-contains", uid),
-      ),
-    ),
-  ]);
-  return {
-    students: studentSnap.docs.map((d) => docToStudent(d.id, d.data() as Record<string, unknown>)),
-    classes: classSnap.docs.map((d) => docToClassBrief(d.id, d.data() as Record<string, unknown>)),
+  let students: StudentVM[] | null = null;
+  let classes: AcademyClassBrief[] | null = null;
+  const emit = () => {
+    if (students && classes) onData({ students, classes });
+  };
+  const unsubStudents = onSnapshot(
+    query(collection(db, academyStudentsPath(academyId)), where("teacherUids", "array-contains", uid)),
+    (snap) => {
+      students = snap.docs.map((d) => docToStudent(d.id, d.data() as Record<string, unknown>));
+      emit();
+    },
+    onError,
+  );
+  const unsubClasses = onSnapshot(
+    query(collection(db, COLLECTIONS.academies, academyId, "classes"), where("teacherUids", "array-contains", uid)),
+    (snap) => {
+      classes = snap.docs.map((d) => docToClassBrief(d.id, d.data() as Record<string, unknown>));
+      emit();
+    },
+    onError,
+  );
+  return () => {
+    unsubStudents();
+    unsubClasses();
   };
 }
 
@@ -118,6 +137,9 @@ function TeacherDashboard() {
   const [notifyMessage, setNotifyMessage] = useState<string | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [listInitialLoading, setListInitialLoading] = useState(false);
+  /** 내 반 구독 대상(로그인한 선생님) — 바뀌면 다시 구독 */
+  const [listUid, setListUid] = useState<string | null>(null);
+  const [listRetry, setListRetry] = useState(0);
 
   const teacherListLoadedUidRef = useRef<string | null>(null);
   const teacherInitGenerationRef = useRef(0);
@@ -141,6 +163,7 @@ function TeacherDashboard() {
         teacherInitGenerationRef.current += 1;
         setMyClasses({ students: [], classes: [] });
         setListError(null);
+        setListUid(null);
         setAcademyId(null);
         setReady(false);
         setListInitialLoading(false);
@@ -156,6 +179,7 @@ function TeacherDashboard() {
 
       const gen = ++teacherInitGenerationRef.current;
       resetTeacherListSession();
+      setListUid(null);
       setMyClasses({ students: [], classes: [] });
       setListError(null);
       setListInitialLoading(false);
@@ -204,35 +228,9 @@ function TeacherDashboard() {
         setInitError(null);
         setReady(true);
         setLastDashboardRoleHint("teacher");
-        setListInitialLoading(true);
-
-        try {
-          const data = await loadMyClasses(aid, uid);
-          // 사용자가 바뀐 뒤 늦게 도착한 응답은 버린다
-          if (
-            cancelled ||
-            gen !== teacherInitGenerationRef.current ||
-            auth.currentUser?.uid !== uid
-          ) {
-            return;
-          }
-          setMyClasses(data);
-          setListError(null);
-          teacherListLoadedUidRef.current = uid;
-        } catch (err) {
-          if (
-            !cancelled &&
-            gen === teacherInitGenerationRef.current &&
-            auth.currentUser?.uid === uid
-          ) {
-            setMyClasses({ students: [], classes: [] });
-            setListError(myClassesErrorMessage(err));
-          }
-        } finally {
-          if (!cancelled && gen === teacherInitGenerationRef.current) {
-            setListInitialLoading(false);
-          }
-        }
+        // 내 반 목록은 아래 구독 effect가 맡는다(3-A ★10)
+        teacherListLoadedUidRef.current = uid;
+        setListUid(uid);
       } catch {
         if (!cancelled && gen === teacherInitGenerationRef.current) {
           setInitError("선생님 정보를 불러오지 못했습니다.");
@@ -248,29 +246,34 @@ function TeacherDashboard() {
     };
   }, [router]);
 
-  const refreshAssignedStudents = useCallback(async () => {
-    const auth = getFirebaseAuth();
-    const user = auth.currentUser;
-    const aid = academyId;
-    if (!user?.uid || !aid) {
-      return;
-    }
-    const uid = user.uid;
-    const gen = teacherInitGenerationRef.current;
-    const stale = () => gen !== teacherInitGenerationRef.current || auth.currentUser?.uid !== uid;
-    setListRefreshBusy(true);
+  // 내 반·담당 학생 실시간 구독 — 로그인한 선생님·학원이 정해진 뒤, [목록 새로고침]은 다시 구독
+  useEffect(() => {
+    if (!academyId || !listUid) return;
+    setListInitialLoading(true);
     setListError(null);
-    try {
-      const data = await loadMyClasses(aid, uid);
-      if (stale()) return;
-      setMyClasses(data);
-      setListError(null);
-    } catch (err) {
-      if (!stale()) setListError(myClassesErrorMessage(err));
-    } finally {
-      setListRefreshBusy(false);
-    }
-  }, [academyId]);
+    return subscribeMyClasses(
+      academyId,
+      listUid,
+      (data) => {
+        setMyClasses(data);
+        setListError(null);
+        setListInitialLoading(false);
+        setListRefreshBusy(false);
+      },
+      (err) => {
+        setMyClasses({ students: [], classes: [] });
+        setListError(myClassesErrorMessage(err));
+        setListInitialLoading(false);
+        setListRefreshBusy(false);
+      },
+    );
+  }, [academyId, listUid, listRetry]);
+
+  const refreshAssignedStudents = useCallback(async () => {
+    if (!academyId || !listUid) return;
+    setListRefreshBusy(true);
+    setListRetry((n) => n + 1);
+  }, [academyId, listUid]);
 
   const onAttendanceDone = useCallback((message: string) => setNotifyMessage(message), []);
   const attendanceActions = useAttendanceActions(academyId, onAttendanceDone);
@@ -378,12 +381,12 @@ function TeacherDashboard() {
       }
       setNotifyMessage(null);
       if (action.kind === "arrive") {
-        void markArrival(student.id, "present", "teacher_my_classes", student.name);
+        void markArrival(student.id, "present", "teacher_my_classes", today.date, student.name);
       } else {
-        void markClass(cls.id, cls.name, student.id, action.status, "teacher_my_classes", student.name);
+        void markClass(cls.id, cls.name, student.id, action.status, "teacher_my_classes", today.date, student.name);
       }
     },
-    [markArrival, markClass],
+    [markArrival, markClass, today.date],
   );
   const confirmCancel = useCallback(() => {
     if (!cancelTarget) return Promise.resolve(null);

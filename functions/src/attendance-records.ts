@@ -13,6 +13,12 @@ import {
   classAttendanceOnDatesQuery,
   isBilledRecord as isBilled,
 } from "./attendance";
+import {
+  arrivalStateOf,
+  correctionActorOutsideTx,
+  studentNameOf,
+  writeCorrectionTx,
+} from "./lib/attendance-corrections";
 
 /**
  * 등원 기록(2-I) — `academies/{academyId}/students/{studentId}/attendanceRecords/{YYYY-MM-DD}`,
@@ -166,6 +172,10 @@ export const recordStudentAbsences = onCall(async (request) => {
   }
   const sender = academySenderForActor(actor);
   const refs = dates.map((d) => attendanceRecordRef(db, academyId, studentId, d));
+  // 3-A ★5: 지난 날짜의 기존 기록을 다른 내용으로 덮으면 정정 이력
+  const today = seoulDateString();
+  const by = dates.some((d) => d < today) ? await correctionActorOutsideTx(db, academyId, actor) : null;
+  const studentName = studentNameOf(studentSnap.data());
 
   await db.runTransaction(async (tx) => {
     const snaps = await tx.getAll(...refs);
@@ -186,21 +196,40 @@ export const recordStudentAbsences = onCall(async (request) => {
     }
     snaps.forEach((snap, i) => {
       const prev = snap.exists ? snap.data() ?? {} : {};
-      tx.set(refs[i]!, {
-        date: dates[i],
-        status: "absent" satisfies AttendanceStatus,
-        reason,
-        ...(note ? { note } : {}),
-        academyId,
-        studentId,
-        recordedByUid: sender.actorUid,
-        recordedByRole: sender.role,
-        source: sender.source,
-        via: "absence_period",
-        statusChangedAt: prev.status === "absent" && prev.statusChangedAt ? prev.statusChangedAt : FieldValue.serverTimestamp(),
-        createdAt: prev.createdAt ?? FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
+      const before = arrivalStateOf(snap.exists ? snap.data() : undefined);
+      if (by && before && dates[i]! < today) {
+        // 새 메모가 비어 있으면 기존 메모 유지(A7 — 기록을 유지한 채 바꾸기)
+        const after = { status: "absent" as const, reason, note: note || before.note, arrivedAt: null };
+        const same = before.status === after.status && before.reason === after.reason && before.note === after.note;
+        if (!same) {
+          writeCorrectionTx(tx, db, {
+            academyId, date: dates[i]!, studentId, studentName, classId: null, className: null,
+            layer: "arrival", action: "update", before, after, via: "student_detail", by,
+          });
+        }
+      }
+      // 3-A: 부분 갱신 — 빈 메모면 기존 메모·정정 표시 등 다른 필드는 유지, 미등원이므로 등원 시각은 지움
+      tx.set(
+        refs[i]!,
+        {
+          date: dates[i],
+          status: "absent" satisfies AttendanceStatus,
+          reason,
+          ...(note ? { note } : {}),
+          arrivedAt: FieldValue.delete(),
+          arrivedAtManual: FieldValue.delete(),
+          academyId,
+          studentId,
+          recordedByUid: sender.actorUid,
+          recordedByRole: sender.role,
+          source: sender.source,
+          via: "absence_period",
+          ...(prev.status === "absent" && prev.statusChangedAt ? {} : { statusChangedAt: FieldValue.serverTimestamp() }),
+          ...(prev.createdAt ? {} : { createdAt: FieldValue.serverTimestamp() }),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
     });
   });
 
@@ -210,8 +239,6 @@ export const recordStudentAbsences = onCall(async (request) => {
     return { ok: true as const, recordedCount: dates.length, notification: null };
   }
 
-  const studentName =
-    typeof studentData.name === "string" && studentData.name ? studentData.name : "학생";
   const dateLabel =
     dates.length === 1
       ? formatDateLabel(dates[0]!)
@@ -258,11 +285,14 @@ export const deleteStudentAttendanceRecord = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  await assertPermission(db, academyId, request.auth.uid, request.auth.token, "lessons.attendance");
+  const actor = await assertPermission(db, academyId, request.auth.uid, request.auth.token, "lessons.attendance");
+  // 3-A ★5: 기록 삭제도 정정 이력
+  const by = await correctionActorOutsideTx(db, academyId, actor);
 
   const ref = attendanceRecordRef(db, academyId, studentId, date);
   await db.runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
+    const [snap, studentSnap] = await tx.getAll(ref, db.doc(`academies/${academyId}/students/${studentId}`));
+    if (!snap) throw new HttpsError("not-found", "출결 기록을 찾을 수 없습니다.");
     if (!snap.exists) {
       throw new HttpsError("not-found", "출결 기록을 찾을 수 없습니다.");
     }
@@ -277,6 +307,10 @@ export const deleteStudentAttendanceRecord = onCall(async (request) => {
       );
     }
     tx.delete(ref);
+    writeCorrectionTx(tx, db, {
+      academyId, date, studentId, studentName: studentNameOf(studentSnap?.data()), classId: null, className: null,
+      layer: "arrival", action: "delete", before: arrivalStateOf(snap.data()), after: null, via: "student_detail", by,
+    });
   });
   return { ok: true as const };
 });

@@ -28,7 +28,6 @@ const ROUTELESS_PERMISSIONS: readonly AcademyPermission[] = ["billing.refunds"];
 const NOT_READY_PERMISSIONS: readonly AcademyPermission[] = [
   "billing.invoices",
   "billing.collections",
-  "lessons.attendance",
   "lessons.notices",
 ];
 

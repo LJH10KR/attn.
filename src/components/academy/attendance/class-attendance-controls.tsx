@@ -41,8 +41,11 @@ const chipBtn =
  * `allowArrive`(선생님 화면)면 등원 전·미등원 학생은 그 자리에 "등원 처리"(★5).
  * 2-J: 이미 선택된 버튼을 다시 누르면 취소(★8 — 이 반을 구독 중이면 막힌 이유와 상관없이 선택된 버튼은 누를 수 있음),
  * `allowArrive`면 "등원 HH:mm ✕"·"미등원 ✕"로 등원 기록 취소.
+ * 3-A: 원장 출결 화면도 같은 컴포넌트(A9). `mode="past"`(지난 날짜 정정)는 재원·종강·그날 수업을 보지 않고
+ * 그날 등원 상태만 본다(A4) — 버튼 동작(정정 함수·알림 없음)은 화면이 정한다.
  */
 export function ClassAttendanceControls({
+  mode = "today",
   studentActive,
   classEnded,
   hasLessonToday,
@@ -54,6 +57,8 @@ export function ClassAttendanceControls({
   disabled,
   onAction,
 }: {
+  /** today = 오늘 기록 조건 전부, past = 지난 날짜 정정(그날 등원 상태만) */
+  mode?: "today" | "past";
   studentActive: boolean;
   classEnded: boolean;
   hasLessonToday: boolean;
@@ -69,18 +74,19 @@ export function ClassAttendanceControls({
   disabled: boolean;
   onAction: (action: ClassAttendanceAction) => void;
 }) {
-  const preBlock = classAttendanceBlock({
-    studentActive,
-    isMember: true,
-    classEnded,
-    hasLessonToday,
-    arrival: { status: "present", billed: false },
-  });
+  // 지난 날짜는 재원·종강·그날 수업을 보지 않는다(정정은 원장 판단)
+  const cond = mode === "past"
+    ? { studentActive: true, classEnded: false, hasLessonToday: true }
+    : { studentActive, classEnded, hasLessonToday };
+  const preBlock = classAttendanceBlock({ ...cond, isMember: true, arrival: { status: "present", billed: false } });
   const loading = !preBlock && !stateError && arrival === undefined;
-  const block = preBlock ?? (arrival === undefined ? null : classAttendanceBlock({
-    studentActive, isMember: true, classEnded, hasLessonToday, arrival,
-  }));
-  const reason = stateError && !preBlock ? "확인 불가" : block ? CLASS_ATTENDANCE_BLOCK_LABELS[block] : loading ? "확인 중" : null;
+  const block = preBlock ?? (arrival === undefined ? null : classAttendanceBlock({ ...cond, isMember: true, arrival }));
+  const blockLabel = block
+    ? mode === "past" && block === "not_arrived"
+      ? "등원 기록 없음"
+      : CLASS_ATTENDANCE_BLOCK_LABELS[block]
+    : null;
+  const reason = stateError && !preBlock ? "확인 불가" : blockLabel ?? (loading ? "확인 중" : null);
 
   const rowLocked = disabled || busy !== null;
 

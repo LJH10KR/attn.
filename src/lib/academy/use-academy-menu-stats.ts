@@ -2,6 +2,7 @@
 
 import {
   collection,
+  collectionGroup,
   getCountFromServer,
   getDocs,
   query,
@@ -83,6 +84,24 @@ const LOADERS: Partial<Record<AcademyPermission, Loader>> = {
       .join(" · ");
     return {
       "operations.classes": { summary: `운영 중 ${active}개`, ...(detail ? { detail } : {}) },
+    };
+  },
+  // 3-A ★9 — 오늘 등원·미등원(컬렉션 그룹 academyId·date). 미처리 배지는 명단 계산이 필요해 5단계 홈 "오늘 할 일"로
+  "lessons.attendance": async (academyId) => {
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
+    const snap = await getDocs(
+      query(
+        collectionGroup(getFirebaseDb(), "attendanceRecords"),
+        where("academyId", "==", academyId),
+        where("date", "==", today),
+      ),
+    );
+    const absent = snap.docs.filter((d) => d.get("status") === "absent").length;
+    return {
+      "lessons.attendance": {
+        summary: `오늘 등원 ${snap.size - absent}명`,
+        ...(absent > 0 ? { detail: `미등원 ${absent}명` } : {}),
+      },
     };
   },
   "billing.payments": async (academyId) => {
