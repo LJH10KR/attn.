@@ -3,30 +3,58 @@
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { EmailVerificationCodeModal } from "@/components/auth/email-verification-code-modal";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { getFirebaseAuth } from "@/lib/firebase/client-app";
+import { confirmGoogleEmailIfLinked } from "@/lib/firebase/google-email-verification";
 import { upsertOwnerProfile } from "@/lib/firebase/owner-profile";
 
 export function VerifyEmailForm() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [otpOpen, setOtpOpen] = useState(false);
+  /** Google 이메일 확인(F2) 중 — 끝나기 전에는 인증 창을 띄우지 않음 */
+  const [checkingGoogle, setCheckingGoogle] = useState(false);
+  /** uid별 확인 한 번 — 개발 모드 effect 이중 실행에도 같은 요청을 이어 받음 */
+  const googleCheckRef = useRef<{ uid: string; promise: Promise<boolean> } | null>(null);
 
   const configured = isFirebaseConfigured();
 
   useEffect(() => {
     if (!configured) return;
     const auth = getFirebaseAuth();
+    let cancelled = false;
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u);
-      if (u && !u.emailVerified) {
-        setOtpOpen(true);
+      if (!u || u.emailVerified) return;
+      // Google이 연결돼 있고 그 이메일이 계정 이메일과 같으면 창 없이 진행(3-A 후속 F2)
+      if (googleCheckRef.current?.uid !== u.uid) {
+        googleCheckRef.current = { uid: u.uid, promise: confirmGoogleEmailIfLinked(u) };
       }
+      setCheckingGoogle(true);
+      void googleCheckRef.current.promise
+        .then(async (verified) => {
+          if (cancelled) return;
+          if (verified) {
+            await upsertOwnerProfile(u);
+            router.replace("/owner");
+            return;
+          }
+          setOtpOpen(true);
+        })
+        .catch(() => {
+          if (!cancelled) setOtpOpen(true);
+        })
+        .finally(() => {
+          if (!cancelled) setCheckingGoogle(false);
+        });
     });
-    return () => unsub();
-  }, [configured]);
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [configured, router]);
 
   const onVerified = useCallback(async () => {
     const auth = getFirebaseAuth();
@@ -59,6 +87,14 @@ export function VerifyEmailForm() {
           오너 로그인
         </Link>
       </div>
+    );
+  }
+
+  if (checkingGoogle) {
+    return (
+      <p className="text-center text-sm text-neutral-600" role="status">
+        계정 인증 상태를 확인하고 있어요…
+      </p>
     );
   }
 

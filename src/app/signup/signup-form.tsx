@@ -18,6 +18,7 @@ import { PasswordInput } from "@/components/ui/password-input";
 import { ProcessStatusModal } from "@/components/ui/process-status-modal";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { getFirebaseAuth, getFirebaseFunctions } from "@/lib/firebase/client-app";
+import { confirmGoogleEmailIfLinked } from "@/lib/firebase/google-email-verification";
 import {
   fetchOwnerSignupProfileState,
   upsertOwnerProfile,
@@ -149,7 +150,7 @@ export function SignupForm() {
         });
         await recordOwnerConsentQuietly();
         setSignupCompleteOpen(true);
-        void httpsCallable(getFirebaseFunctions(), "issueEmailVerificationOtp")({ purpose: "owner" }).catch(
+        void httpsCallable(getFirebaseFunctions(), "issueEmailVerificationOtp")({ purpose: "owner", mode: "resend" }).catch(
           () => {},
         );
       } catch (err) {
@@ -178,6 +179,8 @@ export function SignupForm() {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
+      // 이미 가입한 미인증 원장(비밀번호 가입 뒤 Google 연결)도 Google 이메일이 같으면 인증으로(3-A 후속 F2)
+      await confirmGoogleEmailIfLinked(user);
       const state = await fetchOwnerSignupProfileState(user.uid);
 
       if (state.profileComplete) {
@@ -282,7 +285,7 @@ export function SignupForm() {
       <SignupCompleteModal
         open={signupCompleteOpen}
         title="회원가입 완료!"
-        description="회원님의 이메일 주소로 인증 코드를 발송했어요! 다음 로그인 시 인증 코드를 입력해 주세요."
+        description="이메일로 인증 코드를 보내고 있어요. 로그인하면 인증 창이 열려요. 코드는 15분 동안 유효하고, 지났으면 로그인할 때 새 코드를 자동으로 보내 드려요."
         onConfirmAction={() => {
           setSignupCompleteOpen(false);
           void signOut(getFirebaseAuth()).finally(() => {

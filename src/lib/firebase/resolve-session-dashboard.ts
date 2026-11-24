@@ -11,6 +11,7 @@ import {
   getFirebaseFunctions,
 } from "./client-app";
 import { isActivationMirrorClientReadEnabled } from "./config";
+import { confirmGoogleEmailIfLinked } from "./google-email-verification";
 import {
   COLLECTIONS,
   USER_ACTIVATION_MIRROR_DOC_ID,
@@ -199,7 +200,10 @@ async function resolveKnownSessionDashboardPath(user: User): Promise<string | nu
     const authEmail = user.email ?? "";
     const isProvisionInternalEmail = authEmail.includes("@provision.attndot.internal");
     if (!user.emailVerified && !isProvisionInternalEmail) {
-      return "/login/owner";
+      // Google이 연결돼 있고 그 이메일이 계정 이메일과 같으면 서버가 인증으로 바꿈(3-A 후속 F2) — 아니면 인증 창으로
+      if (!(await confirmGoogleEmailIfLinked(user))) {
+        return "/login/owner";
+      }
     }
 
     /**

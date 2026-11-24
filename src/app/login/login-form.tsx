@@ -29,6 +29,7 @@ import {
   getFirebaseAuth,
   getFirebaseFunctions,
 } from "@/lib/firebase/client-app";
+import { confirmGoogleEmailIfLinked } from "@/lib/firebase/google-email-verification";
 import { upsertOwnerProfile } from "@/lib/firebase/owner-profile";
 
 export type { LoginRole } from "@/lib/auth/login-routes";
@@ -246,7 +247,8 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
     if (!u) return;
     setBusy(true);
     try {
-      if (showOwnerEmailAuth && !u.emailVerified) {
+      // Google이 연결돼 있고 그 이메일이 계정 이메일과 같으면 서버가 인증으로 바꿈(3-A 후속 F2) — 아니면 인증 창
+      if (showOwnerEmailAuth && !(await confirmGoogleEmailIfLinked(u))) {
         setOtpPurpose("owner");
         setOtpEmailHint(u.email);
         setOtpModalOpen(true);
@@ -394,7 +396,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
           email.trim(),
           password,
         );
-        if (showOwnerEmailAuth && !cred.user.emailVerified) {
+        if (showOwnerEmailAuth && !(await confirmGoogleEmailIfLinked(cred.user))) {
           setOtpPurpose("owner");
           setOtpEmailHint(cred.user.email);
           setOtpModalOpen(true);
@@ -480,7 +482,7 @@ export function LoginForm({ fixedRole }: LoginFormProps = {}) {
       const auth = getFirebaseAuth();
       const provider = new GoogleAuthProvider();
       const cred = await signInWithPopup(auth, provider);
-      if (role === "owner" && !cred.user.emailVerified) {
+      if (role === "owner" && !(await confirmGoogleEmailIfLinked(cred.user))) {
         router.replace("/verify-email");
         return;
       }
