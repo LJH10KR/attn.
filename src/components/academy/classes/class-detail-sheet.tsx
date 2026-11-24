@@ -7,10 +7,12 @@ import {
   AttendanceCancelDialog,
   type AttendanceCancelTarget,
 } from "@/components/academy/attendance/attendance-cancel-dialog";
+import { AttendanceLateDialog, type LateDialogTarget } from "@/components/academy/attendance/attendance-late-dialog";
 import {
   ClassAttendanceControls,
   type ClassAttendanceAction,
 } from "@/components/academy/attendance/class-attendance-controls";
+import { suggestLateMinutes } from "@/lib/academy/attendance-rules";
 import {
   CLASS_STATUS_BADGE_CLASS,
   CLASS_STATUS_LABELS,
@@ -106,7 +108,20 @@ export function ClassDetailSheet({
   const onAttendanceDone = useCallback((text: string, ok: boolean) => setNotice({ text, ok }), []);
   const { busyKey, markClass, cancelClass } = useAttendanceActions(academyId, onAttendanceDone);
   const [cancelTarget, setCancelTarget] = useState<AttendanceCancelTarget | null>(null);
+  const [lateTarget, setLateTarget] = useState<LateDialogTarget | null>(null);
   const onAttendance = (s: StudentVM, action: ClassAttendanceAction) => {
+    if (action.kind === "late") {
+      setLateTarget({
+        studentId: s.id,
+        studentName: s.name,
+        classId: cls.id,
+        className: cls.name,
+        current: action.current,
+        isLate: action.isLate,
+        suggested: suggestLateMinutes(action.arrivedAtMs, today.date, todaySlots[0]?.start ?? null),
+      });
+      return;
+    }
     if (action.kind === "cancel_class") {
       // 2-J: 이미 선택된 출석·결석 다시 누름 → 취소 확인 창
       setCancelTarget({
@@ -126,14 +141,14 @@ export function ClassDetailSheet({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || escapeBlocked || deleting || cancelTarget) return;
+      if (e.key !== "Escape" || escapeBlocked || deleting || cancelTarget || lateTarget) return;
       if (confirmOpen) setConfirmOpen(false);
       else if (menuOpen) setMenuOpen(false);
       else onCloseAction();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [escapeBlocked, deleting, confirmOpen, menuOpen, onCloseAction, cancelTarget]);
+  }, [escapeBlocked, deleting, confirmOpen, menuOpen, onCloseAction, cancelTarget, lateTarget]);
 
   const onDelete = async () => {
     setDeleting(true);
@@ -270,9 +285,11 @@ export function ClassDetailSheet({
                 <p className="-mt-1 mb-2 break-keep text-[11px] text-neutral-500">
                   {ended
                     ? "종강한 반이라 출결을 기록할 수 없습니다."
-                    : hasLessonToday
-                      ? `오늘 수업 ${todaySlots.map((x) => `${x.start}–${x.end}`).join(", ")} · 등원한 원생만 출석·결석을 기록할 수 있습니다.`
-                      : "오늘은 이 반 수업이 없어 출결을 기록할 수 없습니다."}
+                    : !hasLessonToday
+                      ? "오늘은 이 반 수업이 없어 출결을 기록할 수 없습니다."
+                      : watch && todayState.cancelled
+                        ? `오늘 수업 ${todaySlots.map((x) => `${x.start}–${x.end}`).join(", ")} · 휴강한 수업이라 출결을 기록할 수 없습니다.`
+                        : `오늘 수업 ${todaySlots.map((x) => `${x.start}–${x.end}`).join(", ")} · 등원한 원생만 출석·지각·결석을 기록할 수 있습니다.`}
                 </p>
               ) : null}
               {notice ? (
@@ -330,8 +347,10 @@ export function ClassDetailSheet({
                           studentActive={isActiveStudent(s)}
                           classEnded={ended}
                           hasLessonToday={hasLessonToday}
+                          classCancelled={watch ? todayState.cancelled : false}
                           arrival={todayState.arrivals.get(s.id)}
                           record={todayState.records.get(s.id)}
+                          lateMinutes={todayState.lateMinutes.get(s.id) ?? null}
                           stateError={
                             Boolean(todayState.error) ||
                             (isActiveStudent(s) && hasLessonToday && !ended && !canReadArrival(s))
@@ -416,6 +435,29 @@ export function ClassDetailSheet({
             });
           }}
           onCloseAction={() => setCancelTarget(null)}
+        />
+      ) : null}
+
+      {lateTarget ? (
+        <AttendanceLateDialog
+          key={`${lateTarget.studentId}:${lateTarget.classId}`}
+          target={lateTarget}
+          past={false}
+          onSubmitAction={(minutes) => {
+            const t = lateTarget;
+            setLateTarget(null);
+            setNotice(null);
+            void markClass(cls.id, cls.name, t.studentId, "late", "class_detail", today.date, t.studentName, minutes);
+          }}
+          onClearAction={() => {
+            const t = lateTarget;
+            setLateTarget(null);
+            setCancelTarget({
+              kind: "class", studentId: t.studentId, studentName: t.studentName, classId: cls.id,
+              className: cls.name, status: "late",
+            });
+          }}
+          onCloseAction={() => setLateTarget(null)}
         />
       ) : null}
     </ModalPortal>

@@ -3,7 +3,7 @@
 import { httpsCallable } from "firebase/functions";
 import { useCallback, useState } from "react";
 import { attendanceActionErrorMessage, type AttendanceNotifyResult } from "@/lib/academy/attendance-records";
-import type { AbsenceReason, AttendanceStatus } from "@/lib/academy/attendance-rules";
+import type { AbsenceReason, AttendanceStatus, ClassStatus } from "@/lib/academy/attendance-rules";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
 
 /**
@@ -15,7 +15,7 @@ export type CorrectionVia = "attendance_screen" | "student_detail";
 
 export type CallOutcome = { ok: true; changed: boolean } | { ok: false; message: string };
 
-export type BatchAction = "arrive" | "class_present" | "class_absent";
+export type BatchAction = "arrive" | "depart" | "class_present" | "class_absent";
 export type BatchMode = "today" | "past";
 export type BatchRowResult = {
   studentId: string;
@@ -65,16 +65,34 @@ export function useAttendanceCorrections(academyId: string) {
     [run],
   );
 
-  /** 지난 날짜 반 출결 — status null = 지우기(미처리로) */
+  /** 지난 날짜 반 출결 — status null = 지우기(미처리로), 3-B 지각은 `lateMinutes`(1~180) */
   const correctClass = useCallback(
     (p: {
       classId: string;
       studentId: string;
       date: string;
-      status: AttendanceStatus | null;
+      status: ClassStatus | null;
+      lateMinutes?: number;
       reason?: AbsenceReason;
       via: CorrectionVia;
     }) => run(`${p.studentId}:${p.classId}:correct`, "correctClassAttendance", p),
+    [run],
+  );
+
+  /**
+   * 3-B 하원 정정 — 지난 날짜 만들기·바꾸기·지우기(departed false), 오늘은 시각만(★7·R1 지금 이전).
+   * leftAtTime: "HH:mm"·null(지움)·undefined(그대로)
+   */
+  const correctDeparture = useCallback(
+    (p: { studentId: string; date: string; departed: boolean; leftAtTime?: string | null; via: CorrectionVia }) =>
+      run(`${p.studentId}:departure:correct`, "correctStudentDeparture", p),
+    [run],
+  );
+
+  /** 3-B 휴강 기록·메모 바꾸기·취소(알림 없음, 정정 기록) */
+  const setCancellation = useCallback(
+    (p: { classId: string; date: string; cancelled: boolean; memo?: string; via: "attendance_screen" }) =>
+      run(`cancel:${p.classId}`, "setClassCancellation", p),
     [run],
   );
 
@@ -115,5 +133,5 @@ export function useAttendanceCorrections(academyId: string) {
     [academyId],
   );
 
-  return { busyKey, correctArrival, correctClass, updateDetails, runBatch };
+  return { busyKey, correctArrival, correctClass, correctDeparture, setCancellation, updateDetails, runBatch };
 }

@@ -16,10 +16,10 @@ const cls = (id, name, extra = {}) => ({ id, name, status: "active", sortOrder: 
 const stu = (id, name, classIds, status = "enrolled") => ({ id, name, gradeLabel: "중2", status, classIds });
 const arrival = (status, extra = {}) => ({
   status, reason: status === "absent" ? "general" : null, note: null, arrivedAtMs: null,
-  arrivedAtManual: false, billed: false, corrected: false, ...extra,
+  arrivedAtManual: false, billed: false, corrected: false, departed: false, leftAtMs: null, leftAtManual: false, ...extra,
 });
 const record = (classId, studentId, status, extra = {}) => ({
-  classId, studentId, status, className: `${classId}이름`, slots: [], reason: null, comment: null,
+  classId, studentId, status, lateMinutes: null, className: `${classId}이름`, slots: [], reason: null, comment: null,
   corrected: false, hasSessionDeduction: false, ...extra,
 });
 
@@ -91,16 +91,16 @@ describe("buildDayRoster", () => {
     // 대상 a·b·c·d + noClass e: 등원 a·d·e, 미등원 b, 기록 없음 c
     // 줄: eng a(없음, 등원→미처리), math a 출석·b 없음(미등원)·c 결석, prep 없음, tue d 출석, end a 출석, gone a 결석
     assert.deepEqual(summarizeDay(roster, ROSTER_FILTER_ALL), {
-      present: 3, absent: 1, noRecord: 1, classPresent: 3, classAbsent: 2, unprocessed: 1,
+      present: 3, absent: 1, departed: 0, noRecord: 1, classPresent: 3, classLate: 0, classAbsent: 2, unprocessed: 1,
     });
   });
 
   it("요약 — 반 하나·수업 반 없는 원생", () => {
     assert.deepEqual(summarizeDay(roster, "math"), {
-      present: 1, absent: 1, noRecord: 1, classPresent: 1, classAbsent: 1, unprocessed: 0,
+      present: 1, absent: 1, departed: 0, noRecord: 1, classPresent: 1, classLate: 0, classAbsent: 1, unprocessed: 0,
     });
     assert.deepEqual(summarizeDay(roster, ROSTER_FILTER_NO_CLASS), {
-      present: 1, absent: 0, noRecord: 0, classPresent: 0, classAbsent: 0, unprocessed: 0,
+      present: 1, absent: 0, departed: 0, noRecord: 0, classPresent: 0, classLate: 0, classAbsent: 0, unprocessed: 0,
     });
   });
 
@@ -114,5 +114,56 @@ describe("buildDayRoster", () => {
   it("빈 날", () => {
     const empty = buildDayRoster({ weekday: 7, classes, students, arrivals: new Map(), records: [] });
     assert.deepEqual(empty, { sections: [], noClass: [] });
+  });
+});
+
+describe("3-B 하원·지각·휴강", () => {
+  const cancel = (classId, className, extra = {}) => ({ classId, className, slots: [], memo: null, byName: "원장", ...extra });
+  const roster = buildDayRoster({
+    weekday: MON,
+    classes,
+    students: [...students, stu("f", "카타", ["eng"]), stu("g", "파하", ["prep"])],
+    arrivals: new Map([
+      ["a", arrival("present", { departed: true, leftAtMs: 1 })],
+      ["b", arrival("absent")],
+      ["f", arrival("present")],
+    ]),
+    records: [
+      record("math", "a", "late", { lateMinutes: 12 }),
+      record("eng", "f", "present"),
+    ],
+    cancellations: new Map([
+      ["eng", cancel("eng", "영어")],
+      // 수업 반이 아닌데 휴강만 있는 반(지난 날 휴강 뒤 종강 — P1)
+      ["end", cancel("end", "끝난반", { slots: [{ start: "10:00", end: "11:00" }] })],
+    ]),
+  });
+
+  it("휴강 표시 — 수업 반과 휴강만 있는 반(기록 없어도 보임)", () => {
+    const byId = Object.fromEntries(roster.sections.map((s) => [s.classId, s]));
+    assert.equal(byId.eng.cancellation.className, "영어");
+    assert.equal(byId.math.cancellation, null);
+    assert.equal(byId.end.kind, "leftover");
+    assert.equal(byId.end.leftoverReason, "ended");
+    assert.deepEqual(byId.end.rows, []);
+    assert.deepEqual(byId.end.slots, [{ start: "10:00", end: "11:00" }]);
+    assert.equal(rosterFilterOptions(roster).find((o) => o.value === "eng").label, "영어 (휴강)");
+  });
+
+  it("요약 4×2 — 하원·지각, 휴강 반은 수업 칸·미처리에서 빠지고 휴강 반에만 있는 기록 없음 원생은 세지 않음", () => {
+    // 대상: eng(휴강) a·f, math a·b(c는 휴원·기록 없음이라 빠짐), prep g → 등원 a·f, 미등원 b, 하원 a, 기록 없음 g
+    // 수업: math a 지각·b 없음(미등원), prep g 없음(등원 전) / eng 출석 f는 휴강이라 제외
+    assert.deepEqual(summarizeDay(roster, ROSTER_FILTER_ALL), {
+      present: 2, absent: 1, departed: 1, noRecord: 1, classPresent: 0, classLate: 1, classAbsent: 0, unprocessed: 0,
+    });
+    // 휴강 반에만 있는 원생이 기록이 없으면 "기록 없음"에 넣지 않는다
+    const onlyCancelled = buildDayRoster({
+      weekday: MON, classes, students: [stu("h", "하하", ["eng"])], arrivals: new Map(), records: [],
+      cancellations: new Map([["eng", cancel("eng", "영어")]]),
+    });
+    assert.equal(summarizeDay(onlyCancelled, ROSTER_FILTER_ALL).noRecord, 0);
+    assert.deepEqual(summarizeDay(roster, "eng"), {
+      present: 2, absent: 0, departed: 1, noRecord: 0, classPresent: 0, classLate: 0, classAbsent: 0, unprocessed: 0,
+    });
   });
 });

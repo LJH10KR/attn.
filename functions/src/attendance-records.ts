@@ -11,8 +11,10 @@ import {
 import {
   billedLockError,
   classAttendanceOnDatesQuery,
+  DEPARTURE_FIELDS_DELETE,
   isBilledRecord as isBilled,
 } from "./attendance";
+import { departureLockPastMessage } from "./lib/attendance-rules";
 import {
   arrivalStateOf,
   correctionActorOutsideTx,
@@ -194,6 +196,14 @@ export const recordStudentAbsences = onCall(async (request) => {
         `${classDates.map(formatDateLabel).join(", ")}에는 수업 출결 기록이 있어 결석으로 기록할 수 없습니다.`,
       );
     }
+    // 3-B ★5(H3): 하원 기록이 있는 날은 미등원으로 바꾸지 않는다
+    const departedDates = snaps.filter((s) => s.get("departed") === true).map((s) => s.id);
+    if (departedDates.length > 0) {
+      throw new HttpsError(
+        "failed-precondition",
+        `${departedDates.map(formatDateLabel).join(", ")}에는 하원 기록이 있어 결석으로 기록할 수 없습니다. 하원 기록을 먼저 정정해 주세요.`,
+      );
+    }
     snaps.forEach((snap, i) => {
       const prev = snap.exists ? snap.data() ?? {} : {};
       const before = arrivalStateOf(snap.exists ? snap.data() : undefined);
@@ -218,6 +228,7 @@ export const recordStudentAbsences = onCall(async (request) => {
           ...(note ? { note } : {}),
           arrivedAt: FieldValue.delete(),
           arrivedAtManual: FieldValue.delete(),
+          ...DEPARTURE_FIELDS_DELETE,
           academyId,
           studentId,
           recordedByUid: sender.actorUid,
@@ -258,6 +269,7 @@ export const recordStudentAbsences = onCall(async (request) => {
       notify: { context: "arrival" },
       limit: "cooldown",
       date: dates[0]!,
+      origin: "absence_period",
     });
     return { ok: true as const, recordedCount: dates.length, notification: result };
   } catch (e) {
@@ -298,6 +310,10 @@ export const deleteStudentAttendanceRecord = onCall(async (request) => {
     }
     if (isBilled(snap.data())) {
       throw billedLockError([date], snap.get("billedInvoicePeriod") as string);
+    }
+    // 3-B ★5(H3): 하원 기록이 있으면 먼저 정정
+    if (snap.get("departed") === true) {
+      throw new HttpsError("failed-precondition", departureLockPastMessage(date, true));
     }
     // 반 출결이 남아 있는 날의 등원 기록을 지우면 "등원 없이 출석"이 된다(2-I ★7)
     if ((await classAttendanceDatesTx(tx, db, academyId, studentId, [date])).length > 0) {

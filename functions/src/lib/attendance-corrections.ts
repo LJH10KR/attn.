@@ -10,9 +10,17 @@ import { normalizePermissionList } from "./permissions";
  * 오늘 버튼·취소는 알림 기록(`attendanceNotifications`)이 있어 남기지 않는다.
  */
 
-export type CorrectionLayer = "arrival" | "class";
+/** 3-B: 하원(`departure`)·휴강(`class_cancel`) 층 추가 */
+export type CorrectionLayer = "arrival" | "class" | "departure" | "class_cancel";
 export type CorrectionAction = "create" | "update" | "delete" | "detail";
-export const CORRECTION_VIA = ["attendance_screen", "attendance_batch", "student_detail"] as const;
+/** 3-B ★2: 오늘 지각 분만 바꾸기는 선생님 화면·반 상세에서도 이력을 남긴다 */
+export const CORRECTION_VIA = [
+  "attendance_screen",
+  "attendance_batch",
+  "student_detail",
+  "teacher_my_classes",
+  "class_detail",
+] as const;
 export type CorrectionVia = (typeof CORRECTION_VIA)[number];
 
 /** 이력에 남기는 등원 기록 상태 */
@@ -23,12 +31,19 @@ export type ArrivalState = {
   arrivedAt: Timestamp | null;
 };
 
-/** 이력에 남기는 반 출결 상태 */
+/** 이력에 남기는 반 출결 상태(3-B: 지각·분) */
 export type ClassState = {
-  status: "present" | "absent";
+  status: "present" | "late" | "absent";
   reason: string | null;
   comment: string | null;
+  lateMinutes?: number | null;
 };
+
+/** 이력에 남기는 하원 상태(3-B) */
+export type DepartureState = { departed: true; leftAt: Timestamp | null };
+
+/** 이력에 남기는 휴강 상태(3-B) */
+export type ClassCancelState = { memo: string | null };
 
 function str(v: unknown): string | null {
   return typeof v === "string" && v ? v : null;
@@ -46,11 +61,19 @@ export function arrivalStateOf(data: FirebaseFirestore.DocumentData | undefined)
 
 export function classStateOf(data: FirebaseFirestore.DocumentData | undefined): ClassState | null {
   if (!data) return null;
+  const status = data.status === "absent" ? "absent" : data.status === "late" ? "late" : "present";
   return {
-    status: data.status === "absent" ? "absent" : "present",
+    status,
     reason: str(data.reason),
     comment: str(data.comment),
+    lateMinutes: status === "late" && typeof data.lateMinutes === "number" ? data.lateMinutes : null,
   };
+}
+
+/** 등원 기록 문서의 하원 상태(없으면 null) */
+export function departureStateOf(data: FirebaseFirestore.DocumentData | undefined): DepartureState | null {
+  if (!data || data.departed !== true) return null;
+  return { departed: true, leftAt: data.leftAt instanceof Timestamp ? data.leftAt : null };
 }
 
 /** 이력의 처리한 사람 — 원장은 "원장", 직원은 직원 문서 이름 */
@@ -76,6 +99,16 @@ export function correctionActorFromTx(
     normalizePermissionList(staffSnap.get("permissions")).includes("lessons.attendance");
   if (!ok) throw new HttpsError("permission-denied", deniedMessage);
   const name = staffSnap!.get("displayName");
+  return { byUid: actor.uid, byRole: "staff", byName: typeof name === "string" && name ? name : "직원" };
+}
+
+/** 권한 확인 없이 이력의 처리한 사람만(오늘 지각 분 바꾸기 ★2 — 그 반 선생님도 할 수 있음) */
+export function correctionActorOf(
+  actor: AcademyActor,
+  staffSnap: FirebaseFirestore.DocumentSnapshot | null,
+): CorrectionActor {
+  if (actor.kind === "owner") return { byUid: actor.uid, byRole: "owner", byName: "원장" };
+  const name = staffSnap?.exists ? staffSnap.get("displayName") : null;
   return { byUid: actor.uid, byRole: "staff", byName: typeof name === "string" && name ? name : "직원" };
 }
 
@@ -112,8 +145,8 @@ export type CorrectionEntry = {
   className: string | null;
   layer: CorrectionLayer;
   action: CorrectionAction;
-  before: ArrivalState | ClassState | null;
-  after: ArrivalState | ClassState | null;
+  before: ArrivalState | ClassState | DepartureState | ClassCancelState | null;
+  after: ArrivalState | ClassState | DepartureState | ClassCancelState | null;
   via: CorrectionVia;
   by: CorrectionActor;
 };

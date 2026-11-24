@@ -172,6 +172,11 @@ export const listAttendanceNotifications = onCall(async (request) => {
       className?: unknown;
       action?: unknown;
       reason?: unknown;
+      date?: unknown;
+      lateMinutes?: unknown;
+      muted?: unknown;
+      resend?: unknown;
+      origin?: unknown;
       studentId?: unknown;
       studentName?: unknown;
       parentUids?: unknown;
@@ -183,14 +188,27 @@ export const listAttendanceNotifications = onCall(async (request) => {
     return {
       id: d.id,
       academyId: typeof x.academyId === "string" ? x.academyId : "",
-      kind: (x.kind === "absent" ? "absent" : "present") as "present" | "absent",
-      // 2-I 이전 기록은 context 없음 = 등원 맥락
-      context: (x.context === "class" ? "class" : "arrival") as "arrival" | "class",
+      kind: (x.kind === "absent" ? "absent" : x.kind === "late" ? "late" : x.kind === "left" ? "left" : "present") as
+        | "present"
+        | "late"
+        | "absent"
+        | "left",
+      // 2-I 이전 기록은 context 없음 = 등원 맥락(3-B: 하원 departure)
+      context: (x.context === "class" ? "class" : x.context === "departure" ? "departure" : "arrival") as
+        | "arrival"
+        | "class"
+        | "departure",
       classId: typeof x.classId === "string" ? x.classId : null,
       className: typeof x.className === "string" ? x.className : null,
       // 2-J 기록 취소 정정 알림 — 없는 문서는 기록 알림
       action: (x.action === "cancel" ? "cancel" : "record") as "record" | "cancel",
       reason: typeof x.reason === "string" ? x.reason : null,
+      // 3-B: 기록 날짜(다시 보내기 조건), 지각 분, 알림 꺼짐(학원 설정), 다시 알림, 기간 결석 요약
+      date: typeof x.date === "string" ? x.date : null,
+      lateMinutes: typeof x.lateMinutes === "number" ? x.lateMinutes : null,
+      muted: x.muted === true,
+      resend: x.resend === true,
+      origin: typeof x.origin === "string" ? x.origin : null,
       studentId: typeof x.studentId === "string" ? x.studentId : "",
       studentName: typeof x.studentName === "string" ? x.studentName : "",
       parentUids: readUidList(x.parentUids),

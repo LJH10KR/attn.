@@ -6,7 +6,7 @@ import {
   ClassAttendanceControls,
   type ClassAttendanceAction,
 } from "@/components/academy/attendance/class-attendance-controls";
-import type { AttendanceStatus } from "@/lib/academy/attendance-rules";
+import type { ClassStatus } from "@/lib/academy/attendance-rules";
 import { STUDENT_STATUS_BADGE_CLASS } from "@/components/academy/student-detail/student-detail-sheet";
 import { scheduleSummary, slotsOnWeekday } from "@/lib/academy/class-schedule";
 import { STUDENT_STATUS_LABELS, isActiveStudent } from "@/lib/academy/student-profile";
@@ -55,7 +55,7 @@ export function groupMyClasses(
   return groups;
 }
 
-type ClassRecordsReport = { className: string; records: ReadonlyMap<string, AttendanceStatus> };
+type ClassRecordsReport = { className: string; records: ReadonlyMap<string, ClassStatus> };
 
 /**
  * 선생님 화면 "내 반" — 반별 학생, 학생을 누르면 학생 상세 시트(정보 탭). 오늘 수업 반은 출석·결석(등원 전·미등원은 "등원 처리").
@@ -196,6 +196,12 @@ function TeacherClassSection({
               준비중
             </span>
           ) : null}
+          {/* 3-B ★15 오늘 휴강(원장·출결 권한이 기록) — 출결 버튼은 막힘 */}
+          {watch && state.cancelled ? (
+            <span className="rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-semibold text-rose-900">
+              휴강
+            </span>
+          ) : null}
           <span className="ml-auto text-[11px] text-neutral-500">{g.students.length}명</span>
         </div>
         {c ? (
@@ -246,10 +252,13 @@ function TeacherClassSection({
                     studentActive={active}
                     classEnded={c.status === "ended"}
                     hasLessonToday={hasLessonToday}
+                    classCancelled={watch ? state.cancelled : false}
                     arrival={state.arrivals.get(s.id)}
                     record={state.records.get(s.id)}
+                    lateMinutes={state.lateMinutes.get(s.id) ?? null}
                     stateError={Boolean(state.error) || (active && hasLessonToday && !canReadArrival(s))}
                     allowArrive
+                    allowDepart
                     busy={rowBusyFor(busyKey, s.id, c.id)}
                     disabled={busyKey !== null}
                     onAction={(action) => onAttendanceAction(s, c, action)}

@@ -4,6 +4,7 @@ import * as logger from "firebase-functions/logger";
 import type { AttendanceNotifyOutcome } from "./attendance-send-core";
 import { recordArrivalCore, recordClassCore, requireId } from "./attendance";
 import { correctArrivalCore, correctClassCore } from "./attendance-correct";
+import { correctDepartureCore, recordDepartureCore } from "./attendance-departure";
 import { resolveAcademyActor, type AcademyActor } from "./lib/academy-access";
 import { assertCorrectionActor } from "./lib/attendance-corrections";
 import {
@@ -15,14 +16,15 @@ import {
 } from "./lib/attendance-rules";
 
 /**
- * 3-A 일괄 처리(A8·★6) — 원장 출결 화면 반 명단에서 여러 원생을 골라 등원·반 출석·반 결석.
+ * 3-A 일괄 처리(A8·★6) — 원장 출결 화면 반 명단에서 여러 원생을 골라 등원·반 출석·반 결석(3-B: 하원 추가).
+ * 3-B ⑦: 일괄에는 지각이 없고(★3) 지각으로 기록된 줄은 출석·결석으로 덮지 않고 건너뛴다.
  * - 원장·`lessons.attendance`만(/teacher에는 일괄이 없음), 최대 50명, 원생마다 차례로(트랜잭션은 원생마다).
  * - 오늘 = 기존 기록 함수 로직(조건·알림·하루 10회 그대로), 지난 날짜 = 정정 로직(알림 없음·정정 이력).
  * - B1: 화면이 기대한 `mode`(today/past)와 서버 판정이 다르면 전체 거부(알림이 갈 줄 알았는데 안 가는 일 방지).
  * - 막힌 줄은 건너뛰고 서버 문구를 줄 결과에 담는다.
  */
 
-const BATCH_ACTIONS = ["arrive", "class_present", "class_absent"] as const;
+const BATCH_ACTIONS = ["arrive", "depart", "class_present", "class_absent"] as const;
 type BatchAction = (typeof BATCH_ACTIONS)[number];
 type BatchMode = "today" | "past";
 
@@ -55,6 +57,18 @@ async function runRow(
 ): Promise<BatchRowResult> {
   const { actor, academyId, classId, date, mode, action } = ctx;
   try {
+    if (action === "depart") {
+      if (mode === "today") {
+        const out = await recordDepartureCore(db, {
+          mode: "button", academyId, studentId, via: "attendance_batch", callerUid: actor.uid, date,
+        });
+        return { studentId, result: out.changed ? "changed" : "unchanged", notification: out.notification };
+      }
+      const out = await correctDepartureCore(db, {
+        actor, academyId, studentId, date, departed: true, via: "attendance_batch",
+      });
+      return { studentId, result: out.changed ? "changed" : "unchanged" };
+    }
     if (mode === "today") {
       const out =
         action === "arrive"
@@ -65,6 +79,7 @@ async function runRow(
             actor, academyId, classId, studentId,
             status: action === "class_present" ? "present" : "absent",
             via: "attendance_batch", date,
+            skipLate: true, // ★3·R2 지각 줄은 트랜잭션 안에서 판단해 건너뜀
           });
       return { studentId, result: out.changed ? "changed" : "unchanged", notification: out.notification };
     }
@@ -77,6 +92,7 @@ async function runRow(
           actor, academyId, classId, studentId, date,
           status: action === "class_present" ? "present" : "absent",
           via: "attendance_batch",
+          skipLate: true,
         });
     return { studentId, result: out.changed ? "changed" : "unchanged" };
   } catch (e) {
@@ -88,7 +104,7 @@ async function runRow(
   }
 }
 
-/** 원장·출결 권한 — 반 명단 일괄 등원·출석·결석(줄마다 결과) */
+/** 원장·출결 권한 — 반 명단 일괄 등원·하원·출석·결석(줄마다 결과) */
 export const recordAttendanceBatch = onCall({ timeoutSeconds: 120 }, async (request) => {
   if (!request.auth?.uid) throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
   const data = (request.data ?? {}) as Record<string, unknown>;

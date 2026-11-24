@@ -37,13 +37,20 @@ export type DayArrival = {
   arrivedAtManual: boolean;
   billed: boolean;
   corrected: boolean;
+  /** 3-B 하원(★4) — `leftAtMs` null = 시각 없음(지난 날짜 일괄 하원) */
+  departed: boolean;
+  leftAtMs: number | null;
+  leftAtManual: boolean;
 };
 
 /** 그날 반 출결 한 건 */
 export type DayClassRecord = {
   classId: string;
   studentId: string;
-  status: "present" | "absent";
+  /** 3-B 지각 포함 */
+  status: "present" | "late" | "absent";
+  /** 지각 분(지각만) */
+  lateMinutes: number | null;
   className: string;
   slots: RosterSlot[];
   reason: string | null;
@@ -66,6 +73,15 @@ export type RosterRow = {
 
 export type LeftoverReason = "ended" | "no_lesson" | "deleted";
 
+/** 3-B 그날 휴강 한 건(`classCancellations/{date}_{classId}`) */
+export type DayCancellation = {
+  classId: string;
+  className: string;
+  slots: RosterSlot[];
+  memo: string | null;
+  byName: string;
+};
+
 export type RosterSection = {
   kind: "lesson" | "leftover";
   classId: string;
@@ -74,6 +90,8 @@ export type RosterSection = {
   /** lesson = 그 요일 현재 시간표, leftover = 기록의 시간 스냅샷(첫 기록) */
   slots: RosterSlot[];
   leftoverReason: LeftoverReason | null;
+  /** 3-B 그날 휴강(없으면 null) — 휴강 반은 요약의 수업 칸에서 빠진다 */
+  cancellation: DayCancellation | null;
   rows: RosterRow[];
 };
 
@@ -103,8 +121,11 @@ export function buildDayRoster(params: {
   students: readonly RosterStudent[];
   arrivals: ReadonlyMap<string, DayArrival>;
   records: readonly DayClassRecord[];
+  /** 3-B 그날 휴강(반 id → 휴강) */
+  cancellations?: ReadonlyMap<string, DayCancellation>;
 }): DayRoster {
   const { weekday, classes, students, arrivals, records } = params;
+  const cancellations = params.cancellations ?? new Map<string, DayCancellation>();
   const studentById = new Map(students.map((s) => [s.id, s]));
   const classById = new Map(classes.map((c) => [c.id, c]));
   const recordsByClass = new Map<string, DayClassRecord[]>();
@@ -151,21 +172,26 @@ export function buildDayRoster(params: {
     cls: c,
     slots,
     leftoverReason: null,
+    cancellation: cancellations.get(c.id) ?? null,
     rows: rowsFor(c.id, true),
   }));
 
-  const leftover: RosterSection[] = [...recordsByClass.keys()]
+  // 기록만 남은 반 + 수업 반이 아닌데 휴강만 있는 반(P1 지난 날 휴강 뒤 종강·삭제 — 휴강 취소를 할 수 있게)
+  const leftoverIds = new Set([...recordsByClass.keys(), ...cancellations.keys()]);
+  const leftover: RosterSection[] = [...leftoverIds]
     .filter((id) => !lessonIds.has(id))
     .map((id) => {
       const c = classById.get(id) ?? null;
-      const first = recordsByClass.get(id)![0]!;
+      const first = recordsByClass.get(id)?.[0] ?? null;
+      const cancellation = cancellations.get(id) ?? null;
       return {
         kind: "leftover" as const,
         classId: id,
-        className: c?.name || first.className || "반",
+        className: c?.name || first?.className || cancellation?.className || "반",
         cls: c,
-        slots: first.slots,
+        slots: first?.slots ?? cancellation?.slots ?? [],
         leftoverReason: (!c ? "deleted" : c.status === "ended" ? "ended" : "no_lesson") as LeftoverReason,
+        cancellation,
         rows: rowsFor(id, false),
       };
     })
@@ -188,11 +214,14 @@ export type DaySummary = {
   /** 등원 기록 — 대상 원생 기준 */
   present: number;
   absent: number;
+  /** 3-B 하원(등원 중 하원 기록이 있는 원생) */
+  departed: number;
   noRecord: number;
-  /** 반 출결 — 반 × 원생 줄 기준 */
+  /** 반 출결 — 반 × 원생 줄 기준(3-B 휴강 반 제외) */
   classPresent: number;
+  classLate: number;
   classAbsent: number;
-  /** 등원했는데 그 반 출결이 없는 줄(★13) */
+  /** 등원했는데 그 반 출결이 없는 줄(★13, 휴강 반 제외) */
   unprocessed: number;
 };
 
@@ -206,19 +235,31 @@ export function summarizeDay(roster: DayRoster, filter: string): DaySummary {
         : roster.sections.filter((s) => s.classId === filter);
   const noClass = filter === ROSTER_FILTER_ALL || filter === ROSTER_FILTER_NO_CLASS ? roster.noClass : [];
 
+  // 휴강 반에만 있는 원생은 등원 기록이 있을 때만 센다("기록 없음"을 부풀리지 않게)
   const arrivalByStudent = new Map<string, DayArrival | null>();
-  for (const s of sections) for (const r of s.rows) arrivalByStudent.set(r.studentId, r.arrival);
-  for (const n of noClass) arrivalByStudent.set(n.studentId, n.arrival);
-
-  const out: DaySummary = { present: 0, absent: 0, noRecord: 0, classPresent: 0, classAbsent: 0, unprocessed: 0 };
-  for (const a of arrivalByStudent.values()) {
-    if (!a) out.noRecord += 1;
-    else if (a.status === "present") out.present += 1;
-    else out.absent += 1;
-  }
   for (const s of sections) {
     for (const r of s.rows) {
+      if (s.cancellation && !r.arrival) continue;
+      arrivalByStudent.set(r.studentId, r.arrival);
+    }
+  }
+  for (const n of noClass) arrivalByStudent.set(n.studentId, n.arrival);
+
+  const out: DaySummary = {
+    present: 0, absent: 0, departed: 0, noRecord: 0, classPresent: 0, classLate: 0, classAbsent: 0, unprocessed: 0,
+  };
+  for (const a of arrivalByStudent.values()) {
+    if (!a) out.noRecord += 1;
+    else if (a.status === "present") {
+      out.present += 1;
+      if (a.departed) out.departed += 1;
+    } else out.absent += 1;
+  }
+  for (const s of sections) {
+    if (s.cancellation) continue;
+    for (const r of s.rows) {
       if (r.record?.status === "present") out.classPresent += 1;
+      else if (r.record?.status === "late") out.classLate += 1;
       else if (r.record?.status === "absent") out.classAbsent += 1;
       else if (r.arrival?.status === "present") out.unprocessed += 1;
     }
@@ -230,7 +271,8 @@ export function summarizeDay(roster: DayRoster, filter: string): DaySummary {
 export function rosterFilterOptions(roster: DayRoster): { value: string; label: string }[] {
   const opts = [{ value: ROSTER_FILTER_ALL, label: "전체 반" }];
   for (const s of roster.sections) {
-    opts.push({ value: s.classId, label: s.kind === "leftover" ? `${s.className} (기록만)` : s.className });
+    const tag = s.cancellation ? " (휴강)" : s.kind === "leftover" ? " (기록만)" : "";
+    opts.push({ value: s.classId, label: `${s.className}${tag}` });
   }
   if (roster.noClass.length > 0) opts.push({ value: ROSTER_FILTER_NO_CLASS, label: "수업 반 없는 원생" });
   return opts;

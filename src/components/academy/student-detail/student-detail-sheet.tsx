@@ -362,6 +362,7 @@ export function StudentDetailSheet({
                         reason: a.reason,
                         billed: a.billed,
                         knownClassRecords: todayState.classRecords ?? [],
+                        departed: a.departed,
                       });
                     }}
                   />
@@ -455,6 +456,7 @@ export function StudentDetailSheet({
                       academyId={academyId}
                       studentId={student.id}
                       studentName={student.name}
+                      classIds={student.classIds}
                       canRecord={access.recordAbsence}
                       onNoticeAction={showNotice}
                     />
@@ -504,7 +506,7 @@ export function StudentDetailSheet({
           }}
         />
       ) : null}
-      {cancelTarget ? (
+      {cancelTarget && cancelTarget.kind === "arrival" ? (
         <AttendanceCancelDialog
           target={cancelTarget}
           onConfirmAction={() =>
@@ -543,17 +545,23 @@ function StudentTodayArrivalLine({
     arrival.status === "absent" && isAbsenceReason(arrival.reason) && arrival.reason !== "general"
       ? `(${ABSENCE_REASON_LABELS[arrival.reason]})`
       : "";
-  const label = arrival.status === "present" ? `오늘 등원${time}` : `오늘 미등원${reasonLabel}`;
+  const left = arrival.departed
+    ? ` · 하원${arrival.leftAtMs ? ` ${formatSeoulHHmm(new Date(arrival.leftAtMs))}` : ""}`
+    : "";
+  const label = arrival.status === "present" ? `오늘 등원${time}${left}` : `오늘 미등원${reasonLabel}`;
   const block = arrivalCancelBlock({
     status: arrival.status,
     reason: arrival.reason,
     billed: arrival.billed,
     classRecordCount,
+    departed: arrival.departed,
   });
   return (
     <div className="mt-2 flex items-center gap-2 rounded-xl bg-black/[0.03] px-3 py-1.5 text-[11px]">
       <span className="min-w-0 flex-1 break-keep text-neutral-700">{label}</span>
-      {block === "reason_locked" ? (
+      {block === "has_departure" ? (
+        <span className="shrink-0 break-keep text-neutral-500">하원 기록 있음</span>
+      ) : block === "reason_locked" ? (
         <span className="shrink-0 break-keep text-neutral-500">출결 탭에서 정정</span>
       ) : block === "billed" ? (
         <span className="shrink-0 break-keep text-neutral-500">차감 반영일</span>

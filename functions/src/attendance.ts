@@ -7,6 +7,7 @@ import {
   type AttendanceSender,
 } from "./attendance-send-core";
 import { actorHasPermission, resolveAcademyActor, type AcademyActor } from "./lib/academy-access";
+import { correctionActorOf, staffDocRef, studentNameOf, writeCorrectionTx } from "./lib/attendance-corrections";
 import {
   ARRIVAL_CANCEL_REASON_LOCKED_MESSAGE,
   arrivalCancelBlock,
@@ -18,8 +19,14 @@ import {
   classCancelPushBody,
   classAttendanceBlock,
   classAttendanceDocId,
+  classCancellationDocId,
   classPushBody,
+  classStatusOf,
+  BATCH_LATE_ROW_MESSAGE,
   CLASS_ATTENDANCE_BLOCK_MESSAGES,
+  departureLockTodayMessage,
+  isLateMinutes,
+  LATE_MINUTES_MESSAGE,
   RECORD_NOT_TODAY_MESSAGE,
   reasonForStatus,
   seoulDateString,
@@ -27,6 +34,7 @@ import {
   weekdayOfDate,
   type ArrivalSnapshot,
   type AttendanceStatus,
+  type ClassStatus,
 } from "./lib/attendance-rules";
 import { isClassStatus } from "./lib/class-teachers";
 import { readSchedule } from "./lib/class-schedule";
@@ -52,6 +60,13 @@ export type AttendanceVia =
   | "kiosk"
   | "absence_period"
   | "attendance_batch";
+
+/** 오늘 반 출결 경로 → 정정 이력 경로(★2 지각 분만 바꾸기) */
+function classCorrectionVia(
+  via: AttendanceVia,
+): "teacher_my_classes" | "class_detail" | "attendance_screen" | "attendance_batch" {
+  return via === "teacher_my_classes" || via === "class_detail" || via === "attendance_batch" ? via : "attendance_screen";
+}
 
 export function parseVia<T extends string>(raw: unknown, allowed: readonly T[], fallback: T): T {
   if (raw === undefined || raw === null) return fallback;
@@ -91,6 +106,28 @@ export function parseStatus(raw: unknown): AttendanceStatus {
   throw new HttpsError("invalid-argument", "요청이 올바르지 않습니다.");
 }
 
+/**
+ * 반 출결 상태 + 지각 분(3-B B1) — 지각이면 분(1~180 정수)이 꼭 있어야 하고, 다른 상태에는 분을 받지 않는다.
+ */
+export function parseClassStatusInput(
+  rawStatus: unknown,
+  rawMinutes: unknown,
+): { status: ClassStatus; lateMinutes: number | null } {
+  if (rawStatus === "late") {
+    if (!isLateMinutes(rawMinutes)) throw new HttpsError("invalid-argument", LATE_MINUTES_MESSAGE);
+    return { status: "late", lateMinutes: rawMinutes };
+  }
+  if (rawMinutes !== undefined && rawMinutes !== null) {
+    throw new HttpsError("invalid-argument", "요청이 올바르지 않습니다.");
+  }
+  return { status: parseStatus(rawStatus), lateMinutes: null };
+}
+
+/** 휴강 문서(3-B) — `classCancellations/{date}_{classId}` */
+export function classCancellationRef(db: admin.firestore.Firestore, academyId: string, date: string, classId: string) {
+  return db.doc(`academies/${academyId}/classCancellations/${classCancellationDocId(date, classId)}`);
+}
+
 export function arrivalRecordRef(
   db: admin.firestore.Firestore,
   academyId: string,
@@ -121,8 +158,23 @@ export function isBilledRecord(data: FirebaseFirestore.DocumentData | undefined)
 
 export function arrivalSnapshotOf(snap: FirebaseFirestore.DocumentSnapshot): ArrivalSnapshot {
   if (!snap.exists) return null;
-  return { status: snap.get("status") === "absent" ? "absent" : "present", billed: isBilledRecord(snap.data()) };
+  return {
+    status: snap.get("status") === "absent" ? "absent" : "present",
+    billed: isBilledRecord(snap.data()),
+    departed: snap.get("departed") === true,
+  };
 }
+
+/** 미등원·삭제로 바뀔 때 함께 지우는 하원 필드(3-B ★5 — 하원이 있으면 먼저 거부하므로 방어용) */
+export const DEPARTURE_FIELDS_DELETE = {
+  departed: FieldValue.delete(),
+  leftAt: FieldValue.delete(),
+  leftAtManual: FieldValue.delete(),
+  leftByUid: FieldValue.delete(),
+  leftByRole: FieldValue.delete(),
+  leftSource: FieldValue.delete(),
+  leftVia: FieldValue.delete(),
+} as const;
 
 function formatDateLabel(dateStr: string): string {
   const [, m, d] = dateStr.split("-").map(Number);
@@ -205,6 +257,7 @@ export async function writeArrival(
         `오늘 수업 출결이 ${classCount}건 있어 미등원으로 바꿀 수 없습니다.`,
       );
     }
+    if (transition === "has_departure") throw new HttpsError("failed-precondition", departureLockTodayMessage(false));
 
     const reason = reasonForStatus(status, snap.get("reason"));
     tx.set(
@@ -215,6 +268,7 @@ export async function writeArrival(
         reason: reason ?? FieldValue.delete(),
         arrivedAt: status === "present" ? FieldValue.serverTimestamp() : FieldValue.delete(),
         arrivedAtManual: FieldValue.delete(),
+        ...(status === "absent" ? DEPARTURE_FIELDS_DELETE : {}),
         academyId,
         studentId,
         recordedByUid: sender.actorUid,
@@ -267,18 +321,20 @@ export async function assertArrivalAccess(
   academyId: string,
   studentId: string,
   callerUid: string,
+  /** 거부 문구의 동작(3-B 하원은 "하원 처리") */
+  what = "등원 처리",
 ): Promise<{ studentData: Record<string, unknown>; sender: AttendanceSender }> {
   const studentSnap = await db.doc(`academies/${academyId}/students/${studentId}`).get();
   if (!studentSnap.exists) throw new HttpsError("not-found", "학생을 찾을 수 없습니다.");
   const studentData = studentSnap.data() as Record<string, unknown>;
   const actor = await resolveAcademyActor(db, academyId, callerUid);
-  if (!actor) throw new HttpsError("permission-denied", "등원을 기록할 권한이 없습니다.");
+  if (!actor) throw new HttpsError("permission-denied", `${what.replace(" 처리", "")}을 기록할 권한이 없습니다.`);
   if (
     actor.kind === "staff" &&
     !actorHasPermission(actor, "lessons.attendance") &&
     !readUidList(studentData.teacherUids).includes(callerUid)
   ) {
-    throw new HttpsError("permission-denied", "담당 반 학생만 등원 처리할 수 있습니다.");
+    throw new HttpsError("permission-denied", `담당 반 학생만 ${what}할 수 있습니다.`);
   }
   if (!isActiveStudent(studentData)) {
     throw new HttpsError("failed-precondition", "재원 중인 원생만 출결을 기록할 수 있습니다.");
@@ -288,9 +344,13 @@ export async function assertArrivalAccess(
 
 export type RecordOutcome = {
   ok: true;
-  status: AttendanceStatus;
+  status: AttendanceStatus | ClassStatus;
   changed: boolean;
   notification: AttendanceNotifyOutcome | null;
+  /** 3-B 지각 분(반 출결 late) */
+  lateMinutes?: number | null;
+  /** 3-B ★2 — 지각 분만 바꿈(알림 없음, 정정 이력) */
+  minutesOnly?: boolean;
 };
 
 /**
@@ -341,12 +401,17 @@ export async function recordClassCore(
     academyId: string;
     classId: string;
     studentId: string;
-    status: AttendanceStatus;
+    status: ClassStatus;
+    /** 지각일 때만(1~180, 호출한 쪽이 검사) */
+    lateMinutes?: number | null;
     via: AttendanceVia;
     date?: unknown;
+    /** 일괄(★3·R2): 지각으로 기록된 줄은 트랜잭션 안에서 판단해 건너뜀 */
+    skipLate?: boolean;
   },
 ): Promise<RecordOutcome> {
   const { actor, academyId, classId, studentId, status, via } = params;
+  const lateMinutes = status === "late" ? params.lateMinutes ?? null : null;
   const canAll = actor.kind === "owner" || actorHasPermission(actor, "lessons.attendance");
   const sender = senderForActor(actor);
   const date = seoulDateString();
@@ -356,12 +421,16 @@ export async function recordClassCore(
   const studentRef = db.doc(`academies/${academyId}/students/${studentId}`);
   const recordRef = classAttendanceCol(db, academyId).doc(classAttendanceDocId(date, classId, studentId));
 
+  const staffRef = actor.kind === "staff" ? staffDocRef(db, academyId, actor.uid) : null;
+
   const outcome = await db.runTransaction(async (tx) => {
-    const [studentSnap, clsSnap, arrivalSnap, recordSnap] = await tx.getAll(
+    const [studentSnap, clsSnap, arrivalSnap, recordSnap, cancelSnap, staffSnap] = await tx.getAll(
       studentRef,
       classRef,
       arrivalRecordRef(db, academyId, studentId, date),
       recordRef,
+      classCancellationRef(db, academyId, date, classId),
+      ...(staffRef ? [staffRef] : []),
     );
     if (!clsSnap!.exists) throw new HttpsError("not-found", "반을 찾을 수 없습니다.");
     if (!canAll && !readUidList(clsSnap!.get("teacherUids")).includes(actor.uid)) {
@@ -377,15 +446,40 @@ export async function recordClassCore(
       classEnded: isClassStatus(cls.status) && cls.status === "ended",
       hasLessonToday: slots.length > 0,
       arrival: arrivalSnapshotOf(arrivalSnap!),
+      classCancelled: cancelSnap!.exists,
     });
     if (block) throw new HttpsError("failed-precondition", CLASS_ATTENDANCE_BLOCK_MESSAGES[block]);
 
     const className = typeof cls.name === "string" && cls.name ? cls.name : "반";
     const slotTimes = slots.map((s) => ({ start: s.start, end: s.end }));
-    if (recordSnap!.exists && recordSnap!.get("status") === status) {
-      return { changed: false as const, student, className, slotTimes };
+    const prevStatus = recordSnap!.exists ? classStatusOf(recordSnap!.get("status")) : null;
+    if (params.skipLate && prevStatus === "late") {
+      throw new HttpsError("failed-precondition", BATCH_LATE_ROW_MESSAGE);
     }
-    const reason = reasonForStatus(status, recordSnap!.exists ? recordSnap!.get("reason") : null);
+    const prevMinutes =
+      recordSnap!.exists && typeof recordSnap!.get("lateMinutes") === "number"
+        ? (recordSnap!.get("lateMinutes") as number)
+        : null;
+    if (prevStatus === status && (status !== "late" || prevMinutes === lateMinutes)) {
+      return { changed: false as const, minutesOnly: false as const, student, className, slotTimes };
+    }
+    // ★2 지각 분만 바꿈 — 알림 없이 기록·정정 이력
+    if (prevStatus === "late" && status === "late") {
+      tx.update(recordRef, { lateMinutes, via, updatedAt: FieldValue.serverTimestamp() });
+      const comment = recordSnap!.get("comment");
+      const base = { reason: null, comment: typeof comment === "string" && comment ? comment : null };
+      writeCorrectionTx(tx, db, {
+        academyId, date, studentId, studentName: studentNameOf(student), classId, className,
+        layer: "class", action: "update",
+        before: { status: "late", ...base, lateMinutes: prevMinutes },
+        after: { status: "late", ...base, lateMinutes },
+        via: classCorrectionVia(via),
+        by: correctionActorOf(actor, staffSnap ?? null),
+      });
+      return { changed: true as const, minutesOnly: true as const, student, className, slotTimes };
+    }
+    const reason =
+      status === "late" ? null : reasonForStatus(status, recordSnap!.exists ? recordSnap!.get("reason") : null);
     tx.set(
       recordRef,
       {
@@ -394,6 +488,7 @@ export async function recordClassCore(
         classId,
         studentId,
         status,
+        lateMinutes: status === "late" ? lateMinutes : FieldValue.delete(),
         reason: reason ?? FieldValue.delete(),
         className,
         slots: slotTimes,
@@ -407,25 +502,31 @@ export async function recordClassCore(
       },
       { merge: true },
     );
-    return { changed: true as const, student, className, slotTimes };
+    return { changed: true as const, minutesOnly: false as const, student, className, slotTimes };
   });
 
-  if (!outcome.changed) return { ok: true, status, changed: false, notification: null };
+  if (!outcome.changed) return { ok: true, status, changed: false, notification: null, lateMinutes };
+  if (outcome.minutesOnly) {
+    return { ok: true, status, changed: true, notification: null, lateMinutes, minutesOnly: true };
+  }
   const notification = await sendStudentAttendanceNotificationCore(db, {
     academyId,
     studentId,
     kind: status,
     sender,
     studentData: outcome.student,
-    body: classPushBody(studentName(outcome.student), outcome.className, status, outcome.slotTimes, new Date()),
+    body: classPushBody(
+      studentName(outcome.student), outcome.className, status, outcome.slotTimes, new Date(), lateMinutes,
+    ),
     notify: { context: "class", classId, className: outcome.className },
     limit: "daily_change",
     date,
+    lateMinutes,
   });
-  return { ok: true, status, changed: true, notification };
+  return { ok: true, status, changed: true, notification, lateMinutes };
 }
 
-/** 원장·출결 권한 직원·그 반 선생님 — 오늘 반 출석/결석(선택 입력 `date` = 화면 날짜, B1) */
+/** 원장·출결 권한 직원·그 반 선생님 — 오늘 반 출석/지각/결석(선택 입력 `date` = 화면 날짜, B1; 지각은 `lateMinutes`, 3-B) */
 export const recordClassAttendance = onCall(async (request) => {
   if (!request.auth?.uid) throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
   const callerUid = request.auth.uid;
@@ -433,13 +534,13 @@ export const recordClassAttendance = onCall(async (request) => {
   const academyId = requireId(data.academyId);
   const classId = requireId(data.classId);
   const studentId = requireId(data.studentId);
-  const status = parseStatus(data.status);
+  const { status, lateMinutes } = parseClassStatusInput(data.status, data.lateMinutes);
   const via = parseVia(data.via, CLASS_VIA, "class_detail");
 
   const db = admin.firestore();
   const actor = await resolveAcademyActor(db, academyId, callerUid);
   if (!actor) throw new HttpsError("permission-denied", "이 반 출결을 기록할 권한이 없습니다.");
-  return recordClassCore(db, { actor, academyId, classId, studentId, status, via, date: data.date });
+  return recordClassCore(db, { actor, academyId, classId, studentId, status, lateMinutes, via, date: data.date });
 });
 
 /*
@@ -450,9 +551,9 @@ export const recordClassAttendance = onCall(async (request) => {
  *   정정 알림은 상태 바뀜 알림과 같은 키·하루 10회(`daily_change`)로 보낸다(J2).
  */
 
-type CancelOutcome =
+type CancelOutcome<S extends string = AttendanceStatus> =
   | { changed: false }
-  | { changed: true; cancelled: AttendanceStatus; student: Record<string, unknown> };
+  | { changed: true; cancelled: S; student: Record<string, unknown> };
 
 /** 원장·출결 권한 직원·그 반 선생님 — 오늘 반 출석/결석 기록 취소(문서 삭제 → 미처리) */
 export const cancelClassAttendance = onCall(async (request) => {
@@ -475,7 +576,7 @@ export const cancelClassAttendance = onCall(async (request) => {
   const studentRef = db.doc(`academies/${academyId}/students/${studentId}`);
   const recordRef = classAttendanceCol(db, academyId).doc(classAttendanceDocId(date, classId, studentId));
 
-  const outcome = await db.runTransaction(async (tx): Promise<CancelOutcome & { className?: string }> => {
+  const outcome = await db.runTransaction(async (tx): Promise<CancelOutcome<ClassStatus> & { className?: string }> => {
     const [clsSnap, studentSnap, recordSnap] = await tx.getAll(classRef, studentRef, recordRef);
     // 3-A: 그날 삭제된 반에 남은 기록은 원장·출결 권한만 취소(반 문서가 없으면 그 반 선생님을 알 수 없음)
     if (!clsSnap!.exists && !(canAll && recordSnap!.exists)) {
@@ -493,7 +594,7 @@ export const cancelClassAttendance = onCall(async (request) => {
     if (deduction !== undefined && deduction !== null) {
       throw new HttpsError("failed-precondition", "회차 차감이 연결된 기록이라 취소할 수 없습니다.");
     }
-    const cancelled: AttendanceStatus = recordSnap!.get("status") === "absent" ? "absent" : "present";
+    const cancelled = classStatusOf(recordSnap!.get("status"));
     const currentName = clsSnap!.get("name");
     const snapshotName = recordSnap!.get("className");
     const className =
@@ -562,10 +663,12 @@ export const cancelStudentArrival = onCall(async (request) => {
       reason: typeof reasonRaw === "string" ? reasonRaw : null,
       billed: isBilledRecord(snap!.data()),
       classRecordCount: classCount,
+      departed: snap!.get("departed") === true,
     });
     if (block === "has_class_records") {
       throw new HttpsError("failed-precondition", arrivalCancelClassRecordsMessage(classCount));
     }
+    if (block === "has_departure") throw new HttpsError("failed-precondition", departureLockTodayMessage(true));
     if (block === "billed") throw billedLockError([date], snap!.get("billedInvoicePeriod") as string);
     if (block === "reason_locked") throw new HttpsError("failed-precondition", ARRIVAL_CANCEL_REASON_LOCKED_MESSAGE);
     tx.delete(ref);

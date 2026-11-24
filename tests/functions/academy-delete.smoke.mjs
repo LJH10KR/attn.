@@ -128,6 +128,8 @@ for (const [p, v] of [
   [`academies/${D}/classHistory/h1`, { type: "x" }],
   [`academies/${D}/meta/onboarding`, { done: true }],
   [`academies/${D}/meta/options`, { rooms: [] }],
+  [`academies/${D}/meta/attendanceSettings`, { notify: { departure: false } }], // 3-B
+  [`academies/${D}/classCancellations/2026-11-01_c1`, { classId: "c1", date: "2026-11-01" }], // 3-B
   [`academies/${D}/roles/r1`, { name: "역할" }],
   [`academies/${D}/adminInbox/i1`, { kind: "x" }],
   [`academies/${D}/attendanceNotifications/n1`, { studentId: "s1" }],
@@ -137,6 +139,7 @@ for (const [p, v] of [
   ["_pushDeliveries/del-1", { academyId: D, recipientUid: P }],
   [`_pushRateLimits/attendance_${D}_s1`, { n: 1 }],
   [`_pushRateLimits/class_attendance_${D}_c1_s1`, { n: 1 }],
+  [`_pushRateLimits/departure_${D}_s1`, { n: 1 }], // 3-B 하원 하루 10회 키
   [`_pushRateLimits/attendance_${D}0_s1`, { n: 1 }], // 다른 학원(접두가 비슷) — 남아야 함
 ]) await db.doc(p).set(v);
 const signupHashes = (await db.collection("signupLinks").where("academyId", "==", D).get()).docs.map((d) => d.id);
@@ -164,6 +167,7 @@ for (const k of ["delparent", "delstaff"]) assert.equal((await db.doc(`attnLogin
 assert.equal((await db.doc("_pushDeliveries/del-1").get()).exists, false);
 assert.equal((await db.doc(`_pushRateLimits/attendance_${D}_s1`).get()).exists, false);
 assert.equal((await db.doc(`_pushRateLimits/class_attendance_${D}_c1_s1`).get()).exists, false);
+assert.equal((await db.doc(`_pushRateLimits/departure_${D}_s1`).get()).exists, false);
 assert.equal((await db.doc(`_pushRateLimits/attendance_${D}0_s1`).get()).exists, true, "비슷한 접두의 다른 학원은 유지");
 assert.equal((await db.doc(`_academyDeletions/${D}`).get()).exists, false, "삭제 표시 정리");
 for (const u of [P, S, K]) {

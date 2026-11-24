@@ -9,9 +9,19 @@ import { getFirebaseFunctions } from "@/lib/firebase/client-app";
 export type AttendanceLogItem = {
   id: string;
   academyId: string;
-  kind: "present" | "absent";
-  /** 2-I: 등원(arrival)·반 출결(class) — 그 전 기록은 arrival */
-  context?: "arrival" | "class";
+  /** 3-B: 수업 지각(late)·하원(left) */
+  kind: "present" | "late" | "absent" | "left";
+  /** 2-I: 등원(arrival)·반 출결(class) — 그 전 기록은 arrival. 3-B 하원(departure) */
+  context?: "arrival" | "class" | "departure";
+  /** 3-B 기록 날짜(서울) — 다시 보내기는 오늘 알림만 */
+  date?: string | null;
+  lateMinutes?: number | null;
+  /** 3-B 출결 설정에서 꺼 둔 종류 — 학부모에게 가지 않고 기록만(★9) */
+  muted?: boolean;
+  /** 3-B 다시 보낸 알림 */
+  resend?: boolean;
+  /** "absence_period" = 기간 결석 요약 */
+  origin?: string | null;
   classId?: string | null;
   className?: string | null;
   /** 2-J: 기록 취소 정정 알림이면 "cancel"(kind = 취소한 기록의 상태) — 그 전 기록은 record */
@@ -36,16 +46,25 @@ export type AttendanceLogItem = {
  * 2-J 취소 정정 알림: 등원 취소 / 미등원 취소 / 수업 출석 취소 · A반 / 수업 결석 취소 · A반.
  */
 export function attendanceKindLabel(item: {
-  kind: "present" | "absent";
+  kind: AttendanceLogItem["kind"];
   reason?: string | null;
-  context?: "arrival" | "class";
+  context?: AttendanceLogItem["context"];
   className?: string | null;
   action?: "record" | "cancel";
+  lateMinutes?: number | null;
 }): string {
   const cancel = item.action === "cancel";
+  // 3-B 하원 / 하원 취소
+  if (item.context === "departure") return cancel ? "하원 취소" : "하원";
   if (item.context === "class") {
     const name = item.className ? ` · ${item.className}` : "";
-    return `${item.kind === "present" ? "수업 출석" : "수업 결석"}${cancel ? " 취소" : ""}${name}`;
+    const what =
+      item.kind === "late"
+        ? `수업 지각${!cancel && typeof item.lateMinutes === "number" ? ` ${item.lateMinutes}분` : ""}`
+        : item.kind === "absent"
+          ? "수업 결석"
+          : "수업 출석";
+    return `${what}${cancel ? " 취소" : ""}${name}`;
   }
   if (cancel) return item.kind === "present" ? "등원 취소" : "미등원 취소";
   if (item.kind === "present") return "등원";
@@ -180,7 +199,7 @@ export function useAttendanceNotificationLog(params: {
     () =>
       visibleItems.map((x) => ({
         id: x.id,
-        title: `${attendanceKindLabel(x)} · ${x.studentName || x.studentId}`,
+        title: `${x.resend ? "다시 알림 · " : ""}${attendanceKindLabel(x)} · ${x.studentName || x.studentId}${x.muted ? " (알림 꺼짐)" : ""}`,
         detail: `${formatWhen(x.createdAtMillis)} · ${x.senderDisplayName} · ${x.parentDisplayName} 학부모`,
       })),
     [visibleItems],

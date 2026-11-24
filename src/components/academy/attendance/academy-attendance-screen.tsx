@@ -9,15 +9,18 @@ import {
 } from "@/components/academy/attendance/attendance-cancel-dialog";
 import { AttendanceCorrectionsList } from "@/components/academy/attendance/attendance-corrections-list";
 import { AttendanceDetailSheet, type DetailClassContext } from "@/components/academy/attendance/attendance-detail-sheet";
+import { AttendanceLateDialog, type LateDialogTarget } from "@/components/academy/attendance/attendance-late-dialog";
+import { AttendanceSettingsSheet } from "@/components/academy/attendance/attendance-settings-sheet";
 import {
   ClassAttendanceControls,
   type ClassAttendanceAction,
 } from "@/components/academy/attendance/class-attendance-controls";
+import { ClassCancellationSheet } from "@/components/academy/attendance/class-cancellation-sheet";
 import { StudentDetailSheet, STUDENT_STATUS_BADGE_CLASS } from "@/components/academy/student-detail/student-detail-sheet";
 import { useStudentDetailParam } from "@/components/academy/student-detail/use-student-detail-param";
 import { ModalPortal } from "@/components/ui/modal-portal";
-import { arrivalSummary, reasonLabel } from "@/lib/academy/attendance-labels";
-import { ATTENDANCE_BATCH_MAX, dateLabel, weekdayOfDate } from "@/lib/academy/attendance-rules";
+import { arrivalSummary, departureSummary, reasonLabel } from "@/lib/academy/attendance-labels";
+import { ATTENDANCE_BATCH_MAX, dateLabel, suggestLateMinutes, weekdayOfDate } from "@/lib/academy/attendance-rules";
 import {
   buildDayRoster,
   ROSTER_FILTER_ALL,
@@ -41,6 +44,7 @@ import { useSeoulToday } from "@/lib/academy/use-class-today-attendance";
 import {
   useAcademyStudentList,
   useDayArrivals,
+  useDayCancellations,
   useDayClassRecords,
   useDayCorrections,
 } from "@/lib/academy/use-day-attendance";
@@ -57,10 +61,22 @@ function shiftDate(date: string, days: number): string {
 }
 
 const LEFTOVER_LABEL = { ended: "종강", no_lesson: "이 요일 수업 없음", deleted: "삭제된 반" } as const;
-const BATCH_LABEL: Record<BatchAction, string> = { arrive: "등원", class_present: "출석", class_absent: "결석" };
+const BATCH_LABEL: Record<BatchAction, string> = { arrive: "등원", depart: "하원", class_present: "출석", class_absent: "결석" };
+const BATCH_ACTIONS: readonly BatchAction[] = ["arrive", "depart", "class_present", "class_absent"];
+
+/** 일괄 확인 창 본문(3-B 하원 — 지난 날짜는 시각 없이, ★4) */
+function batchConfirmBody(action: BatchAction, past: boolean, date: string): string {
+  if (past) {
+    const extra = action === "depart" ? " 하원은 시각 없이 \"하원 · 시각 없음\"으로 기록됩니다." : "";
+    return `${dateLabel(date)} 지난 날짜 정정이에요. 학부모 알림은 가지 않고 정정 기록이 남습니다.${extra} 처리할 수 없는 원생은 건너뜁니다.`;
+  }
+  const extra = action === "class_present" || action === "class_absent" ? " 지각으로 기록된 원생은 건너뜁니다." : "";
+  return `오늘 기록이에요. 원생마다 학부모에게 알림이 갑니다(하루 10회 제한 그대로).${extra} 처리할 수 없는 원생은 건너뜁니다.`;
+}
 
 type DetailTarget = { studentId: string; classId: string | null };
 type BatchConfirm = { section: RosterSection; action: BatchAction; studentIds: string[] };
+type LateTarget = LateDialogTarget & { section: RosterSection };
 
 /**
  * 수업 › 출결관리(3-A) — 날짜·반별 명단, 등원 + 반 출결, 지난 날짜 정정, 사유·코멘트, 일괄 처리, 그날 정정 기록.
@@ -85,6 +101,9 @@ export function AcademyAttendanceScreen() {
   const [batchConfirm, setBatchConfirm] = useState<BatchConfirm | null>(null);
   const [batchResult, setBatchResult] = useState<{ section: RosterSection; action: BatchAction; result: BatchResult } | null>(null);
   const [pastBusy, setPastBusy] = useState<string | null>(null);
+  const [lateTarget, setLateTarget] = useState<LateTarget | null>(null);
+  const [cancelSheet, setCancelSheet] = useState<RosterSection | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const studentDetail = useStudentDetailParam();
 
   const enabled = permissions.can("lessons.attendance");
@@ -92,9 +111,11 @@ export function AcademyAttendanceScreen() {
   const students = useAcademyStudentList(academyId, enabled, retry);
   const arrivals = useDayArrivals(academyId, date, enabled, retry);
   const records = useDayClassRecords(academyId, date, enabled, retry);
+  const cancellations = useDayCancellations(academyId, date, enabled, retry);
   const corrections = useDayCorrections(academyId, date, enabled, retry);
-  const loaded = !classesState.loading && students.loaded && arrivals.loaded && records.loaded;
-  const loadError = classesState.error ?? students.error ?? arrivals.error ?? records.error;
+  const loaded =
+    !classesState.loading && students.loaded && arrivals.loaded && records.loaded && cancellations.loaded;
+  const loadError = classesState.error ?? students.error ?? arrivals.error ?? records.error ?? cancellations.error;
 
   const roster = useMemo(
     () =>
@@ -104,8 +125,9 @@ export function AcademyAttendanceScreen() {
         students: students.data,
         arrivals: arrivals.data,
         records: records.data,
+        cancellations: cancellations.data,
       }),
-    [weekday, classesState.classes, students.data, arrivals.data, records.data],
+    [weekday, classesState.classes, students.data, arrivals.data, records.data, cancellations.data],
   );
   const filterOptions = useMemo(() => rosterFilterOptions(roster), [roster]);
   // 날짜를 바꿨는데 고른 반이 그날 목록에 없으면 전체로
@@ -153,15 +175,37 @@ export function AcademyAttendanceScreen() {
       setCancelTarget({
         kind: "arrival", studentId: row.studentId, studentName: row.name, status: action.arrival.status,
         reason: action.arrival.reason, billed: action.arrival.billed, knownClassRecords: recordsOf(row.studentId), past,
+        departed: action.arrival.departed,
+      });
+      return;
+    }
+    if (action.kind === "cancel_departure") {
+      setCancelTarget({ kind: "departure", studentId: row.studentId, studentName: row.name, past });
+      return;
+    }
+    if (action.kind === "late") {
+      // 미리 채움은 화면에서만(B1 ② — 등원 시각 − 첫 수업 시작, 1~180분일 때만)
+      const first = (row.record?.slots.length ? row.record.slots : section.slots)[0]?.start ?? null;
+      setLateTarget({
+        section,
+        studentId: row.studentId,
+        studentName: row.name,
+        classId: section.classId,
+        className: section.className,
+        current: action.current,
+        isLate: action.isLate,
+        suggested: suggestLateMinutes(action.arrivedAtMs, date, first),
       });
       return;
     }
     setNotice(null);
     if (!past) {
       if (action.kind === "arrive") await actions.markArrival(row.studentId, "present", "attendance_screen", date, row.name);
+      else if (action.kind === "depart") await actions.markDeparture(row.studentId, "attendance_screen", date, row.name);
       else await actions.markClass(section.classId, section.className, row.studentId, action.status, "attendance_screen", date, row.name);
       return;
     }
+    if (action.kind === "depart") return; // 지난 날짜 하원은 상세 시트·일괄에서
     if (action.kind === "arrive") {
       setPastBusy(`${row.studentId}:arrival:present`);
       pastOutcome(
@@ -180,25 +224,54 @@ export function AcademyAttendanceScreen() {
     setPastBusy(null);
   };
 
+  /** 지각 창 → 오늘은 기록 함수(분만 바꾸면 알림 없음, ★2), 지난 날짜는 정정 함수 */
+  const submitLate = async (t: LateTarget, minutes: number) => {
+    setLateTarget(null);
+    setNotice(null);
+    if (!past) {
+      await actions.markClass(t.classId, t.className, t.studentId, "late", "attendance_screen", date, t.studentName, minutes);
+      return;
+    }
+    setPastBusy(`${t.studentId}:${t.classId}:late`);
+    pastOutcome(
+      await fixes.correctClass({
+        classId: t.classId, studentId: t.studentId, date, status: "late", lateMinutes: minutes, via: "attendance_screen",
+      }),
+      `${t.studentName} ${t.className} 지각 ${minutes}분으로 정정했습니다.`,
+    );
+    setPastBusy(null);
+  };
+
   const confirmCancel = async (): Promise<string | null> => {
     const t = cancelTarget;
     if (!t) return null;
     setNotice(null);
     if (!past) {
-      return t.kind === "class"
-        ? actions.cancelClass({
-            classId: t.classId, className: t.className, studentId: t.studentId, status: t.status, date,
-            via: "attendance_screen", studentName: t.studentName,
-          })
-        : actions.cancelArrival({ studentId: t.studentId, status: t.status, date, via: "attendance_screen", studentName: t.studentName });
+      if (t.kind === "class") {
+        return actions.cancelClass({
+          classId: t.classId, className: t.className, studentId: t.studentId, status: t.status, date,
+          via: "attendance_screen", studentName: t.studentName,
+        });
+      }
+      if (t.kind === "departure") {
+        return actions.cancelDeparture({ studentId: t.studentId, date, via: "attendance_screen", studentName: t.studentName });
+      }
+      return actions.cancelArrival({ studentId: t.studentId, status: t.status, date, via: "attendance_screen", studentName: t.studentName });
     }
     const o =
       t.kind === "class"
         ? await fixes.correctClass({ classId: t.classId, studentId: t.studentId, date, status: null, via: "attendance_screen" })
-        : await fixes.correctArrival({ studentId: t.studentId, date, status: null, via: "attendance_screen" });
+        : t.kind === "departure"
+          ? await fixes.correctDeparture({ studentId: t.studentId, date, departed: false, via: "attendance_screen" })
+          : await fixes.correctArrival({ studentId: t.studentId, date, status: null, via: "attendance_screen" });
     if (!o.ok) return o.message;
     setNotice({
-      text: t.kind === "class" ? `${t.studentName} ${t.className} 수업 출결 기록을 지웠습니다.` : `${t.studentName} 등원 기록을 지웠습니다.`,
+      text:
+        t.kind === "class"
+          ? `${t.studentName} ${t.className} 수업 출결 기록을 지웠습니다.`
+          : t.kind === "departure"
+            ? `${t.studentName} 하원 기록을 지웠습니다.`
+            : `${t.studentName} 등원 기록을 지웠습니다.`,
       ok: true,
     });
     return null;
@@ -230,6 +303,8 @@ export function AcademyAttendanceScreen() {
           slots: row?.record?.slots.length ? row.record.slots : section.slots,
           record: row?.record ?? null,
           classEnded: section.cls === null || section.cls.status === "ended",
+          classDeleted: section.cls === null,
+          cancelled: section.cancellation !== null,
           hasLesson: section.kind === "lesson",
         }
       : null;
@@ -307,15 +382,25 @@ export function AcademyAttendanceScreen() {
             오늘로
           </button>
         ) : null}
+        <button
+          type="button"
+          onClick={() => setSettingsOpen(true)}
+          className="shrink-0 rounded-full border border-neutral-300/70 bg-white/60 px-2.5 py-1.5 text-xs font-medium text-neutral-700"
+          aria-label="출결 설정"
+        >
+          ⚙ 설정
+        </button>
       </div>
 
-      {/* 요약 — 3-B 하원·지각 칸이 들어갈 자리(격자 확장) */}
-      <section className="glass-card grid grid-cols-3 gap-y-2 px-4 py-3 text-center" aria-label="요약">
+      {/* 요약 4×2(3-B) — 등원 줄 / 수업 줄(휴강 반 제외) */}
+      <section className="glass-card grid grid-cols-4 gap-y-2 px-3 py-3 text-center" aria-label="요약">
         <Stat label="등원" value={summary.present} tone="text-emerald-800" />
         <Stat label="미등원" value={summary.absent} tone="text-amber-800" />
+        <Stat label="하원" value={summary.departed} tone="text-sky-800" />
         <Stat label="기록 없음" value={summary.noRecord} tone="text-neutral-600" />
-        <Stat label="수업 출석" value={summary.classPresent} tone="text-emerald-800" />
-        <Stat label="수업 결석" value={summary.classAbsent} tone="text-amber-800" />
+        <Stat label="출석" value={summary.classPresent} tone="text-emerald-800" />
+        <Stat label="지각" value={summary.classLate} tone="text-violet-800" />
+        <Stat label="결석" value={summary.classAbsent} tone="text-amber-800" />
         <Stat label="미처리" value={summary.unprocessed} tone="text-red-700" />
       </section>
 
@@ -379,6 +464,7 @@ export function AcademyAttendanceScreen() {
               onToggleRow={toggleSelect}
               onOpenRow={(row) => setDetail({ studentId: row.studentId, classId: section.classId })}
               onAction={(row, action) => void onRowAction(section, row, action)}
+              onOpenCancellation={() => setCancelSheet(section)}
             />
           ))}
           {showNoClass && roster.noClass.length > 0 ? (
@@ -396,7 +482,12 @@ export function AcademyAttendanceScreen() {
                     >
                       <span className="min-w-0 truncate text-sm font-medium text-foreground">{n.name}</span>
                       <span className="shrink-0 text-[11px] text-neutral-500">{n.gradeLabel}</span>
-                      <span className="ml-auto shrink-0 text-[11px] text-neutral-600">{arrivalSummary(n.arrival)}</span>
+                      <span className="ml-auto shrink-0 text-right text-[11px] text-neutral-600">
+                        {arrivalSummary(n.arrival)}
+                        {n.arrival.status === "present" ? (
+                          <span className="block text-[10px] text-neutral-500">{departureSummary(n.arrival)}</span>
+                        ) : null}
+                      </span>
                     </button>
                   </li>
                 ))}
@@ -413,15 +504,16 @@ export function AcademyAttendanceScreen() {
           <div className="fixed inset-x-0 bottom-0 z-[120] border-t border-neutral-200 bg-white/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-8px_24px_rgba(0,0,0,0.08)]">
             <div className="mx-auto flex max-w-lg items-center gap-2">
               <span className="min-w-0 flex-1 truncate text-xs text-neutral-700">
-                <b className="text-foreground">{selected.size}명</b> 선택 · {selectingSection.className}
+                <b className="text-foreground">{selected.size}명</b>
+                <span className="hidden min-[400px]:inline"> 선택 · {selectingSection.className}</span>
               </span>
-              {(["arrive", "class_present", "class_absent"] as const).map((a) => (
+              {BATCH_ACTIONS.map((a) => (
                 <button
                   key={a}
                   type="button"
                   disabled={selected.size === 0 || anyBusy}
                   onClick={() => setBatchConfirm({ section: selectingSection, action: a, studentIds: [...selected] })}
-                  className="shrink-0 rounded-[8px] bg-[#222] px-3 py-2 text-xs font-medium text-white disabled:opacity-40"
+                  className="shrink-0 rounded-[8px] bg-[#222] px-2.5 py-2 text-xs font-medium text-white disabled:opacity-40"
                 >
                   {BATCH_LABEL[a]}
                 </button>
@@ -432,9 +524,10 @@ export function AcademyAttendanceScreen() {
                   setSelecting(null);
                   setSelected(new Set());
                 }}
-                className="shrink-0 rounded-[8px] border border-neutral-300 px-2.5 py-2 text-xs"
+                className="shrink-0 rounded-[8px] border border-neutral-300 px-2 py-2 text-xs"
+                aria-label="선택 닫기"
               >
-                닫기
+                ✕
               </button>
             </div>
           </div>
@@ -444,11 +537,7 @@ export function AcademyAttendanceScreen() {
       {batchConfirm ? (
         <ConfirmSheet
           title={`${batchConfirm.studentIds.length}명을 ${batchConfirm.section.className} ${BATCH_LABEL[batchConfirm.action]}으로 처리할까요?`}
-          body={
-            past
-              ? `${dateLabel(date)} 지난 날짜 정정이에요. 학부모 알림은 가지 않고 정정 기록이 남습니다. 처리할 수 없는 원생은 건너뜁니다.`
-              : "오늘 기록이에요. 원생마다 학부모에게 알림이 갑니다(하루 10회 제한 그대로). 처리할 수 없는 원생은 건너뜁니다."
-          }
+          body={batchConfirmBody(batchConfirm.action, past, date)}
           confirmLabel={`${BATCH_LABEL[batchConfirm.action]} 처리`}
           busy={fixes.busyKey === "batch"}
           onConfirm={() => void runBatch()}
@@ -494,6 +583,62 @@ export function AcademyAttendanceScreen() {
         />
       ) : null}
 
+      {lateTarget ? (
+        <AttendanceLateDialog
+          key={`${lateTarget.studentId}:${lateTarget.classId}`}
+          target={lateTarget}
+          past={past}
+          onSubmitAction={(minutes) => void submitLate(lateTarget, minutes)}
+          onClearAction={() => {
+            const t = lateTarget;
+            setLateTarget(null);
+            setCancelTarget({
+              kind: "class", studentId: t.studentId, studentName: t.studentName, classId: t.classId,
+              className: t.className, status: "late", past,
+            });
+          }}
+          onCloseAction={() => setLateTarget(null)}
+        />
+      ) : null}
+
+      {cancelSheet ? (
+        <ClassCancellationSheet
+          key={`${cancelSheet.classId}:${date}`}
+          date={date}
+          today={today.date}
+          className={cancelSheet.className}
+          classExists={cancelSheet.cls !== null}
+          classEnded={cancelSheet.cls === null || cancelSheet.cls.status === "ended"}
+          hasLesson={cancelSheet.kind === "lesson"}
+          recordCount={cancelSheet.rows.filter((r) => r.record).length}
+          cancellation={roster.sections.find((s) => s.classId === cancelSheet.classId)?.cancellation ?? null}
+          onSubmitAction={async (p) => {
+            setNotice(null);
+            const o = await fixes.setCancellation({ classId: cancelSheet.classId, date, via: "attendance_screen", ...p });
+            if (o.ok) {
+              setNotice({
+                text: !o.changed
+                  ? "바뀐 내용이 없습니다."
+                  : p.cancelled
+                    ? `${cancelSheet.className} ${dateLabel(date)} 휴강을 저장했습니다. 학부모 알림은 가지 않습니다.`
+                    : `${cancelSheet.className} ${dateLabel(date)} 휴강을 취소했습니다.`,
+                ok: true,
+              });
+            }
+            return o;
+          }}
+          onCloseAction={() => setCancelSheet(null)}
+        />
+      ) : null}
+
+      {settingsOpen ? (
+        <AttendanceSettingsSheet
+          academyId={academyId}
+          onSavedAction={(text) => setNotice({ text, ok: true })}
+          onCloseAction={() => setSettingsOpen(false)}
+        />
+      ) : null}
+
       {studentDetail.studentId ? (
         <StudentDetailSheet
           key={studentDetail.studentId}
@@ -530,6 +675,7 @@ function RosterSectionView({
   onToggleRow,
   onOpenRow,
   onAction,
+  onOpenCancellation,
 }: {
   section: RosterSection;
   mode: "today" | "past";
@@ -541,23 +687,39 @@ function RosterSectionView({
   onToggleRow: (studentId: string) => void;
   onOpenRow: (row: RosterRow) => void;
   onAction: (row: RosterRow, action: ClassAttendanceAction) => void;
+  onOpenCancellation: () => void;
 }) {
   const classEnded = section.cls === null || section.cls.status === "ended";
   const hasLesson = section.kind === "lesson";
+  const cancelled = section.cancellation !== null;
+  // 휴강 버튼: 수업 반(오늘·지난 날) 또는 이미 휴강인 반(취소·메모) — 기록만 남은 반은 출결이 있어 휴강 불가
+  const canCancelLesson = cancelled || hasLesson;
   return (
     <section aria-label={section.className}>
       <div className="mb-2 flex items-center gap-1.5 px-1">
         <h3 className="min-w-0 truncate text-sm font-semibold text-foreground">{section.className}</h3>
-        <span className="shrink-0 text-[11px] text-neutral-500">
+        <span className="min-w-0 truncate text-[11px] text-neutral-500">
           {section.slots.length > 0 ? section.slots.map((s) => `${s.start}–${s.end}`).join(", ") : "수업 시간 기록 없음"}
         </span>
-        {section.leftoverReason ? (
+        {section.leftoverReason && !cancelled ? (
           <span className="shrink-0 rounded-full bg-neutral-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-700">
             기록만 · {LEFTOVER_LABEL[section.leftoverReason]}
           </span>
         ) : null}
-        {/* 3-B 휴강 배지 자리 */}
         <span className="ml-auto shrink-0 text-[11px] text-neutral-500">{section.rows.length}명</span>
+        {canCancelLesson ? (
+          <button
+            type="button"
+            onClick={onOpenCancellation}
+            disabled={disabled}
+            className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-medium disabled:opacity-40 ${
+              cancelled ? "border-rose-500/60 bg-rose-500/15 text-rose-900" : "border-neutral-300/70 bg-white/60 text-neutral-700"
+            }`}
+            aria-label={cancelled ? `${section.className} 휴강 — 메모·취소` : `${section.className} 휴강 기록`}
+          >
+            휴강{cancelled ? " ✓" : ""}
+          </button>
+        ) : null}
         {section.rows.length > 0 ? (
           <button
             type="button"
@@ -571,6 +733,12 @@ function RosterSectionView({
           </button>
         ) : null}
       </div>
+      {cancelled ? (
+        <p className="mb-2 break-keep rounded-xl bg-rose-500/10 px-3 py-1.5 text-[11px] text-rose-900">
+          휴강한 수업이에요. 출결을 기록할 수 없고 요약 숫자에서 빠집니다.
+          {section.cancellation?.memo ? ` 메모: ${section.cancellation.memo}` : ""}
+        </p>
+      ) : null}
       {section.rows.length === 0 ? (
         <p className="glass-card py-6 text-center text-xs text-neutral-500">이 반 재원생이 없습니다.</p>
       ) : (
@@ -598,21 +766,32 @@ function RosterSectionView({
                     </span>
                   ) : null}
                 </span>
-                <RowChips row={row} />
+                <RowChips row={row} mode={mode} cancelled={cancelled} />
               </button>
               <ClassAttendanceControls
                 mode={mode}
                 studentActive={row.studentStatus === "enrolled"}
                 classEnded={classEnded}
+                classDeleted={section.cls === null}
+                classCancelled={cancelled}
                 hasLessonToday={hasLesson}
                 arrival={
                   row.arrival
-                    ? { status: row.arrival.status, billed: row.arrival.billed, arrivedAtMs: row.arrival.arrivedAtMs, reason: row.arrival.reason }
+                    ? {
+                        status: row.arrival.status,
+                        billed: row.arrival.billed,
+                        arrivedAtMs: row.arrival.arrivedAtMs,
+                        reason: row.arrival.reason,
+                        departed: row.arrival.departed,
+                        leftAtMs: row.arrival.leftAtMs,
+                      }
                     : null
                 }
                 record={row.record?.status}
+                lateMinutes={row.record?.lateMinutes ?? null}
                 stateError={false}
                 allowArrive
+                allowDepart={mode === "today"}
                 busy={rowBusyFor(busyKey, row.studentId, section.classId)}
                 disabled={disabled}
                 onAction={(action) => onAction(row, action)}
@@ -625,16 +804,21 @@ function RosterSectionView({
   );
 }
 
-/** 이름 아래 둘째 줄 — 3-B 지각·하원, 3-C 회차 칩이 들어갈 자리 */
-function RowChips({ row }: { row: RosterRow }) {
+/** 이름 아래 둘째 줄 — 3-B 하원(지난 날짜만 칩, 오늘은 [하원] 버튼 ★14), 3-C 회차 칩이 들어갈 자리 */
+function RowChips({ row, mode, cancelled }: { row: RosterRow; mode: "today" | "past"; cancelled: boolean }) {
   const chips: { text: string; cls: string }[] = [];
   if (row.arrival?.status === "present" && row.arrival.arrivedAtMs === null) {
     chips.push({ text: arrivalSummary(row.arrival), cls: "text-neutral-500" });
   }
+  if (mode === "past" && row.arrival?.status === "present") {
+    chips.push({ text: departureSummary(row.arrival), cls: row.arrival.departed ? "text-sky-800" : "text-neutral-400" });
+  }
   if (row.arrival?.status === "absent" && reasonLabel(row.arrival.reason) && row.arrival.reason !== "general") {
     chips.push({ text: `미등원 사유 ${reasonLabel(row.arrival.reason)}`, cls: "text-amber-800" });
   }
-  if (!row.record && row.arrival?.status === "present") chips.push({ text: "미처리", cls: "text-red-700 font-semibold" });
+  if (!row.record && !cancelled && row.arrival?.status === "present") {
+    chips.push({ text: "미처리", cls: "text-red-700 font-semibold" });
+  }
   if (row.record?.status === "absent" && row.record.reason && row.record.reason !== "general") {
     chips.push({ text: `결석 사유 ${reasonLabel(row.record.reason)}`, cls: "text-amber-800" });
   }

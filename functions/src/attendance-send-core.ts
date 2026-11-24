@@ -6,7 +6,14 @@ import {
   createAttendancePushDeliveryDoc,
   deliverAttendancePushOnce,
 } from "./attendance-push-delivery";
-import { ATTENDANCE_DAILY_CHANGE_PUSH_LIMIT, seoulDateString } from "./lib/attendance-rules";
+import {
+  ATTENDANCE_DAILY_CHANGE_PUSH_LIMIT,
+  notifyTypeFor,
+  readNotifySettings,
+  seoulDateString,
+  type AttendanceNotifyKind,
+  type AttendanceNotifyType,
+} from "./lib/attendance-rules";
 import { resolveParentRecipients } from "./lib/parent-recipients";
 
 /** 기간 결석 요약 알림의 같은 원생 연속 전송 간격 */
@@ -20,13 +27,14 @@ export type AttendanceSender = {
 };
 
 /**
- * 알림 맥락(2-I) — 등원(날짜 단위)·반 출결(날짜 × 반).
+ * 알림 맥락(2-I, 3-B 하원) — 등원(날짜 단위)·반 출결(날짜 × 반)·하원(날짜 단위).
  * 쿨다운·횟수 키도 맥락별: 등원 `attendance_{academy}_{student}`(기간 결석과 공유),
- * 반 `class_attendance_{academy}_{class}_{student}`.
+ * 반 `class_attendance_{academy}_{class}_{student}`, 하원 `departure_{academy}_{student}`(B5 — 등원과 따로 하루 10회).
  */
 export type AttendanceNotifyContext =
   | { context: "arrival" }
-  | { context: "class"; classId: string; className: string };
+  | { context: "class"; classId: string; className: string }
+  | { context: "departure" };
 
 /**
  * 전송 제한 방식
@@ -41,18 +49,34 @@ export type AttendanceNotifyOutcome =
   | {
       ok: true;
       sent: 0;
-      reason: "no_parent" | "parent_opt_out" | "no_token" | "cooldown" | "daily_limit";
+      /** muted = 학원 출결 설정에서 끈 종류(3-B ★9 — 알림 기록만, 벨·푸시 없음) */
+      reason: "no_parent" | "parent_opt_out" | "no_token" | "cooldown" | "daily_limit" | "muted";
     };
 
-function rateLimitRef(
+export function rateLimitRef(
   db: admin.firestore.Firestore,
   academyId: string,
   studentId: string,
   ctx: AttendanceNotifyContext,
 ) {
-  return ctx.context === "class"
-    ? db.doc(`_pushRateLimits/class_attendance_${academyId}_${ctx.classId}_${studentId}`)
-    : db.doc(`_pushRateLimits/attendance_${academyId}_${studentId}`);
+  if (ctx.context === "class") {
+    return db.doc(`_pushRateLimits/class_attendance_${academyId}_${ctx.classId}_${studentId}`);
+  }
+  if (ctx.context === "departure") return db.doc(`_pushRateLimits/departure_${academyId}_${studentId}`);
+  return db.doc(`_pushRateLimits/attendance_${academyId}_${studentId}`);
+}
+
+export function attendanceSettingsRef(db: admin.firestore.Firestore, academyId: string) {
+  return db.doc(`academies/${academyId}/meta/attendanceSettings`);
+}
+
+/** 학원 출결 설정 — 종류별 켜짐(문서가 없으면 모두 켬, B6) */
+export async function loadNotifySettings(
+  db: admin.firestore.Firestore,
+  academyId: string,
+): Promise<Record<AttendanceNotifyType, boolean>> {
+  const snap = await attendanceSettingsRef(db, academyId).get();
+  return readNotifySettings(snap.exists ? snap.get("notify") : undefined);
 }
 
 /** 전송 자격 확보 — 못 보내면 이유, 보내면 null */
@@ -81,16 +105,24 @@ async function claimSend(
   });
 }
 
+/** 벨 종류 — 학부모 벨 항목 `kind`(화면은 `body`만 씀) */
+function bellKindFor(notify: AttendanceNotifyContext, kind: AttendanceNotifyKind): string {
+  if (notify.context === "departure") return "departure";
+  if (notify.context === "class") return kind === "late" ? "class_late" : kind === "absent" ? "class_absent" : "class_present";
+  return kind === "absent" ? "attendance_absent" : "attendance_present";
+}
+
 /**
  * 학부모 알림 1건 — 알림 기록(`attendanceNotifications`) + 보호자별 벨 + 푸시.
  * 기록(등원·반 출결 문서)은 호출한 쪽이 먼저 저장한다. 전송 제한에 걸리면 기록 없이 이유만 돌려준다.
+ * 3-B ★9: 받을 보호자가 있는데 학원 설정에서 끈 종류면 알림 기록(`muted: true`)만 남기고 벨·푸시·하루 횟수는 없다.
  */
 export async function sendStudentAttendanceNotificationCore(
   db: admin.firestore.Firestore,
   params: {
     academyId: string;
     studentId: string;
-    kind: "present" | "absent";
+    kind: AttendanceNotifyKind;
     sender: AttendanceSender;
     studentData: Record<string, unknown>;
     body: string;
@@ -107,6 +139,12 @@ export async function sendStudentAttendanceNotificationCore(
     action?: "cancel";
     /** 취소 경로(기록용, 2-J) — 삭제된 문서 대신 알림 기록에 남김 */
     via?: string;
+    /** 3-B 지각 분(반 맥락 late) */
+    lateMinutes?: number | null;
+    /** 3-B 기간 결석 요약 알림(다시 보내기에서 저장된 문구를 씀) */
+    origin?: "absence_period";
+    /** 3-B 다시 보내기 — 원래 알림 기록 id */
+    resendOfId?: string;
   },
 ): Promise<AttendanceNotifyOutcome> {
   const { academyId, studentId, kind, sender, studentData, reason, body, notify, limit, date, action, via } = params;
@@ -117,15 +155,20 @@ export async function sendStudentAttendanceNotificationCore(
     return { ok: true as const, sent: 0, reason: "no_parent" as const };
   }
 
-  const blocked = await claimSend(db, rateLimitRef(db, academyId, studentId, notify), limit, {
-    actorUid: sender.actorUid,
-    actorRole: sender.role,
-    studentId,
-    academyId,
-    ...(notify.context === "class" ? { classId: notify.classId } : {}),
-  });
-  if (blocked) {
-    return { ok: true as const, sent: 0, reason: blocked };
+  const notifyType = notifyTypeFor({ context: notify.context, kind, action: action ?? "record" });
+  const muted = !(await loadNotifySettings(db, academyId))[notifyType];
+
+  if (!muted) {
+    const blocked = await claimSend(db, rateLimitRef(db, academyId, studentId, notify), limit, {
+      actorUid: sender.actorUid,
+      actorRole: sender.role,
+      studentId,
+      academyId,
+      ...(notify.context === "class" ? { classId: notify.classId } : {}),
+    });
+    if (blocked) {
+      return { ok: true as const, sent: 0, reason: blocked };
+    }
   }
 
   const studentName =
@@ -133,15 +176,21 @@ export async function sendStudentAttendanceNotificationCore(
   const contextFields =
     notify.context === "class"
       ? { context: "class" as const, classId: notify.classId, className: notify.className }
-      : { context: "arrival" as const };
+      : { context: notify.context };
+  const lateFields = kind === "late" && params.lateMinutes ? { lateMinutes: params.lateMinutes } : {};
 
   const notifRef = await db.collection(`academies/${academyId}/attendanceNotifications`).add({
     kind,
     ...contextFields,
     ...actionFields,
+    ...lateFields,
     ...(via ? { via } : {}),
     date,
     ...(reason ? { reason } : {}),
+    ...(params.origin ? { origin: params.origin } : {}),
+    ...(params.resendOfId ? { resend: true, resendOfId: params.resendOfId } : {}),
+    ...(muted ? { muted: true } : {}),
+    body,
     academyId,
     studentId,
     studentName,
@@ -152,10 +201,9 @@ export async function sendStudentAttendanceNotificationCore(
     createdAt: FieldValue.serverTimestamp(),
   });
 
-  const bellKind =
-    notify.context === "class"
-      ? kind === "present" ? "class_present" : "class_absent"
-      : kind === "present" ? "attendance_present" : "attendance_absent";
+  if (muted) return { ok: true as const, sent: 0, reason: "muted" as const };
+
+  const bellKind = bellKindFor(notify, kind);
 
   // 연결된 활성 보호자마다 벨 + 푸시(전달 문서는 수신자별 — 재시도도 수신자별)
   const outcomes = await Promise.all(
@@ -165,6 +213,7 @@ export async function sendStudentAttendanceNotificationCore(
         kind: bellKind,
         ...contextFields,
         ...actionFields,
+        ...lateFields,
         academyId,
         studentId,
         studentName,

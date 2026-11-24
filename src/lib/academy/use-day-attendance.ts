@@ -10,9 +10,15 @@ import {
   type Query,
 } from "firebase/firestore";
 import { useEffect, useState } from "react";
-import type { DayArrival, DayClassRecord } from "@/lib/academy/day-roster";
+import { classStatusOf } from "@/lib/academy/attendance-rules";
+import type { DayArrival, DayCancellation, DayClassRecord, RosterSlot } from "@/lib/academy/day-roster";
 import { compareStudentsByName, docToStudent, type StudentVM } from "@/lib/academy/student-row";
-import { academyClassAttendancePath, academyStudentsPath, COLLECTIONS } from "@/lib/firebase/attn-schema";
+import {
+  academyClassAttendancePath,
+  academyClassCancellationsPath,
+  academyStudentsPath,
+  COLLECTIONS,
+} from "@/lib/firebase/attn-schema";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
 
 /**
@@ -35,6 +41,7 @@ function millisOf(v: unknown): number | null {
 }
 
 export function toDayArrival(d: DocumentData): DayArrival {
+  const departed = d.departed === true;
   return {
     status: d.status === "absent" ? "absent" : "present",
     reason: str(d.reason),
@@ -43,23 +50,31 @@ export function toDayArrival(d: DocumentData): DayArrival {
     arrivedAtManual: d.arrivedAtManual === true,
     billed: typeof d.billedInvoicePeriod === "string" && d.billedInvoicePeriod.length > 0,
     corrected: d.correctedAt != null,
+    departed,
+    leftAtMs: departed ? millisOf(d.leftAt) : null,
+    leftAtManual: departed && d.leftAtManual === true,
   };
 }
 
-function toDayClassRecord(d: DocumentData): DayClassRecord | null {
-  if (typeof d.classId !== "string" || typeof d.studentId !== "string") return null;
-  const slots = Array.isArray(d.slots)
-    ? d.slots.flatMap((s: unknown) => {
+function slotsOf(v: unknown): RosterSlot[] {
+  return Array.isArray(v)
+    ? v.flatMap((s: unknown) => {
         const x = s as { start?: unknown; end?: unknown };
         return typeof x?.start === "string" && typeof x?.end === "string" ? [{ start: x.start, end: x.end }] : [];
       })
     : [];
+}
+
+function toDayClassRecord(d: DocumentData): DayClassRecord | null {
+  if (typeof d.classId !== "string" || typeof d.studentId !== "string") return null;
+  const status = classStatusOf(d.status);
   return {
     classId: d.classId,
     studentId: d.studentId,
-    status: d.status === "absent" ? "absent" : "present",
+    status,
+    lateMinutes: status === "late" && typeof d.lateMinutes === "number" ? d.lateMinutes : null,
     className: str(d.className) ?? "반",
-    slots,
+    slots: slotsOf(d.slots),
     reason: str(d.reason),
     comment: str(d.comment),
     corrected: d.correctedAt != null,
@@ -125,13 +140,39 @@ export function useDayClassRecords(academyId: string, date: string, enabled: boo
   );
 }
 
-/** 정정 이력 한 건(화면 표시용) */
+const EMPTY_CANCELLATIONS: ReadonlyMap<string, DayCancellation> = new Map();
+
+/** 3-B 그날 휴강(반 id → 휴강) — 출결·청구서 권한(규칙) */
+export function useDayCancellations(academyId: string, date: string, enabled: boolean, retryToken = 0) {
+  return useLiveQuery<ReadonlyMap<string, DayCancellation>>(
+    enabled ? `${academyId}|${date}` : null,
+    () => query(collection(getFirebaseDb(), academyClassCancellationsPath(academyId)), where("date", "==", date)),
+    (docs) => {
+      const m = new Map<string, DayCancellation>();
+      for (const d of docs) {
+        if (typeof d.classId !== "string") continue;
+        m.set(d.classId, {
+          classId: d.classId,
+          className: str(d.className) ?? "반",
+          slots: slotsOf(d.slots),
+          memo: str(d.memo),
+          byName: str(d.byName) ?? "",
+        });
+      }
+      return m;
+    },
+    EMPTY_CANCELLATIONS,
+    retryToken,
+  );
+}
+
+/** 정정 이력 한 건(화면 표시용) — 3-B 하원(departure)·휴강(class_cancel) 층 */
 export type AttendanceCorrectionRow = {
   studentId: string;
   studentName: string;
   classId: string | null;
   className: string | null;
-  layer: "arrival" | "class";
+  layer: "arrival" | "class" | "departure" | "class_cancel";
   action: "create" | "update" | "delete" | "detail";
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
@@ -152,10 +193,11 @@ export function useDayCorrections(academyId: string, date: string, enabled: bool
       docs
         .map((d) => ({
           studentId: String(d.studentId ?? ""),
-          studentName: str(d.studentName) ?? "학생",
+          // 휴강 이력은 원생이 없다(studentName "")
+          studentName: str(d.studentName) ?? (d.layer === "class_cancel" ? "" : "학생"),
           classId: str(d.classId),
           className: str(d.className),
-          layer: d.layer === "class" ? ("class" as const) : ("arrival" as const),
+          layer: (["class", "departure", "class_cancel"].includes(d.layer) ? d.layer : "arrival") as AttendanceCorrectionRow["layer"],
           action: (["create", "update", "delete", "detail"].includes(d.action) ? d.action : "update") as AttendanceCorrectionRow["action"],
           before: d.before && typeof d.before === "object" ? (d.before as Record<string, unknown>) : null,
           after: d.after && typeof d.after === "object" ? (d.after as Record<string, unknown>) : null,

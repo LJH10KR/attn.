@@ -9,6 +9,9 @@ import { StudentDetailSheet } from "@/components/academy/student-detail/student-
 import { useStudentDetailParam } from "@/components/academy/student-detail/use-student-detail-param";
 import { groupMyClasses, TeacherMyClasses } from "@/components/teacher/teacher-my-classes";
 import type { ClassAttendanceAction } from "@/components/academy/attendance/class-attendance-controls";
+import { AttendanceLateDialog, type LateDialogTarget } from "@/components/academy/attendance/attendance-late-dialog";
+import { slotsOnWeekday } from "@/lib/academy/class-schedule";
+import { suggestLateMinutes } from "@/lib/academy/attendance-rules";
 import {
   AttendanceCancelDialog,
   type AttendanceCancelTarget,
@@ -351,11 +354,30 @@ function TeacherDashboard() {
     (s: StudentVM) => canReadAllArrivals || (viewerUid !== null && s.teacherUids.includes(viewerUid)),
     [canReadAllArrivals, viewerUid],
   );
-  const { markArrival, markClass, cancelClass, cancelArrival } = attendanceActions;
+  const { markArrival, markClass, cancelClass, cancelArrival, markDeparture, cancelDeparture } = attendanceActions;
   // 2-J 취소 확인 창 대상
   const [cancelTarget, setCancelTarget] = useState<AttendanceCancelTarget | null>(null);
+  // 3-B 지각 창
+  const [lateTarget, setLateTarget] = useState<LateDialogTarget | null>(null);
   const onAttendanceAction = useCallback(
     (student: StudentVM, cls: AcademyClassBrief, action: ClassAttendanceAction, known: KnownClassRecord[]) => {
+      if (action.kind === "late") {
+        const first = slotsOnWeekday(cls.schedule, today.weekday)[0]?.start ?? null;
+        setLateTarget({
+          studentId: student.id,
+          studentName: student.name,
+          classId: cls.id,
+          className: cls.name,
+          current: action.current,
+          isLate: action.isLate,
+          suggested: suggestLateMinutes(action.arrivedAtMs, today.date, first),
+        });
+        return;
+      }
+      if (action.kind === "cancel_departure") {
+        setCancelTarget({ kind: "departure", studentId: student.id, studentName: student.name });
+        return;
+      }
       if (action.kind === "cancel_class") {
         setCancelTarget({
           kind: "class",
@@ -376,40 +398,47 @@ function TeacherDashboard() {
           reason: action.arrival.reason,
           billed: action.arrival.billed,
           knownClassRecords: known,
+          departed: action.arrival.departed,
         });
         return;
       }
       setNotifyMessage(null);
       if (action.kind === "arrive") {
         void markArrival(student.id, "present", "teacher_my_classes", today.date, student.name);
+      } else if (action.kind === "depart") {
+        void markDeparture(student.id, "teacher_my_classes", today.date, student.name);
       } else {
         void markClass(cls.id, cls.name, student.id, action.status, "teacher_my_classes", today.date, student.name);
       }
     },
-    [markArrival, markClass, today.date],
+    [markArrival, markClass, markDeparture, today.date, today.weekday],
   );
   const confirmCancel = useCallback(() => {
     if (!cancelTarget) return Promise.resolve(null);
     setNotifyMessage(null);
     const t = cancelTarget;
-    return t.kind === "class"
-      ? cancelClass({
-          classId: t.classId,
-          className: t.className,
-          studentId: t.studentId,
-          status: t.status,
-          date: today.date,
-          via: "teacher_my_classes",
-          studentName: t.studentName,
-        })
-      : cancelArrival({
-          studentId: t.studentId,
-          status: t.status,
-          date: today.date,
-          via: "teacher_my_classes",
-          studentName: t.studentName,
-        });
-  }, [cancelTarget, cancelClass, cancelArrival, today.date]);
+    if (t.kind === "class") {
+      return cancelClass({
+        classId: t.classId,
+        className: t.className,
+        studentId: t.studentId,
+        status: t.status,
+        date: today.date,
+        via: "teacher_my_classes",
+        studentName: t.studentName,
+      });
+    }
+    if (t.kind === "departure") {
+      return cancelDeparture({ studentId: t.studentId, date: today.date, via: "teacher_my_classes", studentName: t.studentName });
+    }
+    return cancelArrival({
+      studentId: t.studentId,
+      status: t.status,
+      date: today.date,
+      via: "teacher_my_classes",
+      studentName: t.studentName,
+    });
+  }, [cancelTarget, cancelClass, cancelArrival, cancelDeparture, today.date]);
 
   const headerProfile = useMemo(
     () =>
@@ -574,6 +603,29 @@ function TeacherDashboard() {
           target={cancelTarget}
           onConfirmAction={confirmCancel}
           onCloseAction={() => setCancelTarget(null)}
+        />
+      ) : null}
+
+      {lateTarget ? (
+        <AttendanceLateDialog
+          key={`${lateTarget.studentId}:${lateTarget.classId}`}
+          target={lateTarget}
+          past={false}
+          onSubmitAction={(minutes) => {
+            const t = lateTarget;
+            setLateTarget(null);
+            setNotifyMessage(null);
+            void markClass(t.classId, t.className, t.studentId, "late", "teacher_my_classes", today.date, t.studentName, minutes);
+          }}
+          onClearAction={() => {
+            const t = lateTarget;
+            setLateTarget(null);
+            setCancelTarget({
+              kind: "class", studentId: t.studentId, studentName: t.studentName, classId: t.classId,
+              className: t.className, status: "late",
+            });
+          }}
+          onCloseAction={() => setLateTarget(null)}
         />
       ) : null}
 
