@@ -6,6 +6,18 @@
 
 export type AttendanceStatus = "present" | "absent";
 
+/** 반 출결 상태(3-B: 지각 추가 — 사람이 직접, 분은 `lateMinutes`) */
+export type ClassStatus = "present" | "late" | "absent";
+
+export function isClassStatusValue(raw: unknown): raw is ClassStatus {
+  return raw === "present" || raw === "late" || raw === "absent";
+}
+
+/** 문서 값 → 반 출결 상태(모르는 값은 출석 — 예전 두 값 매핑과 같은 기본) */
+export function classStatusOf(raw: unknown): ClassStatus {
+  return raw === "absent" ? "absent" : raw === "late" ? "late" : "present";
+}
+
 export type ScheduleSlotLike = { weekday: number; start: string; end: string };
 
 /** 반 출결을 막는 이유(검사 순서대로) */
@@ -14,6 +26,7 @@ export const CLASS_ATTENDANCE_BLOCKS = [
   "not_member",
   "class_ended",
   "no_lesson_today",
+  "class_cancelled",
   "not_arrived",
   "billed_absent",
   "absent_today",
@@ -26,6 +39,7 @@ export const CLASS_ATTENDANCE_BLOCK_LABELS: Record<ClassAttendanceBlock, string>
   not_member: "반 원생 아님",
   class_ended: "종강",
   no_lesson_today: "오늘 수업 없음",
+  class_cancelled: "휴강",
   not_arrived: "등원 전",
   billed_absent: "차감 반영일",
   absent_today: "미등원",
@@ -37,13 +51,14 @@ export const CLASS_ATTENDANCE_BLOCK_MESSAGES: Record<ClassAttendanceBlock, strin
   not_member: "이 반 원생이 아닙니다.",
   class_ended: "종강한 반에는 출결을 기록할 수 없습니다.",
   no_lesson_today: "오늘은 이 반 수업이 없습니다.",
+  class_cancelled: "휴강한 수업이라 출결을 기록할 수 없습니다. 휴강을 먼저 취소해 주세요.",
   not_arrived: "아직 등원 처리되지 않았습니다. 등원 처리 후 기록해 주세요.",
   billed_absent: "청구서 결석 차감에 반영된 날입니다. 청구서에서 차감을 삭제한 뒤 등원 처리해 주세요.",
   absent_today: "오늘 미등원으로 기록된 학생입니다. 등원 처리 후 기록해 주세요.",
 };
 
-/** 그날 등원 기록 요약 — 문서가 없으면 null */
-export type ArrivalSnapshot = { status: AttendanceStatus; billed: boolean } | null;
+/** 그날 등원 기록 요약 — 문서가 없으면 null(3-B: `departed` = 하원 기록 있음) */
+export type ArrivalSnapshot = { status: AttendanceStatus; billed: boolean; departed?: boolean } | null;
 
 export function classAttendanceBlock(params: {
   studentActive: boolean;
@@ -51,11 +66,14 @@ export function classAttendanceBlock(params: {
   classEnded: boolean;
   hasLessonToday: boolean;
   arrival: ArrivalSnapshot;
+  /** 3-B 그날 그 반 휴강 */
+  classCancelled?: boolean;
 }): ClassAttendanceBlock | null {
   if (!params.studentActive) return "inactive_student";
   if (!params.isMember) return "not_member";
   if (params.classEnded) return "class_ended";
   if (!params.hasLessonToday) return "no_lesson_today";
+  if (params.classCancelled) return "class_cancelled";
   if (!params.arrival) return "not_arrived";
   if (params.arrival.status === "absent") return params.arrival.billed ? "billed_absent" : "absent_today";
   return null;
@@ -66,8 +84,9 @@ export function classAttendanceBlock(params: {
  * - unchanged: 같은 상태 — 기록·알림 그대로
  * - billed: 차감 잠금 날짜 — 바꾸지 않음
  * - has_class_records: 등원 → 미등원인데 그날 반 출결이 있음
+ * - has_departure: 등원 → 미등원인데 하원 기록이 있음(3-B H3 — 하원 기록을 먼저 취소)
  */
-export type ArrivalTransition = "ok" | "unchanged" | "billed" | "has_class_records";
+export type ArrivalTransition = "ok" | "unchanged" | "billed" | "has_class_records" | "has_departure";
 
 export function arrivalTransition(
   prev: ArrivalSnapshot,
@@ -77,6 +96,7 @@ export function arrivalTransition(
   if (prev && prev.status === next) return "unchanged";
   if (prev?.billed) return "billed";
   if (next === "absent" && classRecordCount > 0) return "has_class_records";
+  if (next === "absent" && prev?.departed) return "has_departure";
   return "ok";
 }
 
@@ -85,8 +105,9 @@ export const ARRIVAL_STATUS_LABELS: Record<AttendanceStatus, string> = {
   absent: "미등원",
 };
 
-export const CLASS_STATUS_LABELS: Record<AttendanceStatus, string> = {
+export const CLASS_STATUS_LABELS: Record<ClassStatus, string> = {
   present: "출석",
+  late: "지각",
   absent: "결석",
 };
 
@@ -136,15 +157,21 @@ export function arrivalPushBody(studentName: string, status: AttendanceStatus, a
     : `${studentName} 학생이 아직 등원하지 않았습니다. (알림 전송 시각 ${time})`;
 }
 
-/** 반 출석·결석 알림 문구(2-I 결정 4장) */
+/** 반 출석·지각·결석 알림 문구(2-I 결정 4장, 3-B ⑤ 지각 "지각하였습니다(10분)") */
 export function classPushBody(
   studentName: string,
   className: string,
-  status: AttendanceStatus,
+  status: ClassStatus,
   slots: readonly { start: string; end: string }[],
   at: Date,
+  lateMinutes?: number | null,
 ): string {
-  const verb = status === "present" ? "출석하였습니다" : "결석하였습니다";
+  const verb =
+    status === "present"
+      ? "출석하였습니다"
+      : status === "late"
+        ? `지각하였습니다${lateMinutes ? `(${lateMinutes}분)` : ""}`
+        : "결석하였습니다";
   return `${studentName} 학생이 ${className} 수업에 ${verb}. (수업 시간 ${slotsLabel(slots)} / 알림 전송 시각 ${formatSeoulHHmm(at)})`;
 }
 
@@ -154,16 +181,19 @@ export function classPushBody(
  * - billed: 차감 잠금 날짜
  * - reason_locked: 질병·학원 사정 미등원(월정액 차감 근거 — 출결 권한의 출결 탭에서만 정정)
  * 등원, 기타(general)·사유 없는 예전 미등원은 null(취소 가능).
+ * 3-B H3: 반 출결 다음에 하원 기록(has_departure — 하원 기록을 먼저 취소).
  */
-export type ArrivalCancelBlock = "has_class_records" | "billed" | "reason_locked";
+export type ArrivalCancelBlock = "has_class_records" | "has_departure" | "billed" | "reason_locked";
 
 export function arrivalCancelBlock(params: {
   status: AttendanceStatus;
   reason: string | null;
   billed: boolean;
   classRecordCount: number;
+  departed?: boolean;
 }): ArrivalCancelBlock | null {
   if (params.classRecordCount > 0) return "has_class_records";
+  if (params.departed) return "has_departure";
   if (params.billed) return "billed";
   if (params.status === "absent" && (params.reason === "illness" || params.reason === "academy")) {
     return "reason_locked";
@@ -189,14 +219,14 @@ export function arrivalCancelPushBody(studentName: string, status: AttendanceSta
   return `${studentName} 학생의 ${what}이 취소되었습니다. (알림 전송 시각 ${formatSeoulHHmm(at)})`;
 }
 
-/** 반 출석·결석 기록 취소 알림 문구(2-J) */
+/** 반 출석·지각·결석 기록 취소 알림 문구(2-J, 3-B 지각) */
 export function classCancelPushBody(
   studentName: string,
   className: string,
-  status: AttendanceStatus,
+  status: ClassStatus,
   at: Date,
 ): string {
-  const what = status === "present" ? "수업 출석 기록" : "수업 결석 기록";
+  const what = status === "present" ? "수업 출석 기록" : status === "late" ? "수업 지각 기록" : "수업 결석 기록";
   return `${studentName} 학생의 ${className} ${what}이 취소되었습니다. (알림 전송 시각 ${formatSeoulHHmm(at)})`;
 }
 
@@ -305,6 +335,8 @@ export type ArrivalCorrectionPrev = {
   billed: boolean;
   reason: string | null;
   arrivedAtMs: number | null;
+  /** 3-B 하원 기록 있음 */
+  departed?: boolean;
 } | null;
 
 /**
@@ -312,8 +344,9 @@ export type ArrivalCorrectionPrev = {
  * - unchanged: 바꿀 것이 없음(등원이면 시각까지 같을 때, 미등원이면 사유까지 같을 때 — B4)
  * - billed: 차감 잠금 날(상태·삭제·사유·시각 모두 거부, 메모는 `updateAttendanceDetails`로)
  * - has_class_records: 등원 → 미등원·삭제인데 그날 반 출결이 있음
+ * - has_departure: 등원 → 미등원·삭제인데 하원 기록이 있음(3-B H3)
  */
-export type ArrivalCorrectionCheck = "ok" | "unchanged" | "billed" | "has_class_records";
+export type ArrivalCorrectionCheck = "ok" | "unchanged" | "billed" | "has_class_records" | "has_departure";
 
 export function arrivalCorrectionCheck(
   prev: ArrivalCorrectionPrev,
@@ -329,6 +362,7 @@ export function arrivalCorrectionCheck(
   if (prev?.billed) return "billed";
   const leavesPresent = next.status === null || (next.status === "absent" && prev?.status !== "absent");
   if (leavesPresent && classRecordCount > 0) return "has_class_records";
+  if (leavesPresent && prev?.departed) return "has_departure";
   return "ok";
 }
 
@@ -344,7 +378,7 @@ export function arrivalCorrectionClassRecordsMessage(date: string, count: number
 export type ClassCorrectionBlock = "session_deduction" | "not_member" | "not_arrived" | "absent_day";
 
 export function classCorrectionBlock(params: {
-  next: AttendanceStatus | null;
+  next: ClassStatus | null;
   recordExists: boolean;
   hasSessionDeduction: boolean;
   /** 현재 그 반 원생(`classIds`) */
@@ -378,3 +412,245 @@ export const ATTENDANCE_BATCH_MAX = 50;
 
 export const BATCH_MODE_MISMATCH_MESSAGE =
   "날짜가 바뀌어 처리 방식이 달라졌습니다. 화면을 새로고침한 뒤 다시 시도해 주세요.";
+
+/*
+ * ── 3-B 지각·하원·휴강·알림 종류·다시 보내기 ── 결정 `docs/stage3-handoff/3-B-decisions.md`, 계획 `3-B-plan.md`.
+ * 지각은 서버가 판정하지 않는다(사람이 분을 골라 보냄 — B1). 하원은 등원 기록(날짜) 쪽(2-I ★3).
+ */
+
+/** 지각 분 범위(B1 ②) */
+export const LATE_MINUTES_MIN = 1;
+export const LATE_MINUTES_MAX = 180;
+export const LATE_MINUTES_MESSAGE = `지각 시간은 ${LATE_MINUTES_MIN}~${LATE_MINUTES_MAX}분으로 입력해 주세요.`;
+
+export function isLateMinutes(raw: unknown): raw is number {
+  return typeof raw === "number" && Number.isInteger(raw) && raw >= LATE_MINUTES_MIN && raw <= LATE_MINUTES_MAX;
+}
+
+/**
+ * 지각 창 미리 채움(화면에서만, B1 ②) — 그날 등원 시각 − 그 반 수업 시작(분, 내림).
+ * 등원 시각이 없거나 시작 전·같은 분이면 null, 180분을 넘으면 null(직접 입력).
+ */
+export function suggestLateMinutes(arrivedAtMs: number | null, date: string, slotStart: string | null): number | null {
+  if (arrivedAtMs === null || !slotStart || !isHHmm(slotStart)) return null;
+  const minutes = Math.floor((arrivedAtMs - seoulDateTimeMs(date, slotStart)) / 60_000);
+  return isLateMinutes(minutes) ? minutes : null;
+}
+
+/** 줄 칩 "지각 12분" */
+export function lateLabel(lateMinutes: number | null | undefined): string {
+  return lateMinutes ? `지각 ${lateMinutes}분` : "지각";
+}
+
+/**
+ * 하원 판단(B4·B10·H2·H3) — 등원 기록 요약을 보고.
+ * - no_arrival: 그날 등원 기록이 없음(H2 — 시각을 지어내지 않음)
+ * - absent_day: 미등원으로 기록된 날
+ * - already_left: 이미 하원(H3 — 기록·알림 그대로)
+ * 차감 잠금 날도 허용(하원은 원비와 무관, H3).
+ */
+export type DepartureBlock = "no_arrival" | "absent_day" | "already_left";
+
+export function departureBlock(arrival: ArrivalSnapshot): DepartureBlock | null {
+  if (!arrival) return "no_arrival";
+  if (arrival.status === "absent") return "absent_day";
+  if (arrival.departed) return "already_left";
+  return null;
+}
+
+/** 직원 버튼 문구(키오스크는 `DEPARTURE_KIOSK_NO_ARRIVAL_MESSAGE`) */
+export const DEPARTURE_BLOCK_MESSAGES: Record<Exclude<DepartureBlock, "already_left">, string> = {
+  no_arrival: "오늘 등원 기록이 없어 하원 처리할 수 없습니다. 등원을 먼저 기록해 주세요.",
+  absent_day: "오늘 미등원으로 기록된 학생이라 하원 처리할 수 없습니다.",
+};
+
+/** 키오스크 하원(H2) — 등원 기록이 없거나 미등원인 날 */
+export const DEPARTURE_KIOSK_NO_ARRIVAL_MESSAGE = "오늘 등원 기록이 없어요. 선생님께 말씀해 주세요.";
+
+export const ALREADY_LEFT_MESSAGE = "이미 하원 처리되었습니다.";
+
+/** 하원이 있어 오늘 미등원·등원 취소를 막을 때(H3) */
+export function departureLockTodayMessage(cancelling: boolean): string {
+  return `하원 기록이 있어 ${cancelling ? "등원 기록을 취소할" : "미등원으로 바꿀"} 수 없습니다. 하원 기록을 먼저 취소해 주세요.`;
+}
+
+/** 하원이 있어 지난 날짜 미등원·지우기·삭제를 막을 때(H3) */
+export function departureLockPastMessage(date: string, deleting: boolean): string {
+  return `${dateLabel(date)}에는 하원 기록이 있어 ${deleting ? "등원 기록을 지울" : "미등원으로 바꿀"} 수 없습니다. 하원 기록을 먼저 정정해 주세요.`;
+}
+
+/** 하원 시각이 등원 시각보다 앞(★6) */
+export const DEPARTURE_BEFORE_ARRIVAL_MESSAGE = "하원 시각은 등원 시각보다 빠를 수 없습니다.";
+
+/** 오늘 기록을 정정 함수로 고칠 때 — 시각만(★7) */
+export const TODAY_TIME_ONLY_MESSAGE = "오늘 기록은 시각만 고칠 수 있습니다. 상태는 출결 버튼으로 처리해 주세요.";
+
+/** 일괄 출석·결석에서 지각 줄을 건너뛸 때(★3·R2) */
+export const BATCH_LATE_ROW_MESSAGE = "지각으로 기록되어 있어 건너뛰었습니다. 줄에서 바꿔 주세요.";
+
+/** 오늘 기록 시각이 지금보다 늦을 때(R1) */
+export const TODAY_FUTURE_TIME_MESSAGE = "오늘 기록은 지금보다 늦은 시각으로 고칠 수 없습니다.";
+
+/**
+ * 오늘 기록 시각 고치기(★7·R1) — "HH:mm" 필수(undefined·null 지우기 불가 → time_only),
+ * 지금(서울, 분 단위)보다 늦으면 future.
+ */
+export function todayTimeBlock(time: unknown, now: Date = new Date()): "time_only" | "future" | null {
+  if (!isHHmm(time)) return "time_only";
+  return time > formatSeoulHHmm(now) ? "future" : null;
+}
+
+/** 하원 알림 문구(B5) */
+export function departurePushBody(studentName: string, at: Date): string {
+  return `${studentName} 학생이 하원하였습니다. (알림 전송 시각 ${formatSeoulHHmm(at)})`;
+}
+
+/** 하원 기록 취소 알림 문구 */
+export function departureCancelPushBody(studentName: string, at: Date): string {
+  return `${studentName} 학생의 하원 기록이 취소되었습니다. (알림 전송 시각 ${formatSeoulHHmm(at)})`;
+}
+
+/** 다시 보내기 문구 앞(B9) */
+export const RESEND_PREFIX = "(다시 알림) ";
+
+/** 다시 보내기 문구 — 저장 문구에 붙은 앞 글자를 떼고 한 번만 붙인다(R3) */
+export function resendBody(body: string): string {
+  let rest = body;
+  while (rest.startsWith(RESEND_PREFIX)) rest = rest.slice(RESEND_PREFIX.length);
+  return `${RESEND_PREFIX}${rest}`;
+}
+
+/**
+ * 휴강 판단(B7·★11·P1). 오늘 = 반 있음·종강 아님·그 요일 수업 있음·그날 그 반 출결 0건,
+ * 지난 날짜 = 반 있음 + 출결 0건만(3-A A4 — 재원·종강·그날 수업은 다시 보지 않음, 원장 판단).
+ */
+export type ClassCancellationBlock = "future" | "class_missing" | "class_ended" | "no_lesson" | "has_records";
+
+export function classCancellationBlock(params: {
+  date: string;
+  today: string;
+  classExists: boolean;
+  classEnded: boolean;
+  hasLesson: boolean;
+  recordCount: number;
+}): ClassCancellationBlock | null {
+  if (params.date > params.today) return "future";
+  if (!params.classExists) return "class_missing";
+  if (params.date === params.today) {
+    if (params.classEnded) return "class_ended";
+    if (!params.hasLesson) return "no_lesson";
+  }
+  if (params.recordCount > 0) return "has_records";
+  return null;
+}
+
+export function classCancellationBlockMessage(
+  block: ClassCancellationBlock,
+  p: { date: string; className: string; recordCount: number },
+): string {
+  switch (block) {
+  case "future":
+    return "앞으로의 날짜는 휴강으로 기록할 수 없습니다.";
+  case "class_missing":
+    return "반을 찾을 수 없습니다.";
+  case "class_ended":
+    return "종강한 반은 휴강으로 기록할 수 없습니다.";
+  case "no_lesson":
+    return "오늘은 이 반 수업이 없어 휴강으로 기록할 수 없습니다.";
+  case "has_records":
+    return `${dateLabel(p.date)} ${p.className} 수업 출결 기록이 ${p.recordCount}건 있어 휴강으로 기록할 수 없습니다. 출결을 먼저 정정해 주세요.`;
+  }
+}
+
+export const CLASS_CANCELLATION_MEMO_MAX_LENGTH = 200;
+
+/** 휴강 문서 ID */
+export function classCancellationDocId(date: string, classId: string): string {
+  return `${date}_${classId}`;
+}
+
+/** 학원 단위 알림 종류(B6) — 설정 문서 `meta/attendanceSettings.notify`의 키 */
+export const ATTENDANCE_NOTIFY_TYPES = [
+  "arrival",
+  "arrivalAbsent",
+  "departure",
+  "classPresent",
+  "classLate",
+  "classAbsent",
+  "correction",
+] as const;
+export type AttendanceNotifyType = (typeof ATTENDANCE_NOTIFY_TYPES)[number];
+
+export const ATTENDANCE_NOTIFY_TYPE_LABELS: Record<AttendanceNotifyType, string> = {
+  arrival: "등원",
+  arrivalAbsent: "미등원",
+  departure: "하원",
+  classPresent: "수업 출석",
+  classLate: "수업 지각",
+  classAbsent: "수업 결석",
+  correction: "정정(취소)",
+};
+
+/** 알림 맥락 */
+export type AttendanceNotifyContextName = "arrival" | "class" | "departure";
+/** 알림 기록 kind — 등원 맥락 present/absent, 반 present/late/absent, 하원 left */
+export type AttendanceNotifyKind = "present" | "late" | "absent" | "left";
+
+/** 알림 한 건의 종류(★8: 모든 취소 = 정정, 기간 결석 요약 = 미등원, 키오스크 등원 = 등원) */
+export function notifyTypeFor(p: {
+  context: AttendanceNotifyContextName;
+  kind: AttendanceNotifyKind;
+  action?: "record" | "cancel" | null;
+}): AttendanceNotifyType {
+  if (p.action === "cancel") return "correction";
+  if (p.context === "departure") return "departure";
+  if (p.context === "class") return p.kind === "late" ? "classLate" : p.kind === "absent" ? "classAbsent" : "classPresent";
+  return p.kind === "absent" ? "arrivalAbsent" : "arrival";
+}
+
+/** 설정 문서의 `notify` → 종류별 켜짐(false로 적힌 것만 끔 — 기본 모두 켬) */
+export function readNotifySettings(raw: unknown): Record<AttendanceNotifyType, boolean> {
+  const src = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const out = {} as Record<AttendanceNotifyType, boolean>;
+  for (const t of ATTENDANCE_NOTIFY_TYPES) out[t] = src[t] !== false;
+  return out;
+}
+
+/**
+ * 다시 보내기 — 지금 기록이 그 알림과 같은 상태인지(B9).
+ * `arrival`: 그날 등원 기록(없으면 null), `classStatus`: 그날 그 반 출결(없으면 null).
+ */
+export function resendStateMatches(
+  item: {
+    context: AttendanceNotifyContextName;
+    kind: AttendanceNotifyKind;
+    action: "record" | "cancel";
+    reason?: string | null;
+    origin?: string | null;
+  },
+  now: {
+    arrival: { status: AttendanceStatus; reason: string | null; departed: boolean } | null;
+    classStatus: ClassStatus | null;
+  },
+): boolean {
+  const { arrival, classStatus } = now;
+  if (item.context === "departure") {
+    return item.action === "cancel" ? arrival?.status === "present" && !arrival.departed : arrival?.departed === true;
+  }
+  if (item.context === "class") {
+    return item.action === "cancel" ? classStatus === null : classStatus === item.kind;
+  }
+  if (item.action === "cancel") return arrival === null;
+  if (item.kind === "present") return arrival?.status === "present";
+  if (arrival?.status !== "absent") return false;
+  // 기간 결석 요약은 사유까지 같아야 같은 알림
+  return item.origin === "absence_period" ? (arrival.reason ?? null) === (item.reason ?? null) : true;
+}
+
+export const RESEND_MESSAGES = {
+  notToday: "오늘 보낸 알림만 다시 보낼 수 있습니다.",
+  stateChanged: "지금 출결 기록이 이 알림과 달라 다시 보낼 수 없습니다.",
+  muted: "출결 설정에서 꺼 둔 알림이라 다시 보낼 수 없습니다.",
+  notFound: "알림 기록을 찾을 수 없습니다.",
+  permission: "알림 다시 보내기는 원장이나 출결 권한이 있는 직원만 할 수 있습니다.",
+} as const;

@@ -57,6 +57,15 @@ export {
   updateAttendanceDetails,
 } from "./attendance-correct";
 export { recordAttendanceBatch } from "./attendance-batch";
+// 3-B 하원·휴강·출결 설정·알림 다시 보내기·학부모 출결 기록
+export {
+  recordStudentDeparture,
+  cancelStudentDeparture,
+  correctStudentDeparture,
+} from "./attendance-departure";
+export { setClassCancellation } from "./class-cancellations";
+export { updateAttendanceSettings, resendAttendanceNotification } from "./attendance-settings";
+export { getStudentAttendanceHistory } from "./attendance-history";
 export {
   addTuitionInvoiceAdjustment,
   applyAbsenceDeduction,

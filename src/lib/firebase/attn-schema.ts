@@ -610,6 +610,16 @@ export function academyStudentAttendanceRecordsPath(academyId: string, studentId
   return `${academyStudentsPath(academyId)}/${studentId}/attendanceRecords`;
 }
 
+/** 3-B 휴강 `classCancellations/{date}_{classId}`(서버만 씀) */
+export function academyClassCancellationsPath(academyId: string): string {
+  return `academies/${academyId}/classCancellations`;
+}
+
+/** 3-B 출결 설정(학부모 알림 7종, 서버만 씀) */
+export function academyAttendanceSettingsPath(academyId: string): string {
+  return `academies/${academyId}/meta/attendanceSettings`;
+}
+
 /** 청구서 조정 항목 — amount 음수는 차감, 양수는 추가 */
 export type TuitionInvoiceAdjustment = {
   id: string;

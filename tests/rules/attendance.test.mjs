@@ -1,5 +1,6 @@
 /**
  * 2-I 등원 기록(attendanceRecords)·반 출결(attendance) 읽기 규칙 — `npm run test:rules`
+ * (3-A 컬렉션 그룹·정정 이력, 3-B 출결 설정·휴강)
  *
  * - 등원 기록: 출결·청구서 권한 + 담당 선생님(학생 teacherUids)
  * - 반 출결: 출결·청구서 권한 + 그 반 선생님(반 teacherUids, `classId ==` 조건 목록 조회)
@@ -210,6 +211,96 @@ describe("등원 기록 컬렉션 그룹(3-A)", () => {
 
   it("academyId 조건 없는 목록은 원장도 거부", async () => {
     await assertFails(getDocs(query(collectionGroup(dbAs(OWNER), "attendanceRecords"), where("date", "==", DATE))));
+  });
+});
+
+describe("출결 설정(meta/attendanceSettings, 3-B)", () => {
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), p("meta", "attendanceSettings")), { notify: { departure: false } });
+    });
+  });
+  const settingsRef = (db) => doc(db, p("meta", "attendanceSettings"));
+
+  it("원장·출결 권한·전체설정 권한은 읽는다(없는 문서도)", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "academies/acad_empty"), { ownerUid: OWNER, name: "빈 학원" });
+    });
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), p("staff", "staff-general")), {
+        authUid: "staff-general", status: "active", roleId: "custom", permissions: ["settings.general"],
+      });
+    });
+    for (const uid of [OWNER, "staff-attendance", "staff-general"]) {
+      await assertSucceeds(getDoc(settingsRef(dbAs(uid))));
+    }
+    await assertSucceeds(getDoc(doc(dbAs(OWNER), "academies/acad_empty/meta/attendanceSettings")));
+  });
+
+  it("청구서만·반 관리만 직원·담당 선생님·학부모는 거부", async () => {
+    for (const uid of ["staff-billing", "staff-classes", "t-a", PARENT]) {
+      await assertFails(getDoc(settingsRef(dbAs(uid))));
+    }
+  });
+
+  it("쓰기는 원장 포함 모두 거부", async () => {
+    await assertFails(setDoc(settingsRef(dbAs(OWNER)), { notify: { departure: true } }));
+    await assertFails(setDoc(settingsRef(dbAs("staff-attendance")), { notify: { departure: true } }));
+  });
+});
+
+describe("휴강(classCancellations, 3-B)", () => {
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, p("classCancellations", `${DATE}_${CLASS_A}`)), {
+        academyId: ACADEMY, date: DATE, classId: CLASS_A, className: "A반", memo: "학원 사정",
+      });
+      await setDoc(doc(db, p("classCancellations", `${DATE}_${CLASS_B}`)), {
+        academyId: ACADEMY, date: DATE, classId: CLASS_B, className: "B반",
+      });
+    });
+  });
+  const cancelRef = (db, classId = CLASS_A, date = DATE) => doc(db, p("classCancellations", `${date}_${classId}`));
+  const cancelListQuery = (db, classId, date = DATE) =>
+    query(collection(db, p("classCancellations")), where("classId", "==", classId), where("date", "==", date));
+
+  it("원장·출결·청구서 권한은 단건(없는 문서 포함)·날짜 목록을 읽는다", async () => {
+    for (const uid of [OWNER, "staff-attendance", "staff-billing"]) {
+      const db = dbAs(uid);
+      await assertSucceeds(getDoc(cancelRef(db)));
+      await assertSucceeds(getDoc(cancelRef(db, CLASS_A, "2026-11-05")));
+      const snap = await assertSucceeds(getDocs(query(collection(db, p("classCancellations")), where("date", "==", DATE))));
+      if (snap.size !== 2) throw new Error(`${uid}: expected 2, got ${snap.size}`);
+    }
+  });
+
+  it("권한 없는 그 반 선생님은 classId == + date == 목록(없는 날 포함)·있는 문서 단건을 읽는다", async () => {
+    const db = dbAs("t-a");
+    const snap = await assertSucceeds(getDocs(cancelListQuery(db, CLASS_A)));
+    if (snap.size !== 1) throw new Error(`expected 1, got ${snap.size}`);
+    await assertSucceeds(getDocs(cancelListQuery(db, CLASS_A, "2026-11-05")));
+    await assertSucceeds(getDoc(cancelRef(db)));
+  });
+
+  it("그 반 선생님도 다른 반 목록·조건 없는 목록·다른 반 단건은 거부", async () => {
+    const db = dbAs("t-a");
+    await assertFails(getDocs(cancelListQuery(db, CLASS_B)));
+    await assertFails(getDocs(query(collection(db, p("classCancellations")), where("date", "==", DATE))));
+    await assertFails(getDoc(cancelRef(db, CLASS_B)));
+  });
+
+  it("비활성 선생님·반 관리만·원생 관리만 직원·학부모는 거부", async () => {
+    for (const uid of ["t-a-inactive", "staff-classes", "staff-students", PARENT]) {
+      await assertFails(getDocs(cancelListQuery(dbAs(uid), CLASS_A)));
+      await assertFails(getDoc(cancelRef(dbAs(uid))));
+    }
+  });
+
+  it("쓰기는 원장·그 반 선생님 포함 모두 거부", async () => {
+    await assertFails(setDoc(cancelRef(dbAs(OWNER), CLASS_A, "2026-11-05"), { classId: CLASS_A, date: "2026-11-05" }));
+    await assertFails(setDoc(cancelRef(dbAs("staff-attendance"), CLASS_A, "2026-11-05"), { classId: CLASS_A }));
+    await assertFails(setDoc(cancelRef(dbAs("t-a"), CLASS_A, "2026-11-05"), { classId: CLASS_A }));
   });
 });
 

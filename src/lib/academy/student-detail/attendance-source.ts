@@ -1,6 +1,8 @@
 import { collection, getDocs, orderBy, query, where } from "firebase/firestore";
+import { classStatusOf, type ClassStatus } from "@/lib/academy/attendance-rules";
 import {
   academyClassAttendancePath,
+  academyClassCancellationsPath,
   academyStudentAttendanceRecordsPath,
   isAbsenceReason,
   type AbsenceReason,
@@ -27,6 +29,9 @@ export type StudentAttendanceRow = {
   arrivedAtMs: number | null;
   /** 3-A 지난 날짜 정정·사유 바꾸기를 거친 기록 */
   corrected: boolean;
+  /** 3-B 하원(★16 읽기만) — `leftAtMs` null = 시각 없음 */
+  departed: boolean;
+  leftAtMs: number | null;
 };
 
 /** 반 출결 한 건 */
@@ -34,7 +39,9 @@ export type StudentClassAttendanceRow = {
   date: string;
   classId: string;
   className: string;
-  status: "present" | "absent";
+  /** 3-B 지각 포함 */
+  status: ClassStatus;
+  lateMinutes: number | null;
   slots: { start: string; end: string }[];
   /** 3-A 수업 결석 사유·코멘트·정정 표시 */
   reason: AbsenceReason | null;
@@ -68,7 +75,36 @@ export async function loadStudentAttendance(
         typeof x.billedInvoicePeriod === "string" && x.billedInvoicePeriod ? x.billedInvoicePeriod : null,
       arrivedAtMs: x.arrivedAt && typeof x.arrivedAt.toMillis === "function" ? x.arrivedAt.toMillis() : null,
       corrected: x.correctedAt != null,
+      departed: x.departed === true,
+      leftAtMs: x.departed === true && x.leftAt && typeof x.leftAt.toMillis === "function" ? x.leftAt.toMillis() : null,
     };
+  });
+}
+
+/** 3-B 그 달 휴강 한 건(학생 상세 출결 탭 — 읽기만) */
+export type StudentCancellationRow = { date: string; classId: string; className: string };
+
+/**
+ * `from`~`to` 학원 휴강 중 이 원생 반(`classIds`)만 — `date` 범위 하나(자동 단일 필드 색인).
+ * 읽기 권한: `lessons.attendance`·`billing.invoices`(규칙, 출결 탭과 같음).
+ */
+export async function loadClassCancellations(
+  academyId: string,
+  classIds: ReadonlySet<string>,
+  range: { from: string; to: string },
+): Promise<StudentCancellationRow[]> {
+  if (classIds.size === 0) return [];
+  const snap = await getDocs(
+    query(
+      collection(getFirebaseDb(), academyClassCancellationsPath(academyId)),
+      where("date", ">=", range.from),
+      where("date", "<=", range.to),
+    ),
+  );
+  return snap.docs.flatMap((d) => {
+    const x = d.data();
+    if (typeof x.classId !== "string" || !classIds.has(x.classId) || typeof x.date !== "string") return [];
+    return [{ date: x.date, classId: x.classId, className: typeof x.className === "string" && x.className ? x.className : "반" }];
   });
 }
 
@@ -100,7 +136,8 @@ export async function loadStudentClassAttendance(
         date: typeof x.date === "string" ? x.date : "",
         classId: typeof x.classId === "string" ? x.classId : "",
         className: typeof x.className === "string" && x.className ? x.className : "반",
-        status: x.status === "absent" ? ("absent" as const) : ("present" as const),
+        status: classStatusOf(x.status),
+        lateMinutes: x.status === "late" && typeof x.lateMinutes === "number" ? x.lateMinutes : null,
         slots,
         reason: isAbsenceReason(x.reason) ? x.reason : null,
         comment: typeof x.comment === "string" ? x.comment : "",

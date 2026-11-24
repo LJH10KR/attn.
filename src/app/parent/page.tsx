@@ -11,6 +11,7 @@ import { DashboardNotificationsModal } from "@/components/dashboard/dashboard-no
 import { DashboardRoleHeader } from "@/components/dashboard/dashboard-role-header";
 import { RoleDashboardBootShell } from "@/components/dashboard/role-dashboard-boot-shell";
 import { StudentListSectionSkeleton } from "@/components/dashboard/student-list-section-skeleton";
+import { ParentAttendanceHistorySheet } from "@/components/parent/parent-attendance-history-sheet";
 import { ParentCheckInPinCard } from "@/components/parent/parent-check-in-pin-card";
 import { ParentSessionBalanceCard } from "@/components/parent/parent-session-balance-card";
 import { ParentTuitionReminderCard } from "@/components/parent/parent-tuition-reminder-card";
@@ -104,6 +105,8 @@ export default function ParentDashboardPage() {
   const [linkWaiting, setLinkWaiting] = useState(false);
   const [kioskRequirePin, setKioskRequirePin] = useState(false);
   const [studentsWithPinMeta, setStudentsWithPinMeta] = useState<ParentChildVM[]>([]);
+  /** 3-B 출결 기록 시트를 연 자녀 */
+  const [historyChild, setHistoryChild] = useState<{ id: string; name: string } | null>(null);
   const [tuitionSettings, setTuitionSettings] =
     useState<TuitionSettingsState>(null);
   const [reminderPayload, setReminderPayload] = useState<PaymentReminderPayload | null>(null);
@@ -650,6 +653,14 @@ export default function ParentDashboardPage() {
                     ))}
                   </ul>
                 ) : null}
+                {/* 3-B 자녀 출결 기록(최근 31일) */}
+                <button
+                  type="button"
+                  onClick={() => setHistoryChild({ id: s.id, name: s.name })}
+                  className="mr-3 mt-2 inline-flex items-center gap-0.5 rounded-[8px] border border-neutral-300/80 bg-white/70 px-2.5 py-1.5 text-[11px] font-medium text-neutral-800 hover:bg-white dark:bg-white/10 dark:text-neutral-100"
+                >
+                  출결 기록 <span aria-hidden>›</span>
+                </button>
                 {kioskRequirePin ? (
                   <ParentCheckInPinCard
                     academyId={academyId!}
@@ -730,6 +741,15 @@ export default function ParentDashboardPage() {
       </div>
 
       <DashboardBottomScrim />
+      {historyChild && academyId ? (
+        <ParentAttendanceHistorySheet
+          key={historyChild.id}
+          academyId={academyId}
+          studentId={historyChild.id}
+          studentName={historyChild.name}
+          onCloseAction={() => setHistoryChild(null)}
+        />
+      ) : null}
       {logoutModal}
       {reminderPayload ? (
         <PaymentReminderModal

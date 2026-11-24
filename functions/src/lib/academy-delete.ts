@@ -53,7 +53,7 @@ function memberRow(d: admin.firestore.QueryDocumentSnapshot): MemberRow {
 }
 
 /** 출결 푸시 횟수 제한 문서(`_pushRateLimits`) — ID가 이 학원 접두로 시작하는 것(ID만 든 문서) */
-const PUSH_RATE_LIMIT_PREFIXES = ["attendance_", "class_attendance_", "pin_setup_reminder_"] as const;
+const PUSH_RATE_LIMIT_PREFIXES = ["attendance_", "class_attendance_", "departure_", "pin_setup_reminder_"] as const;
 
 async function deletePushRateLimits(db: admin.firestore.Firestore, academyId: string): Promise<void> {
   for (const p of PUSH_RATE_LIMIT_PREFIXES) {

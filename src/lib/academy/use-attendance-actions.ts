@@ -6,13 +6,16 @@ import {
   attendanceActionErrorMessage,
   attendanceActionMessage,
   attendanceCancelMessage,
+  describeNotifyResult,
   type AttendanceActionResult,
   type AttendanceCancelResult,
+  type DepartureResult,
 } from "@/lib/academy/attendance-records";
 import {
   ARRIVAL_STATUS_LABELS,
   CLASS_STATUS_LABELS,
   type AttendanceStatus,
+  type ClassStatus,
 } from "@/lib/academy/attendance-rules";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
 
@@ -62,14 +65,16 @@ export function useAttendanceActions(
       classId: string,
       className: string,
       studentId: string,
-      status: AttendanceStatus,
+      status: ClassStatus,
       via: ClassVia,
       date: string,
       studentName?: string,
+      /** 3-B 지각일 때만(1~180) */
+      lateMinutes?: number,
     ) => {
       if (!academyId) return;
       setBusyKey(`${studentId}:${classId}:${status}`);
-      const label = `${className} ${CLASS_STATUS_LABELS[status]}`;
+      const label = `${className} ${CLASS_STATUS_LABELS[status]}${status === "late" && lateMinutes ? ` ${lateMinutes}분` : ""}`;
       const who = studentName ? `${studentName} ` : "";
       try {
         const res = await httpsCallable(getFirebaseFunctions(), "recordClassAttendance")({
@@ -79,9 +84,13 @@ export function useAttendanceActions(
           status,
           via,
           date,
+          ...(status === "late" ? { lateMinutes } : {}),
         });
         const data = res.data as AttendanceActionResult;
-        onDone(`${who}${attendanceActionMessage(label, data)}`, true, studentId, data);
+        const text = data.minutesOnly
+          ? `${className} 지각 시간을 ${data.lateMinutes ?? lateMinutes}분으로 바꿨습니다. 학부모 알림은 가지 않습니다.`
+          : attendanceActionMessage(label, data);
+        onDone(`${who}${text}`, true, studentId, data);
       } catch (e) {
         onDone(attendanceActionErrorMessage(e), false, studentId, null);
       } finally {
@@ -100,7 +109,7 @@ export function useAttendanceActions(
       classId: string;
       className: string;
       studentId: string;
-      status: AttendanceStatus;
+      status: ClassStatus;
       date: string;
       via: ClassVia;
       studentName?: string;
@@ -151,7 +160,7 @@ export function useAttendanceActions(
           via,
         });
         const data = res.data as AttendanceCancelResult;
-        const label = ARRIVAL_STATUS_LABELS[data.cancelled ?? status];
+        const label = ARRIVAL_STATUS_LABELS[data.cancelled === "absent" || (!data.cancelled && status === "absent") ? "absent" : "present"];
         onDone(`${who}${attendanceCancelMessage(label, data)}`, true, studentId, null);
         return null;
       } catch (e) {
@@ -163,22 +172,79 @@ export function useAttendanceActions(
     [academyId, onDone],
   );
 
-  return { busyKey, markArrival, markClass, cancelClass, cancelArrival };
+  /** 3-B 오늘 하원(H2·H3) — 이미 하원이면 서버 문구("이미 하원 처리되었습니다.") */
+  const markDeparture = useCallback(
+    async (studentId: string, via: DepartureVia, date: string, studentName?: string) => {
+      if (!academyId) return;
+      setBusyKey(`${studentId}:departure:record`);
+      const who = studentName ? `${studentName} ` : "";
+      try {
+        const res = await httpsCallable(getFirebaseFunctions(), "recordStudentDeparture")({
+          academyId,
+          studentId,
+          via,
+          date,
+        });
+        const data = res.data as DepartureResult;
+        const text = data.changed === false
+          ? data.message || "이미 하원 처리되었습니다."
+          : `하원으로 기록했습니다.${describeNotifyResult(data.notification ?? null)}`;
+        onDone(`${who}${text}`, true, studentId, null);
+      } catch (e) {
+        onDone(attendanceActionErrorMessage(e), false, studentId, null);
+      } finally {
+        setBusyKey(null);
+      }
+    },
+    [academyId, onDone],
+  );
+
+  /** 3-B 오늘 하원 기록 취소(정정 알림) — `cancelClass`와 같은 방식 */
+  const cancelDeparture = useCallback(
+    async (params: { studentId: string; date: string; via: DepartureVia; studentName?: string }): Promise<string | null> => {
+      if (!academyId) return "학원 정보를 찾을 수 없습니다.";
+      const { studentId, date, via, studentName } = params;
+      setBusyKey(`${studentId}:departure:cancel`);
+      const who = studentName ? `${studentName} ` : "";
+      try {
+        const res = await httpsCallable(getFirebaseFunctions(), "cancelStudentDeparture")({
+          academyId,
+          studentId,
+          date,
+          via,
+        });
+        const data = res.data as AttendanceCancelResult;
+        onDone(`${who}${attendanceCancelMessage("하원", data)}`, true, studentId, null);
+        return null;
+      } catch (e) {
+        return attendanceActionErrorMessage(e, CANCEL_FALLBACK);
+      } finally {
+        setBusyKey(null);
+      }
+    },
+    [academyId, onDone],
+  );
+
+  return { busyKey, markArrival, markClass, cancelClass, cancelArrival, markDeparture, cancelDeparture };
 }
+
+/** 3-B 하원 경로(서버 `DEPARTURE_VIA`) */
+export type DepartureVia = "teacher_my_classes" | "attendance_screen";
 
 const CANCEL_FALLBACK = "기록을 취소하지 못했습니다. 잠시 후 다시 시도해 주세요.";
 
-/** `useAttendanceActions().busyKey`(`학생:반|arrival:상태`) → 이 줄의 처리 중 버튼 */
-export function rowBusyFor(
-  busyKey: string | null,
-  studentId: string,
-  classId: string,
-): "present" | "absent" | "arrive" | "cancel" | null {
+export type RowBusy = "present" | "late" | "absent" | "arrive" | "cancel" | "depart" | "cancel_depart" | null;
+
+/** `useAttendanceActions().busyKey`(`학생:반|arrival|departure:상태`) → 이 줄의 처리 중 버튼 */
+export function rowBusyFor(busyKey: string | null, studentId: string, classId: string): RowBusy {
   if (!busyKey) return null;
   if (busyKey === `${studentId}:arrival:cancel`) return "cancel";
   if (busyKey.startsWith(`${studentId}:arrival:`)) return "arrive";
+  if (busyKey === `${studentId}:departure:record`) return "depart";
+  if (busyKey === `${studentId}:departure:cancel`) return "cancel_depart";
   if (busyKey === `${studentId}:${classId}:cancel`) return "cancel";
   if (busyKey === `${studentId}:${classId}:present`) return "present";
+  if (busyKey === `${studentId}:${classId}:late`) return "late";
   if (busyKey === `${studentId}:${classId}:absent`) return "absent";
   return null;
 }

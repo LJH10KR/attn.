@@ -3,9 +3,16 @@
 import { FirebaseError } from "firebase/app";
 import { collection, doc, onSnapshot, query, where } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
-import { seoulDateString, seoulWeekday, type ArrivalSnapshot } from "@/lib/academy/attendance-rules";
+import {
+  classStatusOf,
+  seoulDateString,
+  seoulWeekday,
+  type ArrivalSnapshot,
+  type ClassStatus,
+} from "@/lib/academy/attendance-rules";
 import {
   academyClassAttendancePath,
+  academyClassCancellationsPath,
   academyStudentAttendanceRecordsPath,
 } from "@/lib/firebase/attn-schema";
 import { getFirebaseDb } from "@/lib/firebase/client-app";
@@ -23,29 +30,48 @@ export function useSeoulToday(): { date: string; weekday: number } {
   return today;
 }
 
-/** 학생 한 명의 오늘 등원 기록 — undefined = 읽는 중. `reason`은 미등원 사유(2-J 취소 판단) */
+/**
+ * 학생 한 명의 오늘 등원 기록 — undefined = 읽는 중. `reason`은 미등원 사유(2-J 취소 판단).
+ * 3-B: 하원(`departed`·`leftAtMs`, H3 — 하원이 있으면 미등원·등원 취소 거부).
+ */
 export type TodayArrival =
-  | (NonNullable<ArrivalSnapshot> & { arrivedAtMs: number | null; reason: string | null })
+  | (NonNullable<ArrivalSnapshot> & {
+      arrivedAtMs: number | null;
+      reason: string | null;
+      departed: boolean;
+      leftAtMs: number | null;
+    })
   | null;
+
+function millisOf(v: unknown): number | null {
+  const t = v as { toMillis?: () => number } | null | undefined;
+  return t && typeof t.toMillis === "function" ? t.toMillis() : null;
+}
 
 function toTodayArrival(snap: { exists: () => boolean; data: () => Record<string, unknown> | undefined }): TodayArrival {
   if (!snap.exists()) return null;
   const d = snap.data() ?? {};
-  const arrivedAt = d.arrivedAt as { toMillis?: () => number } | undefined;
+  const departed = d.departed === true;
   return {
     status: d.status === "absent" ? "absent" : "present",
     billed: typeof d.billedInvoicePeriod === "string" && d.billedInvoicePeriod.length > 0,
-    arrivedAtMs: arrivedAt && typeof arrivedAt.toMillis === "function" ? arrivedAt.toMillis() : null,
+    arrivedAtMs: millisOf(d.arrivedAt),
     reason: typeof d.reason === "string" ? d.reason : null,
+    departed,
+    leftAtMs: departed ? millisOf(d.leftAt) : null,
   };
 }
 
 export type ClassTodayAttendance = {
   /** 학생 id → 오늘 등원 기록(undefined = 아직 못 읽음) */
   arrivals: ReadonlyMap<string, TodayArrival>;
-  /** 학생 id → 이 반 오늘 출결 */
-  records: ReadonlyMap<string, "present" | "absent">;
+  /** 학생 id → 이 반 오늘 출결(3-B 지각 포함) */
+  records: ReadonlyMap<string, ClassStatus>;
+  /** 학생 id → 지각 분(지각 기록만) */
+  lateMinutes: ReadonlyMap<string, number>;
   recordsLoaded: boolean;
+  /** 3-B 이 반 오늘 휴강 — undefined = 읽는 중 */
+  cancelled: boolean | undefined;
   /** 구독 오류(권한을 잃음·네트워크) — 버튼은 옅게 */
   error: string | null;
 };
@@ -94,8 +120,10 @@ export function useClassTodayAttendance(params: {
   const { academyId, classId, date, enabled } = params;
   const idsKey = useMemo(() => [...new Set(params.arrivalStudentIds)].sort().join("|"), [params.arrivalStudentIds]);
   const [arrivals, setArrivals] = useState<Map<string, TodayArrival>>(() => new Map());
-  const [records, setRecords] = useState<Map<string, "present" | "absent">>(() => new Map());
+  const [records, setRecords] = useState<Map<string, ClassStatus>>(() => new Map());
+  const [lateMinutes, setLateMinutes] = useState<Map<string, number>>(() => new Map());
   const [recordsLoaded, setRecordsLoaded] = useState(false);
+  const [cancelled, setCancelled] = useState<boolean | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -121,6 +149,7 @@ export function useClassTodayAttendance(params: {
 
   useEffect(() => {
     setRecords(new Map());
+    setLateMinutes(new Map());
     setRecordsLoaded(false);
     if (!enabled) return;
     const q = query(
@@ -132,12 +161,18 @@ export function useClassTodayAttendance(params: {
     const unsub = onSnapshot(
       q,
       (snap) => {
-        const next = new Map<string, "present" | "absent">();
+        const next = new Map<string, ClassStatus>();
+        const minutes = new Map<string, number>();
         snap.docs.forEach((d) => {
           const sid = d.get("studentId");
-          if (typeof sid === "string") next.set(sid, d.get("status") === "absent" ? "absent" : "present");
+          if (typeof sid !== "string") return;
+          const status = classStatusOf(d.get("status"));
+          next.set(sid, status);
+          const m = d.get("lateMinutes");
+          if (status === "late" && typeof m === "number") minutes.set(sid, m);
         });
         setRecords(next);
+        setLateMinutes(minutes);
         setRecordsLoaded(true);
       },
       errors.onError,
@@ -148,11 +183,29 @@ export function useClassTodayAttendance(params: {
     };
   }, [academyId, classId, date, enabled]);
 
-  return { arrivals, records, recordsLoaded, error };
+  // 3-B ★15 휴강 — 담당 선생님은 없는 문서를 단건으로 못 읽어(규칙) `classId ==`·`date ==` 목록으로 본다.
+  // P3: 반에서 빠진 선생님의 permission-denied는 반 출결과 같은 2.5초 유예·조용히 정리.
+  useEffect(() => {
+    setCancelled(undefined);
+    if (!enabled) return;
+    const q = query(
+      collection(getFirebaseDb(), academyClassCancellationsPath(academyId)),
+      where("classId", "==", classId),
+      where("date", "==", date),
+    );
+    const errors = deferredErrorReporter(() => setError(LOAD_ERROR));
+    const unsub = onSnapshot(q, (snap) => setCancelled(!snap.empty), errors.onError);
+    return () => {
+      errors.dispose();
+      unsub();
+    };
+  }, [academyId, classId, date, enabled]);
+
+  return { arrivals, records, lateMinutes, recordsLoaded, cancelled, error };
 }
 
 /** 그날 이 학생의 반 출결 한 건 */
-export type StudentClassRecord = { classId: string; className: string; status: "present" | "absent" };
+export type StudentClassRecord = { classId: string; className: string; status: ClassStatus };
 
 /**
  * 학생 한 명의 오늘 등원 기록(+ 그날 반 출결) 구독 — 학생 상세 시트 "오늘" 줄(2-J 등원 취소).
@@ -208,7 +261,7 @@ export function useStudentTodayArrival(params: {
           snap.docs.map((d) => ({
             classId: String(d.get("classId") ?? ""),
             className: typeof d.get("className") === "string" && d.get("className") ? d.get("className") : "반",
-            status: d.get("status") === "absent" ? "absent" : "present",
+            status: classStatusOf(d.get("status")),
           })),
         );
         setClassRecordsLoading(false);

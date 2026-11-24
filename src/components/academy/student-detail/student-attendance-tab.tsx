@@ -7,11 +7,14 @@ import { AbsenceRecordModal } from "@/components/academy/absence-record-modal";
 import { AttendanceReasonSheet } from "@/components/academy/attendance/attendance-reason-sheet";
 import { formatRecordDate, seoulDateString } from "@/lib/academy/attendance-records";
 import {
+  loadClassCancellations,
   loadStudentAttendance,
   loadStudentClassAttendance,
   type StudentAttendanceRow,
+  type StudentCancellationRow,
   type StudentClassAttendanceRow,
 } from "@/lib/academy/student-detail/attendance-source";
+import { classRecordLabel } from "@/lib/academy/attendance-labels";
 import { formatSeoulHHmm } from "@/lib/academy/attendance-rules";
 import { ABSENCE_REASON_LABELS } from "@/lib/firebase/attn-schema";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
@@ -44,18 +47,23 @@ export function StudentAttendanceTab({
   academyId,
   studentId,
   studentName,
+  classIds = [],
   canRecord,
   onNoticeAction,
 }: {
   academyId: string;
   studentId: string;
   studentName: string;
+  /** 3-B 휴강 표시용 — 지금 반(기록에 나온 반도 함께 봄) */
+  classIds?: readonly string[];
   canRecord: boolean;
   onNoticeAction: (message: string) => void;
 }) {
   const [{ year, month }, setYm] = useState(currentYearMonth);
   const [rows, setRows] = useState<StudentAttendanceRow[]>([]);
   const [classRows, setClassRows] = useState<StudentClassAttendanceRow[]>([]);
+  const [cancelRows, setCancelRows] = useState<StudentCancellationRow[]>([]);
+  const classIdsKey = classIds.join("|");
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [confirmDate, setConfirmDate] = useState<string | null>(null);
@@ -75,14 +83,18 @@ export function StudentAttendanceTab({
       ]);
       setRows(arrivals);
       setClassRows(classes);
+      // 3-B 휴강(★16 읽기만) — 지금 반 ∪ 그 달 기록에 나온 반. 실패해도 출결 기록은 보여 준다
+      const ids = new Set([...(classIdsKey ? classIdsKey.split("|") : []), ...classes.map((c) => c.classId)]);
+      setCancelRows(await loadClassCancellations(academyId, ids, range).catch(() => []));
     } catch (e) {
       setRows([]);
       setClassRows([]);
+      setCancelRows([]);
       setError(e instanceof Error ? e.message : "출결 기록을 불러오지 못했습니다.");
     } finally {
       setBusy(false);
     }
-  }, [academyId, studentId, year, month]);
+  }, [academyId, studentId, year, month, classIdsKey]);
 
   useEffect(() => {
     void fetchRows();
@@ -122,10 +134,10 @@ export function StudentAttendanceTab({
   };
 
   const absences = rows.filter((r) => r.status === "absent");
-  // 날짜 목록 = 등원 기록 ∪ 반 출결(최근 날짜부터)
-  const dates = [...new Set([...rows.map((r) => r.date), ...classRows.map((c) => c.date)])].sort((a, b) =>
-    b.localeCompare(a),
-  );
+  // 날짜 목록 = 등원 기록 ∪ 반 출결 ∪ 휴강(최근 날짜부터)
+  const dates = [
+    ...new Set([...rows.map((r) => r.date), ...classRows.map((c) => c.date), ...cancelRows.map((c) => c.date)]),
+  ].sort((a, b) => b.localeCompare(a));
   const rowByDate = new Map(rows.map((r) => [r.date, r]));
   const deductibleCount = absences.filter((r) => r.reason === "illness" || r.reason === "academy").length;
   const billedCount = absences.filter((r) => r.billedInvoicePeriod).length;
@@ -175,6 +187,7 @@ export function StudentAttendanceTab({
           {dates.map((date) => {
             const r = rowByDate.get(date);
             const classesOfDay = classRows.filter((c) => c.date === date);
+            const cancelsOfDay = cancelRows.filter((c) => c.date === date);
             const deductible = r?.reason === "illness" || r?.reason === "academy";
             const confirming = confirmDate === date;
             return (
@@ -202,6 +215,11 @@ export function StudentAttendanceTab({
                           {r.status === "present" && r.arrivedAtMs ? (
                             <span className="text-[10px] text-neutral-500">
                               {formatSeoulHHmm(new Date(r.arrivedAtMs))}
+                            </span>
+                          ) : null}
+                          {r.status === "present" && r.departed ? (
+                            <span className="text-[10px] text-sky-800">
+                              하원{r.leftAtMs ? ` ${formatSeoulHHmm(new Date(r.leftAtMs))}` : ""}
                             </span>
                           ) : null}
                           {r.reason ? (
@@ -286,6 +304,11 @@ export function StudentAttendanceTab({
                     </div>
                   ) : null}
                 </div>
+                {cancelsOfDay.length > 0 ? (
+                  <p className="mt-1 text-[10px] text-rose-800">
+                    휴강 · {cancelsOfDay.map((c) => c.className).join(", ")}
+                  </p>
+                ) : null}
                 {classesOfDay.length > 0 ? (
                   <ul className="mt-1.5 space-y-1 border-t border-neutral-200/60 pt-1.5">
                     {classesOfDay.map((c) => (
@@ -301,10 +324,12 @@ export function StudentAttendanceTab({
                           className={`ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                             c.status === "present"
                               ? "bg-emerald-500/15 text-emerald-900"
-                              : "bg-amber-500/20 text-amber-950"
+                              : c.status === "late"
+                                ? "bg-violet-500/15 text-violet-900"
+                                : "bg-amber-500/20 text-amber-950"
                           }`}
                         >
-                          {c.status === "present" ? "출석" : c.reason && c.reason !== "general" ? `결석(${ABSENCE_REASON_LABELS[c.reason]})` : "결석"}
+                          {classRecordLabel(c)}
                         </span>
                         {c.corrected ? <span className="shrink-0 text-[10px] text-sky-800">정정됨</span> : null}
                         </div>

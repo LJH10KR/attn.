@@ -6,8 +6,9 @@ import {
   type AttendanceCancelTarget,
   type KnownClassRecord,
 } from "@/components/academy/attendance/attendance-cancel-dialog";
+import { AttendanceLateDialog, type LateDialogTarget } from "@/components/academy/attendance/attendance-late-dialog";
 import { ModalPortal } from "@/components/ui/modal-portal";
-import { arrivalSummary, arrivalTimeInput } from "@/lib/academy/attendance-labels";
+import { arrivalSummary, arrivalTimeInput, departureSummary, leftTimeInput } from "@/lib/academy/attendance-labels";
 import {
   ABSENCE_REASONS,
   ABSENCE_REASON_LABELS,
@@ -15,6 +16,8 @@ import {
   CLASS_ATTENDANCE_BLOCK_LABELS,
   classAttendanceBlock,
   dateLabel,
+  formatSeoulHHmm,
+  suggestLateMinutes,
   type AbsenceReason,
   type AttendanceStatus,
 } from "@/lib/academy/attendance-rules";
@@ -23,15 +26,15 @@ import { useAttendanceActions } from "@/lib/academy/use-attendance-actions";
 import { useAttendanceCorrections, type CallOutcome } from "@/lib/academy/use-attendance-corrections";
 import type { AttendanceCorrectionRow } from "@/lib/academy/use-day-attendance";
 
-const segBtn = (selected: boolean, tone: "green" | "amber" | "gray") =>
-  `flex-1 rounded-xl border px-2 py-2 text-xs font-medium transition disabled:cursor-not-allowed ${selected ? "cursor-default" : "disabled:opacity-40"} ${
-    selected
-      ? tone === "green"
-        ? "border-emerald-600 bg-emerald-600 text-white"
-        : tone === "amber"
-          ? "border-amber-600 bg-amber-600 text-white"
-          : "border-neutral-700 bg-neutral-700 text-white"
-      : "border-neutral-300/80 bg-white text-neutral-800"
+const SEG_ON = {
+  green: "border-emerald-600 bg-emerald-600 text-white",
+  violet: "border-violet-600 bg-violet-600 text-white",
+  amber: "border-amber-600 bg-amber-600 text-white",
+  gray: "border-neutral-700 bg-neutral-700 text-white",
+} as const;
+const segBtn = (selected: boolean, tone: keyof typeof SEG_ON) =>
+  `flex-1 rounded-xl border px-1.5 py-2 text-xs font-medium transition disabled:cursor-not-allowed ${selected ? "cursor-default" : "disabled:opacity-40"} ${
+    selected ? SEG_ON[tone] : "border-neutral-300/80 bg-white text-neutral-800"
   }`;
 const chip = (selected: boolean) =>
   `rounded-full border px-3 py-1 text-[11px] font-medium disabled:opacity-40 ${
@@ -49,6 +52,10 @@ export type DetailClassContext = {
   /** 오늘 조건(today 모드에서만 씀) */
   classEnded: boolean;
   hasLesson: boolean;
+  /** 3-B 반 문서가 지워진 반 */
+  classDeleted: boolean;
+  /** 3-B 그날 휴강 */
+  cancelled: boolean;
 };
 
 /**
@@ -87,11 +94,14 @@ export function AttendanceDetailSheet({
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [cancelTarget, setCancelTarget] = useState<AttendanceCancelTarget | null>(null);
   const [time, setTime] = useState(arrivalTimeInput(arrival));
+  const [leftTime, setLeftTime] = useState(leftTimeInput(arrival));
+  const [lateTarget, setLateTarget] = useState<LateDialogTarget | null>(null);
   const [note, setNote] = useState(arrival?.note ?? "");
   const [comment, setComment] = useState(classCtx?.record?.comment ?? "");
 
   // 다른 곳에서 기록이 바뀌면 입력칸을 새 값으로(편집 중이 아닐 때만 의미 있음 — 저장 뒤 같은 값)
   useEffect(() => setTime(arrivalTimeInput(arrival)), [arrival]);
+  useEffect(() => setLeftTime(leftTimeInput(arrival)), [arrival]);
   useEffect(() => setNote(arrival?.note ?? ""), [arrival?.note]);
   useEffect(() => setComment(classCtx?.record?.comment ?? ""), [classCtx?.record?.comment]);
 
@@ -108,11 +118,14 @@ export function AttendanceDetailSheet({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !cancelTarget && !busy) onCloseAction();
+      if (e.key === "Escape" && !cancelTarget && !lateTarget && !busy) onCloseAction();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [cancelTarget, busy, onCloseAction]);
+  }, [cancelTarget, lateTarget, busy, onCloseAction]);
+
+  // ★7·R1 오늘 시각은 지금(서울, 분)까지만 — 입력칸 max
+  const nowHHmm = past ? undefined : formatSeoulHHmm(new Date());
 
   // ── 등원 기록 ──
   const setArrival = async (status: AttendanceStatus) => {
@@ -137,7 +150,36 @@ export function AttendanceDetailSheet({
       billed: arrival.billed,
       knownClassRecords,
       past,
+      departed: arrival.departed,
     });
+  };
+
+  // ── 하원(3-B) — 오늘: [하원]·취소·시각만(★7), 지난 날짜: 정정 ──
+  const markDeparture = async () => {
+    setMessage(null);
+    if (!past) {
+      await actions.markDeparture(student.id, "attendance_screen", date, who);
+      return;
+    }
+    done(
+      await fixes.correctDeparture({ studentId: student.id, date, departed: true, via: "attendance_screen" }),
+      `${who} ${dateLabel(date)} 하원으로 정정했습니다.`,
+    );
+  };
+  const clearDeparture = () =>
+    setCancelTarget({ kind: "departure", studentId: student.id, studentName: who, past });
+  const saveLeftTime = async () => {
+    setMessage(null);
+    done(
+      await fixes.correctDeparture({
+        studentId: student.id,
+        date,
+        departed: true,
+        leftAtTime: leftTime || null,
+        via: "attendance_screen",
+      }),
+      leftTime ? `하원 시각을 ${leftTime}로 정정했습니다.` : "하원 시각을 지웠습니다.",
+    );
   };
   const saveTime = async () => {
     setMessage(null);
@@ -162,15 +204,51 @@ export function AttendanceDetailSheet({
 
   // ── 반 출결 ──
   const record = classCtx?.record ?? null;
-  const classBlock = classCtx
+  const rawClassBlock = classCtx
     ? classAttendanceBlock({
         studentActive: past ? true : student.active,
         isMember: true,
         classEnded: past ? false : classCtx.classEnded,
         hasLessonToday: past ? true : classCtx.hasLesson,
         arrival: arrival === undefined ? { status: "present", billed: false } : arrival,
+        classCancelled: classCtx.cancelled,
       })
     : null;
+  const classBlockLabel =
+    classCtx?.classDeleted && (!past || !record)
+      ? "삭제된 반"
+      : rawClassBlock
+        ? past && rawClassBlock === "not_arrived"
+          ? "등원 기록 없음"
+          : CLASS_ATTENDANCE_BLOCK_LABELS[rawClassBlock]
+        : null;
+  const openLate = () => {
+    if (!classCtx) return;
+    setLateTarget({
+      studentId: student.id,
+      studentName: who,
+      classId: classCtx.classId,
+      className: classCtx.className,
+      current: record?.status === "late" ? record.lateMinutes : null,
+      isLate: record?.status === "late",
+      suggested: suggestLateMinutes(arrival?.arrivedAtMs ?? null, date, classCtx.slots[0]?.start ?? null),
+    });
+  };
+  const submitLate = async (minutes: number) => {
+    if (!classCtx) return;
+    setLateTarget(null);
+    setMessage(null);
+    if (!past) {
+      await actions.markClass(classCtx.classId, classCtx.className, student.id, "late", "attendance_screen", date, who, minutes);
+      return;
+    }
+    done(
+      await fixes.correctClass({
+        classId: classCtx.classId, studentId: student.id, date, status: "late", lateMinutes: minutes, via: "attendance_screen",
+      }),
+      `${who} ${classCtx.className} 수업을 지각 ${minutes}분으로 정정했습니다.`,
+    );
+  };
   const setClass = async (status: AttendanceStatus) => {
     if (!classCtx) return;
     setMessage(null);
@@ -216,19 +294,32 @@ export function AttendanceDetailSheet({
     if (!t) return null;
     setMessage(null);
     if (!past) {
-      return t.kind === "class"
-        ? actions.cancelClass({
-            classId: t.classId, className: t.className, studentId: t.studentId, status: t.status, date,
-            via: "attendance_screen", studentName: who,
-          })
-        : actions.cancelArrival({ studentId: t.studentId, status: t.status, date, via: "attendance_screen", studentName: who });
+      if (t.kind === "class") {
+        return actions.cancelClass({
+          classId: t.classId, className: t.className, studentId: t.studentId, status: t.status, date,
+          via: "attendance_screen", studentName: who,
+        });
+      }
+      if (t.kind === "departure") {
+        return actions.cancelDeparture({ studentId: t.studentId, date, via: "attendance_screen", studentName: who });
+      }
+      return actions.cancelArrival({ studentId: t.studentId, status: t.status, date, via: "attendance_screen", studentName: who });
     }
     const o =
       t.kind === "class"
         ? await fixes.correctClass({ classId: t.classId, studentId: t.studentId, date, status: null, via: "attendance_screen" })
-        : await fixes.correctArrival({ studentId: t.studentId, date, status: null, via: "attendance_screen" });
+        : t.kind === "departure"
+          ? await fixes.correctDeparture({ studentId: t.studentId, date, departed: false, via: "attendance_screen" })
+          : await fixes.correctArrival({ studentId: t.studentId, date, status: null, via: "attendance_screen" });
     if (!o.ok) return o.message;
-    show(t.kind === "class" ? `${t.className} 수업 출결 기록을 지웠습니다.` : "등원 기록을 지웠습니다.", true);
+    show(
+      t.kind === "class"
+        ? `${t.className} 수업 출결 기록을 지웠습니다.`
+        : t.kind === "departure"
+          ? "하원 기록을 지웠습니다."
+          : "등원 기록을 지웠습니다.",
+      true,
+    );
     return null;
   };
 
@@ -326,7 +417,7 @@ export function AttendanceDetailSheet({
                 </p>
               ) : null}
 
-              {past && arrival?.status === "present" ? (
+              {arrival?.status === "present" ? (
                 <div className="mt-3 flex items-center gap-2">
                   <label htmlFor="arrived-at-time" className="shrink-0 text-[11px] text-neutral-600">
                     등원 시각
@@ -335,16 +426,18 @@ export function AttendanceDetailSheet({
                     id="arrived-at-time"
                     type="time"
                     value={time}
+                    max={nowHHmm}
                     onChange={(e) => setTime(e.target.value)}
                     className="min-w-0 flex-1 rounded-xl border border-neutral-300/80 bg-white px-2 py-1.5 text-sm"
                   />
                   <button
                     type="button"
-                    disabled={busy || time === arrivalTimeInput(arrival)}
+                    // 오늘은 시각만 고치고 지울 수 없다(★7·R1 — 서버가 지금 이후도 거부)
+                    disabled={busy || time === arrivalTimeInput(arrival) || (!past && !time)}
                     onClick={() => void saveTime()}
                     className={saveBtn}
                   >
-                    {time || !arrivalTimeInput(arrival) ? "시각 저장" : "시각 지우기"}
+                    {time || !arrivalTimeInput(arrival) || !past ? "시각 저장" : "시각 지우기"}
                   </button>
                 </div>
               ) : null}
@@ -382,6 +475,61 @@ export function AttendanceDetailSheet({
               ) : null}
             </section>
 
+            <section className={sectionCls} aria-label="하원 기록">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h3 className="text-xs font-semibold text-foreground">하원</h3>
+                <span className="text-[11px] text-neutral-500">
+                  {arrival === undefined ? "확인 중" : departureSummary(arrival)}
+                </span>
+              </div>
+              {arrival?.status !== "present" ? (
+                <p className="text-[11px] text-neutral-500">
+                  등원 기록이 있어야 하원을 기록할 수 있습니다.
+                </p>
+              ) : !arrival.departed ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void markDeparture()}
+                  className="w-full rounded-xl border border-sky-500/50 bg-sky-500/10 py-2 text-xs font-medium text-sky-900 disabled:opacity-40"
+                >
+                  {past ? "하원으로 정정(시각 없이)" : "하원 처리 · 학부모 알림"}
+                </button>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="left-at-time" className="shrink-0 text-[11px] text-neutral-600">
+                      하원 시각
+                    </label>
+                    <input
+                      id="left-at-time"
+                      type="time"
+                      value={leftTime}
+                      max={nowHHmm}
+                      onChange={(e) => setLeftTime(e.target.value)}
+                      className="min-w-0 flex-1 rounded-xl border border-neutral-300/80 bg-white px-2 py-1.5 text-sm"
+                    />
+                    <button
+                      type="button"
+                      disabled={busy || leftTime === leftTimeInput(arrival) || (!past && !leftTime)}
+                      onClick={() => void saveLeftTime()}
+                      className={saveBtn}
+                    >
+                      {leftTime || !leftTimeInput(arrival) || !past ? "시각 저장" : "시각 지우기"}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={clearDeparture}
+                    className="mt-2 text-[11px] font-medium text-red-600 underline-offset-2 hover:underline disabled:opacity-40"
+                  >
+                    하원 기록 {past ? "지우기" : "취소"}
+                  </button>
+                </>
+              )}
+            </section>
+
             {classCtx ? (
               <section className={sectionCls} aria-label={`${classCtx.className} 수업 출결`}>
                 <div className="mb-2 flex items-center justify-between gap-2">
@@ -395,16 +543,29 @@ export function AttendanceDetailSheet({
                   </span>
                 </div>
                 <div className="flex gap-1.5">
-                  {(["present", "absent"] as const).map((st) => (
+                  {(["present", "late", "absent"] as const).map((st) => (
                     <button
                       key={st}
                       type="button"
                       aria-pressed={record?.status === st}
-                      disabled={busy || (record?.status !== st && (Boolean(classBlock) || Boolean(record?.hasSessionDeduction)))}
-                      onClick={() => record?.status !== st && void setClass(st)}
-                      className={segBtn(record?.status === st, st === "present" ? "green" : "amber")}
+                      disabled={
+                        busy ||
+                        Boolean(record?.hasSessionDeduction) ||
+                        (record?.status !== st && Boolean(classBlockLabel))
+                      }
+                      onClick={() => {
+                        if (st === "late") openLate();
+                        else if (record?.status !== st) void setClass(st);
+                      }}
+                      className={segBtn(record?.status === st, st === "present" ? "green" : st === "late" ? "violet" : "amber")}
                     >
-                      {st === "present" ? "출석" : "결석"}
+                      {st === "present"
+                        ? "출석"
+                        : st === "late"
+                          ? record?.status === "late" && record.lateMinutes
+                            ? `지각 ${record.lateMinutes}분`
+                            : "지각"
+                          : "결석"}
                     </button>
                   ))}
                   <button
@@ -417,10 +578,14 @@ export function AttendanceDetailSheet({
                     미처리
                   </button>
                 </div>
-                {classBlock && !record ? (
+                {classBlockLabel && !record ? (
                   <p className="mt-2 text-[11px] text-neutral-500">
-                    {past && classBlock === "not_arrived" ? "등원 기록 없음" : CLASS_ATTENDANCE_BLOCK_LABELS[classBlock]} —
-                    등원 기록을 먼저 {past ? "정정" : "처리"}해 주세요.
+                    {classBlockLabel}
+                    {rawClassBlock === "not_arrived" || rawClassBlock === "absent_today"
+                      ? ` — 등원 기록을 먼저 ${past ? "정정" : "처리"}해 주세요.`
+                      : rawClassBlock === "class_cancelled"
+                        ? " — 휴강한 수업이라 출결을 기록할 수 없습니다."
+                        : ""}
                   </p>
                 ) : null}
                 {record?.hasSessionDeduction ? (
@@ -492,6 +657,22 @@ export function AttendanceDetailSheet({
           target={cancelTarget}
           onConfirmAction={confirmCancel}
           onCloseAction={() => setCancelTarget(null)}
+        />
+      ) : null}
+
+      {lateTarget && classCtx ? (
+        <AttendanceLateDialog
+          target={lateTarget}
+          past={past}
+          onSubmitAction={(minutes) => void submitLate(minutes)}
+          onClearAction={() => {
+            setLateTarget(null);
+            setCancelTarget({
+              kind: "class", studentId: student.id, studentName: who, classId: classCtx.classId,
+              className: classCtx.className, status: "late", past,
+            });
+          }}
+          onCloseAction={() => setLateTarget(null)}
         />
       ) : null}
     </ModalPortal>

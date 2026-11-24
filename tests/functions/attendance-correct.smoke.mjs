@@ -76,7 +76,7 @@ const student = (id, extra) =>
     name: id.toUpperCase(), status: "enrolled", grade: "e3", gradeYear: 2026, guardians: [], guardianPhones: [],
     parentUids: ["p9x"], classIds: ["cA"], teacherUids: [tA.uid], ...extra,
   });
-for (const id of ["s1", "s2", "s3", "s5", "s6", "s7", "s8", "s9", "s11", "s12", "s13"]) await student(id, {});
+for (const id of ["s1", "s2", "s3", "s5", "s6", "s7", "s8", "s9", "s11", "s12", "s13", "s14"]) await student(id, {});
 await student("s4", { classIds: ["cB"], teacherUids: [] });
 await student("s10", { status: "on_leave" });
 
@@ -122,9 +122,36 @@ for (const u of [tA, classesOnly, billingStaff]) {
 await as(stranger);
 await assert.rejects(fixArrival("s1", Y1, "present"), /권한/);
 
-// --- 날짜: 오늘·미래 거부, 형식 오류, 아주 오래된 날짜 허용(제한 없음) ---
+// --- 날짜: 오늘은 시각만(3-B ★7, P4)·미래 거부, 형식 오류, 아주 오래된 날짜 허용(제한 없음) ---
 await as(owner);
-await assert.rejects(fixArrival("s1", TODAY, "present"), /지난 날짜만 정정할 수 있습니다\. 오늘 기록은 출결 버튼으로 처리해 주세요\./);
+const TODAY_ONLY_TIME = /오늘 기록은 시각만 고칠 수 있습니다\. 상태는 출결 버튼으로 처리해 주세요\./;
+// 오늘 기록이 없으면 만들 수 없음, 상태·사유 변경은 거부
+await assert.rejects(fixArrival("s1", TODAY, "present"), TODAY_ONLY_TIME);
+await assert.rejects(fixArrival("s1", TODAY, "present", { arrivedAtTime: "00:00" }), TODAY_ONLY_TIME);
+await call("recordStudentArrival", { academyId: A, studentId: "s14", status: "present", date: TODAY });
+await assert.rejects(fixArrival("s14", TODAY, "absent"), TODAY_ONLY_TIME);
+await assert.rejects(fixArrival("s14", TODAY, "absent", { reason: "illness" }), TODAY_ONLY_TIME);
+await assert.rejects(fixArrival("s14", TODAY, null), TODAY_ONLY_TIME);
+await assert.rejects(fixArrival("s14", TODAY, "present"), TODAY_ONLY_TIME);
+// 오늘 등원 시각만 고침 — 알림 없이 정정 이력
+// R1 시각 지우기 거부·지금 이후 거부, 지금 이전 시각만(서울 00:05 전이면 건너뜀)
+await assert.rejects(fixArrival("s14", TODAY, "present", { arrivedAtTime: null }), TODAY_ONLY_TIME);
+const NOW_HM = now.toLocaleTimeString("en-GB", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+if (NOW_HM < "23:59") {
+  await assert.rejects(fixArrival("s14", TODAY, "present", { arrivedAtTime: "23:59" }), /오늘 기록은 지금보다 늦은 시각으로 고칠 수 없습니다\./);
+}
+if (NOW_HM >= "00:05") {
+  const notifsBeforeTime = await notifCount({ studentId: "s14" });
+  assert.equal((await fixArrival("s14", TODAY, "present", { arrivedAtTime: "00:01" })).changed, true);
+  const s14 = await arrivalDoc("s14", TODAY);
+  assert.equal(s14.status, "present");
+  assert.equal(s14.arrivedAtManual, true);
+  assert.equal(s14.arrivedAt.toMillis(), seoulMs(TODAY, "00:01"));
+  assert.equal(await notifCount({ studentId: "s14" }), notifsBeforeTime, "오늘 시각 정정은 알림 없음");
+  assert.equal((await corrections("s14")).length, 1);
+} else {
+  console.log("  (서울 00:05 전 — 오늘 시각 고치기 단계 건너뜀)");
+}
 await assert.rejects(fixClass("cA", "s1", TOMORROW, "present"), /앞으로의 날짜는 정정할 수 없습니다\./);
 await assert.rejects(fixArrival("s1", "2026-02-30", "present"), /요청이 올바르지 않습니다/);
 await assert.rejects(fixArrival("s1", Y1, "late"), /요청이 올바르지 않습니다/);

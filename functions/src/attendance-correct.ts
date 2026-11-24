@@ -7,7 +7,10 @@ import {
   billedLockError,
   classAttendanceCol,
   classAttendanceOnDatesQuery,
+  classCancellationRef,
+  DEPARTURE_FIELDS_DELETE,
   isBilledRecord,
+  parseClassStatusInput,
   parseVia,
   requireId,
 } from "./attendance";
@@ -29,11 +32,14 @@ import {
   arrivalCorrectionCheck,
   arrivalCorrectionClassRecordsMessage,
   classAttendanceDocId,
+  CLASS_ATTENDANCE_BLOCK_MESSAGES,
   classCorrectionBlock,
   classCorrectionBlockMessage,
   CORRECTION_DATE_MESSAGES,
   CORRECTION_PERMISSION_MESSAGE,
   correctionDateBlock,
+  DEPARTURE_BEFORE_ARRIVAL_MESSAGE,
+  departureLockPastMessage,
   DETAILS_PERMISSION_MESSAGE,
   isAbsenceReason,
   isHHmm,
@@ -44,10 +50,15 @@ import {
   seoulDateTimeMs,
   SESSION_DEDUCTION_LOCKED_MESSAGE,
   slotsOnWeekday,
+  BATCH_LATE_ROW_MESSAGE,
+  TODAY_FUTURE_TIME_MESSAGE,
+  TODAY_TIME_ONLY_MESSAGE,
+  todayTimeBlock,
   weekdayOfDate,
   type AbsenceReason,
   type ArrivalCorrectionPrev,
   type AttendanceStatus,
+  type ClassStatus,
 } from "./lib/attendance-rules";
 import { readSchedule } from "./lib/class-schedule";
 import { readUidList } from "./lib/parent-recipients";
@@ -83,7 +94,21 @@ export function requirePastDate(raw: unknown, today: string = seoulDateString())
   return raw;
 }
 
-function staffRefFor(db: admin.firestore.Firestore, academyId: string, actor: AcademyActor) {
+/** 오늘 또는 지난 날짜(3-B ★7 — 오늘은 시각만 고치는 정정 함수용) */
+export function requireNotFutureDate(raw: unknown, today: string = seoulDateString()): string {
+  if (!isValidDateString(raw)) throw new HttpsError("invalid-argument", "요청이 올바르지 않습니다.");
+  if (raw > today) throw new HttpsError("failed-precondition", CORRECTION_DATE_MESSAGES.future);
+  return raw;
+}
+
+/** 오늘 기록 시각(★7·R1) — "HH:mm" 필수(지우기 불가), 지금보다 늦으면 거부 */
+export function assertTodayTime(time: unknown): void {
+  const block = todayTimeBlock(time);
+  if (block === "time_only") throw new HttpsError("failed-precondition", TODAY_TIME_ONLY_MESSAGE);
+  if (block === "future") throw new HttpsError("failed-precondition", TODAY_FUTURE_TIME_MESSAGE);
+}
+
+export function staffRefFor(db: admin.firestore.Firestore, academyId: string, actor: AcademyActor) {
   return actor.kind === "staff" ? staffDocRef(db, academyId, actor.uid) : null;
 }
 
@@ -92,11 +117,13 @@ function recorderRole(actor: AcademyActor): "owner" | "teacher" {
   return actor.kind === "owner" ? "owner" : "teacher";
 }
 
-export type CorrectOutcome = { ok: true; changed: boolean; status: AttendanceStatus | null };
+export type CorrectOutcome = { ok: true; changed: boolean; status: AttendanceStatus | ClassStatus | null };
 
 /**
  * 지난 날짜 등원 기록 정정(만들기·바꾸기·지우기) — `correctStudentArrival`·일괄 공용. 날짜는 호출한 쪽이 확인한다.
  * `arrivedAtTime`: "HH:mm" = 그 시각으로(직접 입력 표시), null = 시각 지움, undefined = 이미 등원이면 그대로·아니면 시각 없음(★2·B4).
+ * 3-B: 하원이 있으면 미등원·지우기 거부(★5), 하원 시각보다 늦은 등원 시각 거부(★6),
+ * `date`가 오늘이면 이미 등원인 기록의 시각만 고친다(★7 — 상태는 출결 버튼).
  */
 export async function correctArrivalCore(
   db: admin.firestore.Firestore,
@@ -129,8 +156,15 @@ export async function correctArrivalCore(
         billed: isBilledRecord(prevData),
         reason: prevState.reason,
         arrivedAtMs: prevState.arrivedAt?.toMillis() ?? null,
+        departed: prevData?.departed === true,
       }
       : null;
+    if (date === seoulDateString()) {
+      if (status !== "present" || prev?.status !== "present") {
+        throw new HttpsError("failed-precondition", TODAY_TIME_ONLY_MESSAGE);
+      }
+      assertTodayTime(arrivedAtTime);
+    }
 
     // 다음 등원 시각 — "keep"이면 필드를 건드리지 않는다
     const keepTime = status === "present" && arrivedAtTime === undefined && prev?.status === "present";
@@ -155,6 +189,14 @@ export async function correctArrivalCore(
     if (check === "has_class_records") {
       throw new HttpsError("failed-precondition", arrivalCorrectionClassRecordsMessage(date, classCount, status === null));
     }
+    if (check === "has_departure") {
+      throw new HttpsError("failed-precondition", departureLockPastMessage(date, status === null));
+    }
+    // ★6 하원 시각이 있으면 등원 시각은 그보다 늦을 수 없다
+    const leftAtMs = prevData?.leftAt instanceof Timestamp ? prevData.leftAt.toMillis() : null;
+    if (status === "present" && nextArrivedAtMs !== null && leftAtMs !== null && nextArrivedAtMs > leftAtMs) {
+      throw new HttpsError("invalid-argument", DEPARTURE_BEFORE_ARRIVAL_MESSAGE);
+    }
 
     const studentName = studentNameOf(studentSnap!.data());
     if (status === null) {
@@ -178,6 +220,7 @@ export async function correctArrivalCore(
         status,
         reason: nextReason ?? FieldValue.delete(),
         ...timeFields,
+        ...(status === "absent" ? DEPARTURE_FIELDS_DELETE : {}),
         academyId,
         studentId,
         via,
@@ -226,23 +269,29 @@ export async function correctClassCore(
     classId: string;
     studentId: string;
     date: string;
-    status: AttendanceStatus | null;
+    status: ClassStatus | null;
+    /** 지각일 때만(1~180, 호출한 쪽이 검사) */
+    lateMinutes?: number | null;
     reason?: AbsenceReason;
     via: CorrectionVia;
+    /** 일괄(★3·R2): 지각으로 기록된 줄은 트랜잭션 안에서 판단해 건너뜀 */
+    skipLate?: boolean;
   },
 ): Promise<CorrectOutcome> {
   const { actor, academyId, classId, studentId, date, status, reason, via } = params;
+  const lateMinutes = status === "late" ? params.lateMinutes ?? null : null;
   const studentRef = db.doc(`academies/${academyId}/students/${studentId}`);
   const classRef = db.doc(`academies/${academyId}/classes/${classId}`);
   const recordRef = classAttendanceCol(db, academyId).doc(classAttendanceDocId(date, classId, studentId));
   const staffRef = staffRefFor(db, academyId, actor);
 
   return db.runTransaction(async (tx): Promise<CorrectOutcome> => {
-    const [studentSnap, clsSnap, arrivalSnap, recordSnap, staffSnap] = await tx.getAll(
+    const [studentSnap, clsSnap, arrivalSnap, recordSnap, cancelSnap, staffSnap] = await tx.getAll(
       studentRef,
       classRef,
       arrivalRecordRef(db, academyId, studentId, date),
       recordRef,
+      classCancellationRef(db, academyId, date, classId),
       ...(staffRef ? [staffRef] : []),
     );
     const by = correctionActorFromTx(actor, staffSnap ?? null, CORRECTION_PERMISSION_MESSAGE);
@@ -261,13 +310,27 @@ export async function correctClassCore(
       arrival: arrivalSnapshotOf(arrivalSnap!),
     });
     if (block) throw new HttpsError("failed-precondition", classCorrectionBlockMessage(block, date));
+    // 3-B ★12 휴강한 수업에는 출결을 만들거나 바꾸지 않는다(지우기는 허용 — 휴강 전에 남은 기록 정리)
+    if (status !== null && cancelSnap!.exists) {
+      throw new HttpsError("failed-precondition", CLASS_ATTENDANCE_BLOCK_MESSAGES.class_cancelled);
+    }
 
     const prevState = classStateOf(recordExists ? recordSnap!.data() : undefined);
+    if (params.skipLate && prevState?.status === "late") {
+      throw new HttpsError("failed-precondition", BATCH_LATE_ROW_MESSAGE);
+    }
     const nextReason =
       status === "absent"
         ? reason ?? reasonForStatus("absent", prevState?.status === "absent" ? prevState.reason : null)
         : null;
-    if (prevState && status !== null && prevState.status === status && (status === "present" || prevState.reason === nextReason)) {
+    if (
+      prevState &&
+      status !== null &&
+      prevState.status === status &&
+      (status === "present" ||
+        (status === "late" && (prevState.lateMinutes ?? null) === lateMinutes) ||
+        (status === "absent" && prevState.reason === nextReason))
+    ) {
       return { ok: true, changed: false, status };
     }
 
@@ -306,6 +369,7 @@ export async function correctClassCore(
         classId,
         studentId,
         status,
+        lateMinutes: status === "late" ? lateMinutes : FieldValue.delete(),
         reason: nextReason ?? FieldValue.delete(),
         className,
         ...slots,
@@ -325,7 +389,7 @@ export async function correctClassCore(
       },
       { merge: true },
     );
-    const after: ClassState = { status, reason: nextReason, comment: prevState?.comment ?? null };
+    const after: ClassState = { status, reason: nextReason, comment: prevState?.comment ?? null, lateMinutes };
     writeCorrectionTx(tx, db, {
       academyId, date, studentId, studentName, classId, className,
       layer: "class", action: recordExists ? "update" : "create", before: prevState, after, via, by,
@@ -348,7 +412,12 @@ export const correctStudentArrival = onCall(async (request) => {
     throw new HttpsError("invalid-argument", "요청이 올바르지 않습니다.");
   }
   const via = parseVia(data.via, CORRECTION_REQUEST_VIA, "attendance_screen");
-  const date = requirePastDate(data.date);
+  // ★7 오늘은 등원 기록의 시각만(상태·사유는 출결 버튼) — 지난 날짜는 3-A 그대로
+  const date = requireNotFutureDate(data.date);
+  if (date === seoulDateString()) {
+    if (status !== "present") throw new HttpsError("failed-precondition", TODAY_TIME_ONLY_MESSAGE);
+    assertTodayTime(timeRaw);
+  }
 
   const db = admin.firestore();
   const actor = assertCorrectionActor(
@@ -362,14 +431,15 @@ export const correctStudentArrival = onCall(async (request) => {
   });
 });
 
-/** 원장·출결 권한 — 지난 날짜 반 출결 정정(알림 없음, 정정 이력) */
+/** 원장·출결 권한 — 지난 날짜 반 출결 정정(알림 없음, 정정 이력, 3-B 지각·분) */
 export const correctClassAttendance = onCall(async (request) => {
   if (!request.auth?.uid) throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
   const data = (request.data ?? {}) as Record<string, unknown>;
   const academyId = requireId(data.academyId);
   const classId = requireId(data.classId);
   const studentId = requireId(data.studentId);
-  const status = parseCorrectionStatus(data.status);
+  const { status, lateMinutes } =
+    data.status === null ? { status: null, lateMinutes: null } : parseClassStatusInput(data.status, data.lateMinutes);
   const reason = parseOptionalReason(data.reason);
   if (reason !== undefined && status !== "absent") throw new HttpsError("invalid-argument", REASON_NOT_ABSENT_MESSAGE);
   const via = parseVia(data.via, CORRECTION_REQUEST_VIA, "attendance_screen");
@@ -380,7 +450,7 @@ export const correctClassAttendance = onCall(async (request) => {
     await resolveAcademyActor(db, academyId, request.auth.uid),
     CORRECTION_PERMISSION_MESSAGE,
   );
-  return correctClassCore(db, { actor, academyId, classId, studentId, date, status, reason, via });
+  return correctClassCore(db, { actor, academyId, classId, studentId, date, status, lateMinutes, reason, via });
 });
 
 /**

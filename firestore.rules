@@ -255,6 +255,16 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      /**
+       * 출결 설정(3-B — 학부모 알림 종류 7종 켜기·끄기) — 쓰기는 Functions(`updateAttendanceSettings`)만,
+       * 읽기는 출결·전체설정 권한(원장 포함).
+       */
+      match /meta/attendanceSettings {
+        allow read: if isAdmin()
+          || hasAnyPermission(academyId, ['lessons.attendance', 'settings.general']);
+        allow write: if false;
+      }
+
       /** 출석 키오스크 설정(해시·잠금) — Functions만 쓰기, 공개 필드만 읽기 */
       match /meta/kioskSettings {
         allow read: if isAdmin()
@@ -380,6 +390,18 @@ service cloud.firestore {
        * 읽기는 출결·청구서 권한, 그리고 그 반 선생님(반 `teacherUids`) — 선생님은 `classId ==` 조건 목록 조회로 읽는다.
        */
       match /attendance/{attendanceId} {
+        allow read: if isAdmin()
+          || hasAnyPermission(academyId, ['lessons.attendance', 'billing.invoices'])
+          || (isAcademyTeacherActive(academyId)
+              && uidListHasMe(get(/databases/$(database)/documents/academies/$(academyId)/classes/$(resource.data.classId)).data.teacherUids));
+        allow write: if false;
+      }
+
+      /**
+       * 휴강(3-B, 문서 ID = `{date}_{classId}`) — 쓰기는 Functions(`setClassCancellation`)만.
+       * 읽기는 반 출결과 같음: 출결·청구서 권한, 그리고 그 반 선생님(`classId ==`·`date ==` 목록 조회). 학부모는 Callable로만.
+       */
+      match /classCancellations/{cancellationId} {
         allow read: if isAdmin()
           || hasAnyPermission(academyId, ['lessons.attendance', 'billing.invoices'])
           || (isAcademyTeacherActive(academyId)

@@ -3,6 +3,7 @@ import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getFunctions } from "firebase-admin/functions";
 import { onTaskDispatched } from "firebase-functions/v2/tasks";
 import * as logger from "firebase-functions/logger";
+import type { AttendanceNotifyKind } from "./lib/attendance-rules";
 import { countUserDashboardBellItems } from "./app-badge-count";
 import {
   applyMulticastDeliveryResults,
@@ -30,7 +31,7 @@ export type AttendancePushDeliveryDoc = {
   academyId: string;
   studentId: string;
   recipientUid: string;
-  kind: "present" | "absent";
+  kind: AttendanceNotifyKind;
   studentName: string;
   body: string;
   pushDelivered: boolean;
@@ -315,7 +316,7 @@ export async function createAttendancePushDeliveryDoc(
     academyId: string;
     studentId: string;
     recipientUid: string;
-    kind: "present" | "absent";
+    kind: AttendanceNotifyKind;
     studentName: string;
     body: string;
   },

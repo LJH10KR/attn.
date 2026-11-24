@@ -6,11 +6,13 @@ import {
   ARRIVAL_CANCEL_REASON_LOCKED_MESSAGE,
   arrivalCancelBlock,
   CLASS_STATUS_LABELS,
+  departureLockTodayMessage,
   type AttendanceStatus,
+  type ClassStatus,
 } from "@/lib/academy/attendance-rules";
 
 /** 화면이 아는 그날 반 출결(구독 중인 반만) */
-export type KnownClassRecord = { className: string; status: AttendanceStatus };
+export type KnownClassRecord = { className: string; status: ClassStatus };
 
 /**
  * 취소 확인 창 대상(2-J). 3-A: `past`면 지난 날짜 정정(지우기) — 학부모 알림 없음·정정 기록이 남음,
@@ -23,7 +25,7 @@ export type AttendanceCancelTarget = (
       studentName: string;
       classId: string;
       className: string;
-      status: AttendanceStatus;
+      status: ClassStatus;
     }
   | {
       kind: "arrival";
@@ -34,6 +36,14 @@ export type AttendanceCancelTarget = (
       billed: boolean;
       /** 화면이 구독 중인 그 학생의 반 출결 — 구독하지 않는 반은 서버가 거부 문구로 안내 */
       knownClassRecords: readonly KnownClassRecord[];
+      /** 3-B 하원 기록이 있으면 먼저 거부(★5) */
+      departed?: boolean;
+    }
+  | {
+      /** 3-B 하원 기록 취소(오늘 — 정정 알림) / 지우기(지난 날짜 — 알림 없음) */
+      kind: "departure";
+      studentId: string;
+      studentName: string;
     }
 ) & { past?: boolean };
 
@@ -58,15 +68,36 @@ export function attendanceCancelDialogText(t: AttendanceCancelTarget): DialogTex
       confirmLabel: `${what} 기록 ${past ? "지우기" : "취소"}`,
     };
   }
+  if (t.kind === "departure") {
+    return past
+      ? {
+          title: `${withSubject(t.studentName)} 하원 기록을 지울까요?`,
+          body: `${PAST_LINE} 지우면 그날 "하원 기록 없음"이 됩니다.`,
+          confirmLabel: "하원 기록 지우기",
+        }
+      : {
+          title: `${withSubject(t.studentName)} 하원 기록을 취소할까요?`,
+          body: `${NOTIFY_LINE} 취소하면 등원 상태로 돌아갑니다.`,
+          confirmLabel: "하원 기록 취소",
+        };
+  }
   const what = t.status === "present" ? "등원" : "미등원";
   const rawBlock = arrivalCancelBlock({
     status: t.status,
     reason: t.reason,
     billed: t.billed,
     classRecordCount: t.knownClassRecords.length,
+    departed: t.departed === true,
   });
   // 지난 날짜 정정은 질병·학원 사정 미등원도 지울 수 있다(출결 권한만 쓰는 화면)
   const block = past && rawBlock === "reason_locked" ? null : rawBlock;
+  if (block === "has_departure") {
+    return {
+      title: `${what} 기록을 ${past ? "지울" : "취소할"} 수 없습니다`,
+      body: past ? "그날 하원 기록이 있습니다. 하원 기록을 먼저 정정해 주세요." : departureLockTodayMessage(true),
+      confirmLabel: null,
+    };
+  }
   if (block === "has_class_records") {
     const list = t.knownClassRecords.map((r) => `${r.className} ${CLASS_STATUS_LABELS[r.status]}`).join(", ");
     return {

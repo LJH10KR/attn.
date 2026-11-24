@@ -53,7 +53,7 @@ export function formatRecordDate(dateStr: string): string {
 
 export type AttendanceNotifyResult = {
   sent?: number;
-  reason?: "no_parent" | "parent_opt_out" | "no_token" | "cooldown" | "daily_limit" | "unchanged" | "failed";
+  reason?: "no_parent" | "parent_opt_out" | "no_token" | "cooldown" | "daily_limit" | "unchanged" | "failed" | "muted";
 } | null;
 
 /** 알림 결과를 기록 완료 문구 뒤에 붙일 설명으로 변환 */
@@ -72,6 +72,8 @@ export function describeNotifyResult(result: AttendanceNotifyResult): string {
       return " 학부모가 알림을 받지 않는 상태입니다.";
     case "failed":
       return " 알림 전송에는 실패했습니다.";
+    case "muted":
+      return " 출결 설정에서 꺼 둔 알림이라 학부모에게 보내지 않았습니다.";
     default:
       return "";
   }
@@ -80,8 +82,11 @@ export function describeNotifyResult(result: AttendanceNotifyResult): string {
 /** `recordStudentArrival`·`recordClassAttendance` 응답 */
 export type AttendanceActionResult = {
   ok?: boolean;
-  status?: "present" | "absent";
+  status?: "present" | "late" | "absent";
   changed?: boolean;
+  /** 3-B ★2 지각 분만 바꿈(알림 없음) */
+  minutesOnly?: boolean;
+  lateMinutes?: number | null;
   notification?: AttendanceNotifyResult;
 };
 
@@ -106,7 +111,16 @@ function withEuro(word: string): string {
 export type AttendanceCancelResult = {
   ok?: boolean;
   changed?: boolean;
-  cancelled?: "present" | "absent" | null;
+  cancelled?: "present" | "late" | "absent" | null;
+  notification?: AttendanceNotifyResult;
+};
+
+/** 3-B `recordStudentDeparture` 응답 */
+export type DepartureResult = {
+  ok?: boolean;
+  changed?: boolean;
+  alreadyLeft?: boolean;
+  message?: string;
   notification?: AttendanceNotifyResult;
 };
 
