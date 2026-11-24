@@ -15,13 +15,23 @@ function parsePurpose(raw: unknown): EmailVerificationPurpose {
   throw new HttpsError("invalid-argument", "인증 대상이 올바르지 않습니다.");
 }
 
-/** 로그인·가입 후 — 6자리 인증 코드 이메일 발송 */
+/**
+ * 로그인·가입 후 — 6자리 인증 코드 이메일 발송.
+ * - mode "resend"(기본 — 가입 직후·[인증 코드 다시 받기]): 늘 새 코드, 60초 안이면 resource-exhausted.
+ * - mode "auto"(인증 창이 열릴 때, 3-A 후속 F1): 최근 보낸 유효 코드가 있으면 새로 만들지 않고
+ *   `{ sent: false, reason: "recent" | "cooldown" }`.
+ */
 export const issueEmailVerificationOtp = onCall(async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
   }
   const uid = request.auth.uid;
   parsePurpose(request.data?.purpose);
+  const modeRaw: unknown = request.data?.mode;
+  if (modeRaw !== undefined && modeRaw !== "auto" && modeRaw !== "resend") {
+    throw new HttpsError("invalid-argument", "발송 방식이 올바르지 않습니다.");
+  }
+  const mode = modeRaw === "auto" ? "auto" : "resend";
 
   const user = await admin.auth().getUser(uid);
   if (user.emailVerified) {
@@ -36,6 +46,7 @@ export const issueEmailVerificationOtp = onCall(async (request) => {
     email,
     displayName: user.displayName ?? "",
     purpose: "owner",
+    mode,
   });
   return { ok: true as const, ...extra };
 });

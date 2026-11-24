@@ -145,6 +145,7 @@ export { sendOwnerSignupVerificationEmail } from "./owner-auth-mail";
 export { startPhoneVerification, checkPhoneVerification } from "./phone-verification";
 export { getOwnerConsentState, recordOwnerConsent } from "./legal-consent";
 export { issueEmailVerificationOtp, verifyEmailVerificationOtp } from "./email-verification-otp";
+export { confirmGoogleEmailVerified } from "./google-email-verification";
 export { createAcademyEasy } from "./academy-provision";
 export {
   signInTeacher,

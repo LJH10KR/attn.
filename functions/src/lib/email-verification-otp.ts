@@ -1,27 +1,22 @@
-import * as crypto from "node:crypto";
 import * as admin from "firebase-admin";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import * as nodemailer from "nodemailer";
+import {
+  hashOtp,
+  issueOtpWith,
+  OtpCooldownError,
+  type IssueMode,
+  type OtpStore,
+} from "./email-verification-issue";
+import { OTP_MAX_ATTEMPTS } from "./email-verification-policy";
 
 /** 원장 가입 이메일 인증만(2-L — 학부모 이메일 인증은 휴대폰 번호 확인으로 대체돼 없어짐) */
 export type EmailVerificationPurpose = "owner";
 
-const OTP_TTL_MS = 15 * 60 * 1000;
-const MAX_ATTEMPTS = 5;
-const RESEND_COOLDOWN_MS = 60 * 1000;
-
 function otpDocPath(uid: string): string {
   return `emailVerificationOtps/${uid}`;
-}
-
-function hashOtp(code: string): string {
-  return crypto.createHash("sha256").update(code).digest("hex");
-}
-
-function generateOtpCode(): string {
-  return String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
 }
 
 function isFunctionsEmulator(): boolean {
@@ -29,6 +24,7 @@ function isFunctionsEmulator(): boolean {
 }
 
 async function sendOtpEmail(params: {
+  uid: string;
   to: string;
   displayName: string;
   code: string;
@@ -54,18 +50,23 @@ async function sendOtpEmail(params: {
   ].join("\n");
 
   if (!host || !from) {
-    logger.warn("SMTP 미설정 — OTP는 로그에만 출력됩니다.", { to: params.to });
-    logger.info("email_verification_otp", {
-      to: params.to,
-      code: params.code,
-      purpose: params.purpose,
-    });
     if (!isFunctionsEmulator()) {
+      // 운영 로그에는 이메일·코드를 남기지 않는다(3-A 후속 B2)
+      logger.error("SMTP 미설정 — 인증 메일을 보내지 못했습니다.", {
+        uid: params.uid,
+        purpose: params.purpose,
+      });
       throw new HttpsError(
         "failed-precondition",
         "인증 메일 발송을 위해 Functions 환경 변수 SMTP_HOST, SMTP_FROM 등을 설정해 주세요.",
       );
     }
+    // 에뮬레이터만 — 코드를 로그로 확인(QA용)
+    logger.info("email_verification_otp", {
+      to: params.to,
+      code: params.code,
+      purpose: params.purpose,
+    });
     return;
   }
 
@@ -84,42 +85,92 @@ async function sendOtpEmail(params: {
   });
 }
 
+function firestoreOtpStore(uid: string, purpose: EmailVerificationPurpose): OtpStore {
+  const db = admin.firestore();
+  const ref = db.doc(otpDocPath(uid));
+  const millis = (v: unknown): number | null =>
+    v instanceof Timestamp ? v.toMillis() : null;
+  return {
+    async get() {
+      const snap = await ref.get();
+      if (!snap.exists) return null;
+      return {
+        codeHash: snap.get("codeHash"),
+        email: snap.get("email"),
+        attempts: snap.get("attempts"),
+        // 메일이 실제로 나간 시각만 본다(B1). 이 [Fix] 전 문서(deliveredAt 없음)는 보내지 않은 것으로 본다.
+        deliveredAtMs: millis(snap.get("deliveredAt")),
+        expiresAtMs: millis(snap.get("expiresAt")),
+      };
+    },
+    async replace(doc) {
+      await ref.set({
+        codeHash: doc.codeHash,
+        email: doc.email,
+        purpose,
+        attempts: 0,
+        expiresAt: Timestamp.fromMillis(doc.expiresAtMs),
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    },
+    async markDelivered(atMs) {
+      const at = Timestamp.fromMillis(atMs);
+      await ref.update({ deliveredAt: at, lastSentAt: at });
+    },
+    async deleteIfCodeHash(codeHash) {
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        if (snap.exists && snap.get("codeHash") === codeHash) tx.delete(ref);
+      });
+    },
+  };
+}
+
+export type IssueEmailVerificationOtpResult =
+  | { sent: true; debugCode?: string }
+  | { sent: false; reason: "recent" | "cooldown" };
+
 export async function issueEmailVerificationOtpForUid(params: {
   uid: string;
   email: string;
   displayName: string;
   purpose: EmailVerificationPurpose;
-}): Promise<{ debugCode?: string }> {
-  const db = admin.firestore();
-  const ref = db.doc(otpDocPath(params.uid));
-  const existing = await ref.get();
-  const lastSentAt = existing.get("lastSentAt") as Timestamp | undefined;
-  if (lastSentAt && Date.now() - lastSentAt.toMillis() < RESEND_COOLDOWN_MS) {
-    throw new HttpsError(
-      "resource-exhausted",
-      "인증 코드를 방금 발송했습니다. 잠시 후 다시 시도해 주세요.",
+  /** 기본 "resend"(늘 새 코드). 인증 창이 열릴 때는 "auto"(최근 보낸 유효 코드가 있으면 건너뜀) */
+  mode?: IssueMode;
+}): Promise<IssueEmailVerificationOtpResult> {
+  let result;
+  try {
+    result = await issueOtpWith(
+      {
+        store: firestoreOtpStore(params.uid, params.purpose),
+        send: (code) =>
+          sendOtpEmail({
+            uid: params.uid,
+            to: params.email,
+            displayName: params.displayName,
+            code,
+            purpose: params.purpose,
+          }),
+      },
+      { email: params.email, mode: params.mode ?? "resend" },
     );
+  } catch (e) {
+    if (e instanceof OtpCooldownError) {
+      throw new HttpsError(
+        "resource-exhausted",
+        "인증 코드를 방금 발송했습니다. 잠시 후 다시 시도해 주세요.",
+      );
+    }
+    if (e instanceof HttpsError) throw e;
+    logger.error("email_verification_send_failed", {
+      uid: params.uid,
+      purpose: params.purpose,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    throw new HttpsError("unavailable", "인증 메일을 보내지 못했습니다. 잠시 후 다시 시도해 주세요.");
   }
-
-  const code = generateOtpCode();
-  await ref.set({
-    codeHash: hashOtp(code),
-    email: params.email,
-    purpose: params.purpose,
-    attempts: 0,
-    lastSentAt: FieldValue.serverTimestamp(),
-    expiresAt: Timestamp.fromMillis(Date.now() + OTP_TTL_MS),
-    createdAt: FieldValue.serverTimestamp(),
-  });
-
-  await sendOtpEmail({
-    to: params.email,
-    displayName: params.displayName,
-    code,
-    purpose: params.purpose,
-  });
-
-  return isFunctionsEmulator() ? { debugCode: code } : {};
+  if (!result.sent) return result;
+  return isFunctionsEmulator() ? { sent: true, debugCode: result.code } : { sent: true };
 }
 
 export async function verifyEmailVerificationOtpForUid(params: {
@@ -151,7 +202,7 @@ export async function verifyEmailVerificationOtpForUid(params: {
   }
 
   const attempts = (snap.get("attempts") as number) || 0;
-  if (attempts >= MAX_ATTEMPTS) {
+  if (attempts >= OTP_MAX_ATTEMPTS) {
     await ref.delete();
     throw new HttpsError(
       "resource-exhausted",

@@ -67,7 +67,11 @@ export type OwnerProfileExtras = {
   phone?: string;
 };
 
-/** 이메일 인증 완료 후 또는 Google 신규 가입 직후 Firestore 오너 프로필을 맞춥니다. */
+/**
+ * 이메일 인증 완료 후 또는 Google 신규 가입 직후 Firestore 오너 프로필을 맞춥니다.
+ * 이름·연락처는 **값이 있을 때만** 씁니다 — 로그인마다 extras 없이 불러도 저장된 연락처·이름을 지우지 않음
+ * (3-A 후속 [Fix] — 전에는 phone을 null로 덮어써 가입한 원장이 "추가 정보 입력"을 다시 거쳤음).
+ */
 export async function upsertOwnerProfile(
   user: User,
   extras?: OwnerProfileExtras,
@@ -76,12 +80,12 @@ export async function upsertOwnerProfile(
   const ref = doc(db, COLLECTIONS.users, user.uid);
   const snap = await getDoc(ref);
   const displayName =
-    extras?.displayName?.trim() || user.displayName?.trim() || null;
-  const phone = extras?.phone?.trim() || null;
+    extras?.displayName?.trim() || user.displayName?.trim() || "";
+  const phone = extras?.phone?.trim() || "";
   const base = {
     email: user.email ?? null,
-    displayName,
-    phone,
+    ...(displayName ? { displayName } : {}),
+    ...(phone ? { phone } : {}),
     photoURL: profilePhotoUrlForUser(user),
     platformRole: "owner" as const,
     emailVerified: user.emailVerified,
