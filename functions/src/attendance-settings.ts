@@ -21,7 +21,7 @@ import {
   classStatusOf,
   departureCancelPushBody,
   departurePushBody,
-  notifyTypeFor,
+  isNotifyEnabled,
   RESEND_MESSAGES,
   resendBody,
   resendStateMatches,
@@ -107,7 +107,7 @@ export const resendAttendanceNotification = onCall(async (request) => {
   if (!studentId || (context === "class" && !classId)) throw new HttpsError("not-found", RESEND_MESSAGES.notFound);
 
   const settings = await loadNotifySettings(db, academyId);
-  if (!settings[notifyTypeFor({ context, kind, action })]) {
+  if (!isNotifyEnabled(settings, { context, kind, action })) {
     throw new HttpsError("failed-precondition", RESEND_MESSAGES.muted);
   }
 

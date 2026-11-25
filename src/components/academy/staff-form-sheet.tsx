@@ -289,7 +289,7 @@ export function StaffFormSheet({
           </div>
         </main>
 
-        <footer className="shrink-0 border-t border-neutral-200/80 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
+        <footer className="shrink-0 border-t border-neutral-200/80 px-4 pb-sheet-4 pt-3">
           <div className="mx-auto flex max-w-lg gap-2">
             {target?.accountStatus === "no_account" ? (
               <button

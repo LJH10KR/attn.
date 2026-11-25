@@ -16,6 +16,21 @@
   --glass-dock-fill: rgba(255, 255, 255, 0.82);
   --glass-dock-border: rgba(255, 255, 255, 0.75);
   --glass-dock-shadow: 0 12px 40px -12px rgba(0, 0, 0, 0.18);
+  /* 휴대폰 아래 둥근 모서리 여백(3-B 후속 F1) — `pb-sheet-*` */
+  --sheet-corner-gap: 30px;
+}
+
+/*
+ * 화면 아래에 붙는 시트·고정 막대의 아래 여백(3-B 후속 F1).
+ * 이 앱은 viewport-fit=cover가 없어 iOS에서 env(safe-area-inset-bottom)이 0 → 휴대폰에서만 30px 더 띄워
+ * iPhone 둥근 모서리에 버튼·글자가 잘리지 않게 한다. sm 이상(가운데 뜨는 창)은 기본 여백만.
+ * pb-sheet-5 = max(1.25rem, env) + 30px, pb-sheet-4 = max(1rem, env) + 30px, pb-sheet-3 = max(0.75rem, env) + 30px.
+ */
+@utility pb-sheet-* {
+  padding-bottom: calc(max(calc(var(--spacing) * --value(integer)), env(safe-area-inset-bottom)) + var(--sheet-corner-gap));
+  @variant sm {
+    padding-bottom: max(calc(var(--spacing) * --value(integer)), env(safe-area-inset-bottom));
+  }
 }
 
 /* TEMP: 다크모드 토큰은 확정 후 재활성화 예정

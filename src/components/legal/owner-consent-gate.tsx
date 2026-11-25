@@ -77,7 +77,7 @@ export function OwnerConsentGate({ enabled }: { enabled: boolean }) {
           role="dialog"
           aria-modal="true"
           aria-labelledby="owner-consent-title"
-          className="w-full max-w-lg rounded-t-3xl bg-white p-5 pb-[calc(max(1.25rem,env(safe-area-inset-bottom))+30px)] shadow-2xl sm:rounded-3xl sm:pb-5"
+          className="w-full max-w-lg rounded-t-3xl bg-white p-5 pb-sheet-5 shadow-2xl sm:rounded-3xl"
           data-owner-consent-gate
         >
           <h2 id="owner-consent-title" className="break-keep text-base font-semibold text-foreground">

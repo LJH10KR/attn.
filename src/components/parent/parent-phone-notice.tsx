@@ -161,7 +161,7 @@ export function ParentPhoneNoticeGate({ refreshKey }: { refreshKey: number }) {
               role="alertdialog"
               aria-modal="true"
               aria-labelledby="phone-notice-title"
-              className="w-full max-w-lg rounded-t-3xl bg-white p-5 pb-[calc(max(1.25rem,env(safe-area-inset-bottom))+30px)] shadow-2xl sm:rounded-3xl sm:pb-5 dark:bg-neutral-900"
+              className="w-full max-w-lg rounded-t-3xl bg-white p-5 pb-sheet-5 shadow-2xl sm:rounded-3xl dark:bg-neutral-900"
               data-phone-notice={current.studentId}
             >
               <h2 id="phone-notice-title" className="break-keep text-base font-semibold text-foreground">

@@ -596,16 +596,30 @@ export type AttendanceNotifyContextName = "arrival" | "class" | "departure";
 /** 알림 기록 kind — 등원 맥락 present/absent, 반 present/late/absent, 하원 left */
 export type AttendanceNotifyKind = "present" | "late" | "absent" | "left";
 
-/** 알림 한 건의 종류(★8: 모든 취소 = 정정, 기간 결석 요약 = 미등원, 키오스크 등원 = 등원) */
+/**
+ * 알림 한 건의 **원래 종류**(★8: 기간 결석 요약 = 미등원, 키오스크 등원 = 등원).
+ * 취소 알림이면 취소한 기록의 종류(kind = 취소한 기록의 상태) — 켜짐 판단은 `isNotifyEnabled`.
+ */
 export function notifyTypeFor(p: {
   context: AttendanceNotifyContextName;
   kind: AttendanceNotifyKind;
-  action?: "record" | "cancel" | null;
 }): AttendanceNotifyType {
-  if (p.action === "cancel") return "correction";
   if (p.context === "departure") return "departure";
   if (p.context === "class") return p.kind === "late" ? "classLate" : p.kind === "absent" ? "classAbsent" : "classPresent";
   return p.kind === "absent" ? "arrivalAbsent" : "arrival";
+}
+
+/**
+ * 이 알림을 보낼지(3-B 후속 F2) — 기록 알림 = 원래 종류가 켜짐,
+ * 취소(정정) 알림 = 원래 종류 **그리고** 정정이 켜짐(받은 적 없는 알림의 취소는 보내지 않음).
+ * 서버 전송·다시 보내기·알림 기록 화면 [다시 보내기]가 함께 쓴다.
+ */
+export function isNotifyEnabled(
+  settings: Record<AttendanceNotifyType, boolean>,
+  p: { context: AttendanceNotifyContextName; kind: AttendanceNotifyKind; action?: "record" | "cancel" | null },
+): boolean {
+  const base = settings[notifyTypeFor(p)];
+  return p.action === "cancel" ? base && settings.correction : base;
 }
 
 /** 설정 문서의 `notify` → 종류별 켜짐(false로 적힌 것만 끔 — 기본 모두 켬) */

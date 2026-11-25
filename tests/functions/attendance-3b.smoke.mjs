@@ -5,8 +5,10 @@
  * - 하원: 오늘·취소·H2·H3·하원 있으면 미등원·등원 취소·지난 날짜 미등원/지우기·기록 삭제·기간 결석 거부(★5), 잠금 날 허용,
  *   하원 하루 10회가 등원과 따로(B5), 지난 날짜 정정·시각 검사(★6), 오늘 시각만(★7), 일괄 하원(오늘 알림·지난 무알림),
  *   미등원 경로에 하원 필드가 남지 않음, 키오스크 모드 공용 로직(`recordDepartureCore`, B10)
- * - 휴강: 권한, 오늘 조건·기록 있으면 거부, 지난 날짜 P1(지금 종강한 반), 휴강 반 출결 거부(오늘·정정·일괄), 메모·취소·삭제된 반, 이력, 알림 0
- * - 출결 설정: 권한·형식, 끈 종류 = 알림 기록 muted만(벨 0·하루 10회 안 셈, ★9)
+ * - 휴강: 권한, 오늘 조건·기록 있으면 거부, 지난 날짜 P1(지금 종강한 반), 휴강 반 출결 거부(오늘·정정·일괄), 메모·취소·삭제된 반, 이력, 알림 0,
+ *   반 관리 목록 경로 `class_list`(3-B 후속 Q2)
+ * - 출결 설정: 권한·형식, 끈 종류 = 알림 기록 muted만(벨 0·하루 10회 안 셈, ★9),
+ *   취소 알림 = 원래 종류 그리고 정정(3-B 후속 F2 — 하원 끔·정정 끔·둘 다 켬·지각 끔, 다시 보내기도 같은 판단)
  * - 다시 보내기: 권한, 오늘·상태 같음만, 꺼짐 거부, 하루 10회, "(다시 알림)"
  * - 학부모 출결 기록: 연결된 자녀만, 다른·비활성 학부모·직원 거부, 메모·코멘트 없음, 31일, 휴강만 있는 날(P2)
  */
@@ -426,6 +428,11 @@ await assert.rejects(cancelLesson("cC", Y1, true), /C반 수업 출결 기록이
 await fixClass("cC", "c2", Y1, null);
 assert.equal((await cancelLesson("cC", Y1, true)).changed, true);
 await assert.rejects(fixClass("cC", "c2", Y1, "present"), /휴강한 수업이라/);
+// 3-B 후속 Q2: 반 관리 목록(via class_list)의 오늘 휴강 — 정정 이력에 실제 경로
+assert.equal((await cancelLesson("cDel", TODAY, true, { via: "class_list" })).changed, true);
+assert.equal((await corrections({ classId: "cDel", layer: "class_cancel" })).at(-1).via, "class_list");
+await assert.rejects(cancelLesson("cDel", TODAY, false, { via: "class_detail" }), /요청 경로가 올바르지 않습니다/);
+assert.equal((await cancelLesson("cDel", TODAY, false, { via: "class_list" })).changed, true);
 // 삭제된 반의 휴강 취소
 await cancelLesson("cDel", Y1, true);
 await db.doc(`academies/${A}/classes/cDel`).delete();
@@ -451,6 +458,48 @@ assert.equal(await bellCount(), bells, "끈 종류는 벨 없음");
 assert.equal((await db.doc(`_pushRateLimits/departure_${A}_s12`).get()).exists, false, "끈 종류는 하루 10회에 안 셈");
 assert.equal((await mark("cA", "s12", "late", { lateMinutes: 3 })).notification.reason, "muted");
 assert.notEqual((await mark("cA", "s12", "present")).notification.reason, "muted", "켠 종류는 그대로");
+
+// 3-B 후속 F2: 취소 알림 = 원래 종류 그리고 정정(지금 설정: 하원·수업 지각 끔, 정정 켬)
+const latestCancel = async (sid, context) =>
+  (await notifs({ studentId: sid, context, action: "cancel" })).sort((x, y) => y.createdAt.toMillis() - x.createdAt.toMillis())[0];
+const cancelCount = async (sid) => (await notifs({ studentId: sid, action: "cancel" })).length;
+await arrive("s15");
+await depart("s15");
+let bellsF2 = await bellCount();
+// ① 하원 끔 + 정정 켬 → 하원 취소 muted(벨 없음)
+assert.equal((await cancelDepart("s15")).changed, true);
+assert.equal(await cancelCount("s15"), 1);
+assert.equal((await latestCancel("s15", "departure")).muted, true, "하원 끔 → 하원 취소 muted");
+assert.equal(await bellCount(), bellsF2, "꺼 둔 종류의 취소는 벨 없음");
+// ② 수업 지각 끔 → 지각 기록 취소 muted
+await mark("cA", "s15", "late", { lateMinutes: 4 });
+assert.equal((await cancelClass("cA", "s15")).cancelled, "late");
+assert.equal((await latestCancel("s15", "class")).muted, true, "수업 지각 끔 → 지각 기록 취소 muted");
+assert.equal(await bellCount(), bellsF2);
+// ③ 하원 켬 + 정정 끔 → muted
+await settings({ ...ALL_ON, correction: false });
+await depart("s15");
+bellsF2 = await bellCount();
+await cancelDepart("s15");
+assert.equal(await cancelCount("s15"), 3);
+assert.equal((await latestCancel("s15", "departure")).muted, true, "정정 끔 → 하원 취소 muted");
+assert.equal(await bellCount(), bellsF2);
+// ④ 둘 다 켬 → 전송
+await settings(ALL_ON);
+await depart("s15");
+bellsF2 = await bellCount();
+await cancelDepart("s15");
+assert.equal(await cancelCount("s15"), 4);
+const sentCancel = await latestCancel("s15", "departure");
+assert.equal(sentCancel.muted, undefined, "둘 다 켬 → 하원 취소 전송");
+assert.equal(await bellCount(), bellsF2 + 1);
+// ⑤ 다시 보내기도 같은 판단 — 하원 끔(정정 켬)이면 하원 취소 알림 거부, 정정만 꺼도 거부
+await settings({ ...ALL_ON, departure: false });
+await assert.rejects(resend(sentCancel.id), /출결 설정에서 꺼 둔 알림이라 다시 보낼 수 없습니다/);
+await settings({ ...ALL_ON, correction: false });
+await assert.rejects(resend(sentCancel.id), /출결 설정에서 꺼 둔 알림이라 다시 보낼 수 없습니다/);
+// 아래 다시 보내기 절이 기대하는 설정으로 되돌림
+await settings({ ...ALL_ON, departure: false, classLate: false });
 
 // ───────────────────── 다시 보내기 ─────────────────────
 await arrive("s13");

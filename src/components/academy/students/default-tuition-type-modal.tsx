@@ -212,7 +212,7 @@ export function DefaultTuitionTypeModal({
       onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}
     >
       <div className="w-full max-w-sm rounded-t-3xl sm:rounded-3xl bg-background shadow-xl">
-        <div className="max-h-[min(90dvh,640px)] overflow-y-auto p-5 space-y-4">
+        <div className="max-h-[min(90dvh,640px)] overflow-y-auto p-5 pb-sheet-5 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-base font-semibold text-foreground">기본 원비 납부 방식</h3>
             <button

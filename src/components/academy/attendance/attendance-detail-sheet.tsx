@@ -360,7 +360,7 @@ export function AttendanceDetailSheet({
             </button>
           </header>
 
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 pb-[calc(max(1.25rem,env(safe-area-inset-bottom))+12px)]">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 pb-sheet-5">
             <p className="break-keep text-[11px] text-neutral-500">
               {past
                 ? "지난 날짜 정정은 학부모 알림이 가지 않고, 정정 기록이 남습니다."

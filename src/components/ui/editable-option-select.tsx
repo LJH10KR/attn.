@@ -168,7 +168,7 @@ export function EditableOptionSelect({
               role="dialog"
               aria-modal="true"
               aria-label={`${noun} 선택`}
-              className="flex max-h-[80dvh] w-full max-w-lg flex-col rounded-t-3xl bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl"
+              className="flex max-h-[80dvh] w-full max-w-lg flex-col rounded-t-3xl bg-white p-4 pb-sheet-4 shadow-2xl sm:rounded-3xl"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="mb-3 flex items-center justify-between gap-2">

@@ -91,7 +91,7 @@ export function useAttendanceCorrections(academyId: string) {
 
   /** 3-B 휴강 기록·메모 바꾸기·취소(알림 없음, 정정 기록) */
   const setCancellation = useCallback(
-    (p: { classId: string; date: string; cancelled: boolean; memo?: string; via: "attendance_screen" }) =>
+    (p: { classId: string; date: string; cancelled: boolean; memo?: string; via: "attendance_screen" | "class_list" }) =>
       run(`cancel:${p.classId}`, "setClassCancellation", p),
     [run],
   );
