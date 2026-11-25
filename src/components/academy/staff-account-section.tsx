@@ -528,7 +528,7 @@ export function StaffAccountSection({
               role="alertdialog"
               aria-modal="true"
               aria-labelledby="staff-delete-title"
-              className="w-full max-w-lg rounded-t-3xl bg-white p-5 pb-[calc(max(1.25rem,env(safe-area-inset-bottom))+30px)] text-sm shadow-2xl sm:rounded-3xl sm:pb-5"
+              className="w-full max-w-lg rounded-t-3xl bg-white p-5 pb-sheet-5 text-sm shadow-2xl sm:rounded-3xl"
               onClick={(e) => e.stopPropagation()}
               data-staff-delete-sheet
             >

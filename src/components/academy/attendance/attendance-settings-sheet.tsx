@@ -19,7 +19,7 @@ type Notify = Record<AttendanceNotifyType, boolean>;
 const HINTS: Partial<Record<AttendanceNotifyType, string>> = {
   arrival: "키오스크 등원 포함",
   arrivalAbsent: "기간 결석 요약 포함",
-  correction: "모든 기록 취소 알림",
+  correction: "모든 기록 취소 알림. 원래 알림을 꺼 둔 종류의 취소 알림은 가지 않습니다.",
 };
 
 /** 3-B 출결 설정(⚙, B6·★8) 실시간 읽기 — 문서가 없으면 모두 켬. undefined = 읽는 중 */
@@ -128,7 +128,7 @@ export function AttendanceSettingsSheet({
               ✕
             </button>
           </header>
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-[calc(max(1.25rem,env(safe-area-inset-bottom))+12px)]">
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-sheet-5">
             {live.error ? (
               <p className="rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-800">설정을 불러오지 못했습니다. 다시 열어 주세요.</p>
             ) : !current ? (
@@ -140,7 +140,7 @@ export function AttendanceSettingsSheet({
                     <label className="flex cursor-pointer items-center justify-between gap-3 px-3 py-3">
                       <span className="min-w-0">
                         <span className="block text-sm text-foreground">{ATTENDANCE_NOTIFY_TYPE_LABELS[t]} 알림</span>
-                        {HINTS[t] ? <span className="block text-[10px] text-neutral-500">{HINTS[t]}</span> : null}
+                        {HINTS[t] ? <span className="block break-keep text-[10px] text-neutral-500">{HINTS[t]}</span> : null}
                       </span>
                       <input
                         type="checkbox"

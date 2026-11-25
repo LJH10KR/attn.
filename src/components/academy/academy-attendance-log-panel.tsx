@@ -4,7 +4,7 @@ import { httpsCallable } from "firebase/functions";
 import { useMemo, useState } from "react";
 import { useAttendanceNotifySettings } from "@/components/academy/attendance/attendance-settings-sheet";
 import { attendanceActionErrorMessage, describeNotifyResult, type AttendanceNotifyResult } from "@/lib/academy/attendance-records";
-import { notifyTypeFor, seoulDateString } from "@/lib/academy/attendance-rules";
+import { isNotifyEnabled, seoulDateString } from "@/lib/academy/attendance-rules";
 import { getFirebaseFunctions } from "@/lib/firebase/client-app";
 import {
   attendanceKindLabel,
@@ -140,13 +140,11 @@ export function AcademyAttendanceLogPanel({
       ) : (
         <div className="space-y-2">
           {rows.map((r) => {
-            const type = notifyTypeFor({
-              context: r.context ?? "arrival",
-              kind: r.kind,
-              action: r.action ?? "record",
-            });
-            // 설정을 못 읽으면 버튼을 열어 두고 서버가 판단(꺼짐이면 서버 문구)
-            const enabledNow = settings.notify ? settings.notify[type] : settings.error;
+            // 설정을 못 읽으면 버튼을 열어 두고 서버가 판단(꺼짐이면 서버 문구).
+            // 취소 알림은 원래 종류와 정정이 둘 다 켜져 있어야(3-B 후속 F2 — 서버와 같은 함수)
+            const enabledNow = settings.notify
+              ? isNotifyEnabled(settings.notify, { context: r.context ?? "arrival", kind: r.kind, action: r.action ?? "record" })
+              : settings.error;
             const showResend = canResend && Boolean(academyId) && isTodayItem(r, today);
             return (
               <div key={r.id} className={`p-3 ${glassCard}`}>

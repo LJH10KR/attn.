@@ -84,7 +84,7 @@ export function AttendanceReasonSheet({
           role="dialog"
           aria-modal="true"
           aria-labelledby="attendance-reason-title"
-          className="w-full max-w-lg rounded-t-3xl bg-white p-5 pb-[calc(max(1.25rem,env(safe-area-inset-bottom))+30px)] shadow-2xl sm:rounded-3xl sm:pb-5"
+          className="w-full max-w-lg rounded-t-3xl bg-white p-5 pb-sheet-5 shadow-2xl sm:rounded-3xl"
           onClick={(e) => e.stopPropagation()}
         >
           <h2 id="attendance-reason-title" className="text-base font-semibold text-foreground">

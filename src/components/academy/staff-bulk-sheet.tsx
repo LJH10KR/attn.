@@ -288,7 +288,7 @@ export function StaffBulkSheet({
             </fieldset>
           </div>
         </main>
-        <footer className="shrink-0 border-t border-neutral-200/80 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
+        <footer className="shrink-0 border-t border-neutral-200/80 px-4 pb-sheet-4 pt-3">
           <div className="mx-auto flex max-w-lg items-center justify-between gap-3">
             <p className="min-w-0 break-keep text-xs text-neutral-600" data-staff-bulk-summary>
               저장할 줄 {ready.length} · 오류 {errorCount} · 확인 필요 {confirmCount}

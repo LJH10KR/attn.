@@ -15,7 +15,10 @@ import {
   ClassAttendanceControls,
   type ClassAttendanceAction,
 } from "@/components/academy/attendance/class-attendance-controls";
-import { ClassCancellationSheet } from "@/components/academy/attendance/class-cancellation-sheet";
+import {
+  ClassCancellationSheet,
+  classCancellationNotice,
+} from "@/components/academy/attendance/class-cancellation-sheet";
 import { StudentDetailSheet, STUDENT_STATUS_BADGE_CLASS } from "@/components/academy/student-detail/student-detail-sheet";
 import { useStudentDetailParam } from "@/components/academy/student-detail/use-student-detail-param";
 import { ModalPortal } from "@/components/ui/modal-portal";
@@ -501,7 +504,7 @@ export function AcademyAttendanceScreen() {
 
       {selectingSection ? (
         <ModalPortal>
-          <div className="fixed inset-x-0 bottom-0 z-[120] border-t border-neutral-200 bg-white/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-8px_24px_rgba(0,0,0,0.08)]">
+          <div className="fixed inset-x-0 bottom-0 z-[120] border-t border-neutral-200 bg-white/95 px-4 pb-sheet-3 pt-3 shadow-[0_-8px_24px_rgba(0,0,0,0.08)]">
             <div className="mx-auto flex max-w-lg items-center gap-2">
               <span className="min-w-0 flex-1 truncate text-xs text-neutral-700">
                 <b className="text-foreground">{selected.size}명</b>
@@ -617,11 +620,7 @@ export function AcademyAttendanceScreen() {
             const o = await fixes.setCancellation({ classId: cancelSheet.classId, date, via: "attendance_screen", ...p });
             if (o.ok) {
               setNotice({
-                text: !o.changed
-                  ? "바뀐 내용이 없습니다."
-                  : p.cancelled
-                    ? `${cancelSheet.className} ${dateLabel(date)} 휴강을 저장했습니다. 학부모 알림은 가지 않습니다.`
-                    : `${cancelSheet.className} ${dateLabel(date)} 휴강을 취소했습니다.`,
+                text: classCancellationNotice({ className: cancelSheet.className, date, cancelled: p.cancelled, changed: o.changed }),
                 ok: true,
               });
             }
@@ -863,7 +862,7 @@ function ConfirmSheet({
           role="alertdialog"
           aria-modal="true"
           aria-labelledby="attendance-batch-title"
-          className="w-full max-w-lg rounded-t-3xl bg-white p-5 pb-[calc(max(1.25rem,env(safe-area-inset-bottom))+30px)] shadow-2xl sm:rounded-3xl sm:pb-5"
+          className="w-full max-w-lg rounded-t-3xl bg-white p-5 pb-sheet-5 shadow-2xl sm:rounded-3xl"
           onClick={(e) => e.stopPropagation()}
         >
           <h2 id="attendance-batch-title" className="break-keep text-base font-semibold text-foreground">
@@ -917,7 +916,7 @@ function BatchResultSheet({
           role="dialog"
           aria-modal="true"
           aria-labelledby="attendance-batch-result-title"
-          className="flex max-h-[80dvh] w-full max-w-lg flex-col rounded-t-3xl bg-white p-5 pb-[calc(max(1.25rem,env(safe-area-inset-bottom))+30px)] shadow-2xl sm:rounded-3xl sm:pb-5"
+          className="flex max-h-[80dvh] w-full max-w-lg flex-col rounded-t-3xl bg-white p-5 pb-sheet-5 shadow-2xl sm:rounded-3xl"
           onClick={(e) => e.stopPropagation()}
         >
           <h2 id="attendance-batch-result-title" className="text-base font-semibold text-foreground">

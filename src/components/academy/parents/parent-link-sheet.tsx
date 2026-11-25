@@ -393,7 +393,7 @@ export function ParentLinkSheet({
           </div>
         </main>
 
-        <footer className="shrink-0 border-t border-neutral-200/80 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
+        <footer className="shrink-0 border-t border-neutral-200/80 px-4 pb-sheet-4 pt-3">
           <div className="mx-auto max-w-lg">
             <p className={`mb-2 text-center text-[11px] ${tooMany ? "text-red-700" : "text-neutral-500"}`}>
               {tooMany

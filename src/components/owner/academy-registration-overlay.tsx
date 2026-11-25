@@ -175,7 +175,7 @@ export function AcademyRegistrationOverlay({
       </main>
 
       {phase !== "loading" ? (
-        <footer className="shrink-0 border-t border-neutral-200/80 px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] dark:border-white/10">
+        <footer className="shrink-0 border-t border-neutral-200/80 px-4 py-4 pb-sheet-4 dark:border-white/10">
           <div className="mx-auto flex max-w-lg justify-center">
             <button
               type="button"

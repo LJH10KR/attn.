@@ -467,7 +467,7 @@ export function AcademySignupLinkCard({
               role="alertdialog"
               aria-modal="true"
               aria-labelledby="signup-link-confirm-title"
-              className="w-full max-w-lg rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl"
+              className="w-full max-w-lg rounded-t-3xl bg-white p-5 pb-sheet-5 shadow-2xl sm:rounded-3xl"
               onClick={(e) => e.stopPropagation()}
             >
               <h2 id="signup-link-confirm-title" className="break-keep text-base font-semibold text-foreground">

@@ -269,7 +269,7 @@ export function ClassAssignSheet({
           </div>
         </main>
 
-        <footer className="shrink-0 border-t border-neutral-200/80 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
+        <footer className="shrink-0 border-t border-neutral-200/80 px-4 pb-sheet-4 pt-3">
           <div className="mx-auto max-w-lg">
             <p className="mb-2 text-center text-[11px] text-neutral-500">
               {add.length + remove.length === 0 ? "바뀐 원생이 없습니다" : `추가 ${add.length}명 · 해제 ${remove.length}명`}

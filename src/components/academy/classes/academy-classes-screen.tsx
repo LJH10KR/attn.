@@ -6,6 +6,10 @@ import { httpsCallable } from "firebase/functions";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AcademyPanelRefreshButton } from "@/components/academy/academy-panel-refresh-button";
 import { useAcademyShell } from "@/components/academy/academy-shell";
+import {
+  ClassCancellationSheet,
+  classCancellationNotice,
+} from "@/components/academy/attendance/class-cancellation-sheet";
 import { ClassAssignSheet } from "@/components/academy/classes/class-assign-sheet";
 import { ClassDetailSheet } from "@/components/academy/classes/class-detail-sheet";
 import {
@@ -15,9 +19,12 @@ import {
 } from "@/components/academy/classes/class-form-sheet";
 import { StudentDetailSheet } from "@/components/academy/student-detail/student-detail-sheet";
 import { useStudentDetailParam } from "@/components/academy/student-detail/use-student-detail-param";
-import { scheduleSummary } from "@/lib/academy/class-schedule";
+import { scheduleSummary, slotsOnWeekday } from "@/lib/academy/class-schedule";
 import { compareStudentsByName, docToStudent, type StudentVM } from "@/lib/academy/student-row";
 import { useAcademyClasses, type AcademyClassBrief } from "@/lib/academy/use-academy-classes";
+import { useAttendanceCorrections } from "@/lib/academy/use-attendance-corrections";
+import { useSeoulToday } from "@/lib/academy/use-class-today-attendance";
+import { useDayCancellations } from "@/lib/academy/use-day-attendance";
 import { useAcademyOptionList } from "@/lib/academy/use-academy-option-list";
 import { teacherSummary, useClassTeacherCandidates } from "@/lib/academy/use-class-teacher-candidates";
 import { academyStudentsPath, type AcademyClassStatus } from "@/lib/firebase/attn-schema";
@@ -38,10 +45,17 @@ const chipClass = (active: boolean) =>
 const smallBtn =
   "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-neutral-300/70 bg-white/70 text-xs text-neutral-700 disabled:opacity-30";
 
+const cancelBtnBase = "shrink-0 rounded-full border px-3 py-1 text-xs disabled:opacity-40";
+// 출결관리 반 머리 "휴강 ✓"와 같은 로즈색
+const cancelBtnOn = `${cancelBtnBase} border-rose-500/60 bg-rose-500/15 font-semibold text-rose-900`;
+const cancelBtnOff = `${cancelBtnBase} border-neutral-300/70 bg-white/70 font-medium text-neutral-700`;
+
 /**
  * 운영 › 반 관리(9-4) — 반 목록(정렬 순서·상태 필터·원생 수/정원·선생님·강의실·시간), ↑↓ 순서 모드,
  * 반 상세 시트(원생 목록·수정·배정·삭제), 추가·수정 시트, 원생 배정 시트. 원생을 누르면 학생 상세 시트.
  * 원생 수는 저장하지 않으므로 학생 목록을 한 번 읽어 `classIds`로 센다(반 권한은 학생 읽기 가능).
+ * 3-B 후속 F3: 원장·출결 권한이면 오늘 수업이 있는 반(종강 아님) 카드 아래 줄에 오늘 휴강 [휴강] / "오늘 휴강 ✓"
+ * (출결관리와 같은 휴강 시트, 서버가 오늘 조건·그날 출결을 다시 확인, 정정 경로 `class_list`). 지난 날짜 휴강은 출결관리에서.
  */
 export function AcademyClassesScreen() {
   const { academyId, permissions } = useAcademyShell();
@@ -64,6 +78,14 @@ export function AcademyClassesScreen() {
   const [assignClass, setAssignClass] = useState<AcademyClassBrief | null>(null);
   const { items: rooms, save: saveRooms } = useAcademyOptionList(academyId, "rooms");
   const teachers = useClassTeacherCandidates(academyId, permissions.viewer?.uid ?? null);
+  // 오늘 휴강(F3) — 휴강 권한(원장·lessons.attendance)일 때만 구독(규칙 거부 문서를 구독하지 않음)
+  const today = useSeoulToday();
+  const canCancelLesson = permissions.can("lessons.attendance");
+  const todayCancellations = useDayCancellations(academyId, today.date, canCancelLesson);
+  const cancelFix = useAttendanceCorrections(academyId);
+  const [cancelClassId, setCancelClassId] = useState<string | null>(null);
+  const todaySlotsOf = (c: AcademyClassBrief) =>
+    canCancelLesson && c.status !== "ended" ? slotsOnWeekday(c.schedule, today.weekday) : [];
 
   const loadStudents = useCallback(async () => {
     try {
@@ -111,6 +133,8 @@ export function AcademyClassesScreen() {
   const filtered = statusFilter === "all" ? classes : classes.filter((c) => c.status === statusFilter);
 
   const openClass = openClassId ? classById.get(openClassId) ?? null : null;
+  // 휴강 시트 대상 — 반이 지워지면 시트도 닫힘(지금 반 문서 기준)
+  const cancelClass = cancelClassId ? classById.get(cancelClassId) ?? null : null;
   // 다른 곳에서 반이 삭제되면 상세 시트를 닫는다
   useEffect(() => {
     if (openClassId && !classesLoading && !classesError && !classById.has(openClassId)) setOpenClassId(null);
@@ -322,12 +346,15 @@ export function AcademyClassesScreen() {
                 const over = studentsOk && c.capacity !== null && count > c.capacity;
                 const schedule = scheduleSummary(c.schedule);
                 const room = roomLabel(c);
+                const todaySlots = todaySlotsOf(c);
+                const cancelled = todayCancellations.data.has(c.id);
                 return (
-                  <li key={c.id}>
+                  // 카드 탭 = 반 상세, 아래 줄 [휴강] = 휴강 시트(버튼 안에 버튼을 넣지 않음)
+                  <li key={c.id} className="glass-card overflow-hidden">
                     <button
                       type="button"
                       onClick={() => setOpenClassId(c.id)}
-                      className="glass-card block w-full px-4 py-3 text-left transition hover:bg-white/45 active:bg-white/55"
+                      className="block w-full px-4 py-3 text-left transition hover:bg-white/45 active:bg-white/55"
                     >
                       <div className="flex items-center gap-2">
                         <span className="min-w-0 truncate font-medium text-foreground">{c.name}</span>
@@ -349,6 +376,28 @@ export function AcademyClassesScreen() {
                       </p>
                       <p className="mt-0.5 truncate text-[11px] text-neutral-500">{schedule || "수업 시간 미정"}</p>
                     </button>
+                    {todaySlots.length > 0 ? (
+                      <div className="flex items-center gap-2 border-t border-neutral-200/70 px-4 py-2">
+                        <span
+                          className={`min-w-0 flex-1 truncate text-[11px] ${cancelled ? "text-rose-900" : "text-neutral-600"}`}
+                        >
+                          오늘 {todaySlots.map((s) => `${s.start}–${s.end}`).join(", ")}
+                        </span>
+                        {todayCancellations.error ? (
+                          <span className="shrink-0 text-[11px] text-red-700">휴강 상태 확인 실패</span>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={!todayCancellations.loaded || cancelFix.busyKey !== null}
+                            onClick={() => setCancelClassId(c.id)}
+                            className={cancelled ? cancelBtnOn : cancelBtnOff}
+                            aria-label={cancelled ? `${c.name} 오늘 휴강 — 메모·취소` : `${c.name} 오늘 휴강 기록`}
+                          >
+                            {cancelled ? "오늘 휴강 ✓" : "휴강"}
+                          </button>
+                        )}
+                      </div>
+                    ) : null}
                   </li>
                 );
               })
@@ -381,6 +430,30 @@ export function AcademyClassesScreen() {
             refreshStudents();
           }}
           onCloseAction={() => setOpenClassId(null)}
+        />
+      ) : null}
+
+      {cancelClass ? (
+        <ClassCancellationSheet
+          key={`${cancelClass.id}:${today.date}`}
+          date={today.date}
+          today={today.date}
+          className={cancelClass.name}
+          classExists
+          classEnded={cancelClass.status === "ended"}
+          hasLesson={slotsOnWeekday(cancelClass.schedule, today.weekday).length > 0}
+          recordCount={null}
+          cancellation={todayCancellations.data.get(cancelClass.id) ?? null}
+          onSubmitAction={async (p) => {
+            const o = await cancelFix.setCancellation({ classId: cancelClass.id, date: today.date, via: "class_list", ...p });
+            if (o.ok) {
+              setNotice(
+                classCancellationNotice({ className: cancelClass.name, date: today.date, cancelled: p.cancelled, changed: o.changed }),
+              );
+            }
+            return o;
+          }}
+          onCloseAction={() => setCancelClassId(null)}
         />
       ) : null}
 

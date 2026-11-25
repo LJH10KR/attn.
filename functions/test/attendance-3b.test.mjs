@@ -23,6 +23,7 @@ import {
   departureLockTodayMessage,
   departurePushBody,
   isLateMinutes,
+  isNotifyEnabled,
   lateLabel,
   LATE_MINUTES_MESSAGE,
   notifyTypeFor,
@@ -164,16 +165,46 @@ describe("휴강 판단(★11·P1)", () => {
 });
 
 describe("알림 종류(★8)", () => {
-  it("맥락·상태·취소 → 종류", () => {
+  it("맥락·상태 → 원래 종류(취소 알림도 취소한 기록의 종류)", () => {
     assert.equal(notifyTypeFor({ context: "arrival", kind: "present" }), "arrival");
     assert.equal(notifyTypeFor({ context: "arrival", kind: "absent" }), "arrivalAbsent");
     assert.equal(notifyTypeFor({ context: "departure", kind: "left" }), "departure");
     assert.equal(notifyTypeFor({ context: "class", kind: "present" }), "classPresent");
     assert.equal(notifyTypeFor({ context: "class", kind: "late" }), "classLate");
     assert.equal(notifyTypeFor({ context: "class", kind: "absent" }), "classAbsent");
-    for (const context of ["arrival", "class", "departure"]) {
-      assert.equal(notifyTypeFor({ context, kind: "present", action: "cancel" }), "correction");
+  });
+
+  // 3-B 후속 F2 — 기록 알림 = 원래 종류, 취소 알림 = 원래 종류 그리고 정정
+  it("켜짐 판단 조합 표(7종 × 기록·취소 × 원래 켬·끔 × 정정 켬·끔)", () => {
+    const cases = [
+      [{ context: "arrival", kind: "present" }, "arrival"],
+      [{ context: "arrival", kind: "absent" }, "arrivalAbsent"],
+      [{ context: "departure", kind: "left" }, "departure"],
+      [{ context: "class", kind: "present" }, "classPresent"],
+      [{ context: "class", kind: "late" }, "classLate"],
+      [{ context: "class", kind: "absent" }, "classAbsent"],
+    ];
+    for (const [p, type] of cases) {
+      for (const baseOn of [true, false]) {
+        for (const correctionOn of [true, false]) {
+          const settings = { ...readNotifySettings(undefined), [type]: baseOn, correction: correctionOn };
+          const tag = `${type} 원래 ${baseOn} 정정 ${correctionOn}`;
+          assert.equal(isNotifyEnabled(settings, { ...p, action: "record" }), baseOn, `기록 ${tag}`);
+          assert.equal(isNotifyEnabled(settings, p), baseOn, `기록(action 없음) ${tag}`);
+          assert.equal(isNotifyEnabled(settings, { ...p, action: "cancel" }), baseOn && correctionOn, `취소 ${tag}`);
+        }
+      }
     }
+  });
+  it("다른 종류를 꺼도 영향 없음 — 하원 끔은 등원 취소·수업 취소를 막지 않음", () => {
+    const settings = { ...readNotifySettings(undefined), departure: false };
+    assert.equal(isNotifyEnabled(settings, { context: "arrival", kind: "present", action: "cancel" }), true);
+    assert.equal(isNotifyEnabled(settings, { context: "class", kind: "late", action: "cancel" }), true);
+    assert.equal(isNotifyEnabled(settings, { context: "departure", kind: "left", action: "cancel" }), false);
+    // 정정만 꺼도 기록 알림은 감
+    const noCorrection = { ...readNotifySettings(undefined), correction: false };
+    assert.equal(isNotifyEnabled(noCorrection, { context: "departure", kind: "left", action: "record" }), true);
+    assert.equal(isNotifyEnabled(noCorrection, { context: "departure", kind: "left", action: "cancel" }), false);
   });
   it("설정 문서 — false만 끔, 없으면 모두 켬", () => {
     const all = readNotifySettings(undefined);

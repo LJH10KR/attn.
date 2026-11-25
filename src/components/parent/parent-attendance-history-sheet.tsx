@@ -116,7 +116,7 @@ export function ParentAttendanceHistorySheet({
               ✕
             </button>
           </header>
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-[calc(max(1.25rem,env(safe-area-inset-bottom))+12px)]">
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-sheet-5">
             {error ? (
               <div className="py-8 text-center">
                 <p className="break-keep text-sm text-red-700">{error}</p>

@@ -26,7 +26,8 @@ import { readSchedule } from "./lib/class-schedule";
  * - 반 출결 기록·정정 함수도 트랜잭션 안에서 휴강 문서를 읽고 거부한다(★12) — 이 함수는 그 반 출결을 조회하므로 서로 순서가 맞춰진다.
  */
 
-const CANCELLATION_VIA = ["attendance_screen"] as const;
+/** 출결관리 반 머리·반 관리 목록 카드(3-B 후속 Q2 — 오늘 휴강) */
+const CANCELLATION_VIA = ["attendance_screen", "class_list"] as const;
 const PERMISSION_MESSAGE = "휴강은 원장이나 출결 권한이 있는 직원만 기록할 수 있습니다.";
 
 export const setClassCancellation = onCall(async (request) => {

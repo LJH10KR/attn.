@@ -8,7 +8,7 @@ import {
 } from "./attendance-push-delivery";
 import {
   ATTENDANCE_DAILY_CHANGE_PUSH_LIMIT,
-  notifyTypeFor,
+  isNotifyEnabled,
   readNotifySettings,
   seoulDateString,
   type AttendanceNotifyKind,
@@ -155,8 +155,12 @@ export async function sendStudentAttendanceNotificationCore(
     return { ok: true as const, sent: 0, reason: "no_parent" as const };
   }
 
-  const notifyType = notifyTypeFor({ context: notify.context, kind, action: action ?? "record" });
-  const muted = !(await loadNotifySettings(db, academyId))[notifyType];
+  // 3-B 후속 F2: 취소 알림은 원래 종류와 정정이 둘 다 켜져 있을 때만
+  const muted = !isNotifyEnabled(await loadNotifySettings(db, academyId), {
+    context: notify.context,
+    kind,
+    action: action ?? "record",
+  });
 
   if (!muted) {
     const blocked = await claimSend(db, rateLimitRef(db, academyId, studentId, notify), limit, {

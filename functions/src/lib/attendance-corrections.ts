@@ -13,13 +13,17 @@ import { normalizePermissionList } from "./permissions";
 /** 3-B: 하원(`departure`)·휴강(`class_cancel`) 층 추가 */
 export type CorrectionLayer = "arrival" | "class" | "departure" | "class_cancel";
 export type CorrectionAction = "create" | "update" | "delete" | "detail";
-/** 3-B ★2: 오늘 지각 분만 바꾸기는 선생님 화면·반 상세에서도 이력을 남긴다 */
+/**
+ * 3-B ★2: 오늘 지각 분만 바꾸기는 선생님 화면·반 상세에서도 이력을 남긴다.
+ * 3-B 후속 Q2: 반 관리 목록의 오늘 휴강(`class_list`).
+ */
 export const CORRECTION_VIA = [
   "attendance_screen",
   "attendance_batch",
   "student_detail",
   "teacher_my_classes",
   "class_detail",
+  "class_list",
 ] as const;
 export type CorrectionVia = (typeof CORRECTION_VIA)[number];
 

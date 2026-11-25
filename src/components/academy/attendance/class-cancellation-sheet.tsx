@@ -11,8 +11,17 @@ import {
 import type { DayCancellation } from "@/lib/academy/day-roster";
 import type { CallOutcome } from "@/lib/academy/use-attendance-corrections";
 
+/** 휴강 저장·취소 성공 안내(원장 출결 화면·반 관리 목록 공용) */
+export function classCancellationNotice(p: { className: string; date: string; cancelled: boolean; changed: boolean }): string {
+  if (!p.changed) return "바뀐 내용이 없습니다.";
+  return p.cancelled
+    ? `${p.className} ${dateLabel(p.date)} 휴강을 저장했습니다. 학부모 알림은 가지 않습니다.`
+    : `${p.className} ${dateLabel(p.date)} 휴강을 취소했습니다.`;
+}
+
 /**
- * 3-B 휴강 시트(B7·★11) — 원장 출결 화면 반 머리 [휴강]. 학부모 알림 없음, 정정 기록이 남는다.
+ * 3-B 휴강 시트(B7·★11) — 원장 출결 화면 반 머리 [휴강], 반 관리 목록 카드 [휴강](3-B 후속 F3, 오늘만).
+ * 학부모 알림 없음, 정정 기록이 남는다.
  * 없으면 메모(선택)와 함께 기록, 있으면 메모 바꾸기·휴강 취소. 그날 그 반 출결이 있으면 기록할 수 없다(서버도 거부).
  * 미래 날짜 휴강은 넘김(3-E/4단계).
  */
@@ -34,8 +43,11 @@ export function ClassCancellationSheet({
   classExists: boolean;
   classEnded: boolean;
   hasLesson: boolean;
-  /** 그날 그 반 출결 기록 수(화면이 아는 값 — 실제 판단은 서버) */
-  recordCount: number;
+  /**
+   * 그날 그 반 출결 기록 수(화면이 아는 값 — 실제 판단은 서버).
+   * null = 모름(반 관리 목록) — 화면에서 미리 막지 않고, 출결이 있으면 서버 거부 문구를 시트 안에 보여 준다.
+   */
+  recordCount: number | null;
   cancellation: DayCancellation | null;
   /** cancelled false = 휴강 취소 */
   onSubmitAction: (p: { cancelled: boolean; memo?: string }) => Promise<CallOutcome>;
@@ -47,7 +59,7 @@ export function ClassCancellationSheet({
   const exists = cancellation !== null;
   const block = exists
     ? null
-    : classCancellationBlock({ date, today, classExists, classEnded, hasLesson, recordCount });
+    : classCancellationBlock({ date, today, classExists, classEnded, hasLesson, recordCount: recordCount ?? 0 });
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -83,7 +95,7 @@ export function ClassCancellationSheet({
           role="dialog"
           aria-modal="true"
           aria-labelledby="class-cancellation-title"
-          className="w-full max-w-lg rounded-t-3xl bg-white p-5 pb-[calc(max(1.25rem,env(safe-area-inset-bottom))+30px)] shadow-2xl sm:rounded-3xl sm:pb-5"
+          className="w-full max-w-lg rounded-t-3xl bg-white p-5 pb-sheet-5 shadow-2xl sm:rounded-3xl"
           onClick={(e) => e.stopPropagation()}
         >
           <h2 id="class-cancellation-title" className="break-keep text-base font-semibold text-foreground">
@@ -98,7 +110,7 @@ export function ClassCancellationSheet({
 
           {block ? (
             <p className="mt-3 break-keep rounded-xl bg-amber-500/10 px-3 py-2 text-xs text-amber-900">
-              {classCancellationBlockMessage(block, { date, className, recordCount })}
+              {classCancellationBlockMessage(block, { date, className, recordCount: recordCount ?? 0 })}
             </p>
           ) : (
             <div className="mt-3">
